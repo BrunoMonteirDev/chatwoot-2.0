@@ -1,0 +1,1201 @@
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { GripVertical, MessageSquare } from 'lucide-react';
+import {
+  NavTab,
+  FilterCategory,
+  Chat,
+  Message,
+  UserProfile,
+  Attachment,
+  MultiTenantAccount,
+  ChatStatusFilter,
+  ChatSortOption,
+  ChatFilterRule,
+} from './types';
+import { initialChats, currentUser, mockStatuses, mockCallLogs } from './data/mockData';
+
+import { NavRail, ACCOUNTS_LIST } from './components/NavRail';
+import { ChatListHeader } from './components/ChatListHeader';
+import { ChatListItem } from './components/ChatListItem';
+import { ChatArea } from './components/ChatArea';
+import { ImagePreviewModal } from './components/ImagePreviewModal';
+import { StatusView } from './components/StatusView';
+import { CallsView } from './components/CallsView';
+import { CommunitiesView } from './components/CommunitiesView';
+import { ContactsView } from './components/ContactsView';
+import { SettingsView, SettingsTab } from './components/SettingsView';
+import { AppsView } from './components/AppsView';
+import { NewConversationModal } from './components/NewConversationModal';
+import { NewGroupModal } from './components/NewGroupModal';
+import { WallpaperId } from './components/WhatsAppDoodleBg';
+import { FloatingMobileNav } from './components/FloatingMobileNav';
+import { DimensionModal } from './components/DimensionModal';
+import { ContextMenu } from './components/ContextMenu';
+import { useContextMenu } from './hooks/useContextMenu';
+import { getChatContextMenuItems } from './utils/contextMenuActions';
+import { ToastContainer, ToastMessage } from './components/Toast';
+import { useAuth } from './features/auth/AuthContext';
+import { useInboxes } from './features/inboxes/useInboxes';
+import { errorMessageForUser } from './integrations/chatwoot/errors';
+import { useConversations } from './features/conversations/useConversations';
+import { toChatListItem } from './features/conversations/toChatListItem';
+import { useConversationMessages } from './features/messages/useConversationMessages';
+import { toChatMessages } from './features/messages/toChatMessages';
+import { useConversationManagement } from './features/conversations/useConversationManagement';
+import { useChatwootRealtime } from './features/realtime/useChatwootRealtime';
+import { useContactDetails } from './features/contacts/useContactDetails';
+import { useContacts } from './features/contacts/useContacts';
+import { toContactListItem } from './features/contacts/toContactListItem';
+import { conversationService } from './integrations/chatwoot/conversations';
+import { messageService } from './integrations/chatwoot/messages';
+import type { ConversationMessage } from './domain/currentUser';
+
+export default function App() {
+  const { user: authenticatedUser, currentAccount, selectAccount, logout } = useAuth();
+  const superAdminUrl = import.meta.env.VITE_SUPER_ADMIN_URL || '/super_admin';
+  const { inboxes, status: inboxesStatus, error: inboxesError, retry: retryInboxes } = useInboxes(currentAccount?.id ?? null);
+  const contactDirectory = useContacts(currentAccount?.id ?? null);
+  const [chats, setChats] = useState<Chat[]>(initialChats);
+  const [activeChatId, setActiveChatId] = useState<string>('me');
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const { menuState, openContextMenu, closeContextMenu } = useContextMenu();
+
+  // New Filter & Sort State for Chat List
+  const [selectedStatus, setSelectedStatus] = useState<ChatStatusFilter>('todas');
+  const [selectedSort, setSelectedSort] = useState<ChatSortOption>('last_activity_desc');
+  const [filterRules, setFilterRules] = useState<ChatFilterRule[]>([]);
+
+  const addToast = (title: string, type: 'success' | 'info' | 'error' = 'success') => {
+    const id = `toast-${Date.now()}-${Math.random()}`;
+    setToasts((prev) => [...prev, { id, title, type }]);
+  };
+
+  const removeToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const handleChatContextMenu = (e: React.MouseEvent, chatItem: Chat) => {
+    const items = getChatContextMenuItems(chatItem, {
+      onSelectChat: (selected) => {
+        setActiveChatId(selected.id);
+        setShowMobileChat(true);
+      },
+      onToggleUnread: (selected) => {
+        const isUnread = (selected.unreadCount ?? 0) > 0;
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === selected.id
+              ? { ...c, unreadCount: isUnread ? 0 : 1 }
+              : c
+          )
+        );
+        addToast(isUnread ? 'Conversa marcada como lida' : 'Conversa marcada como não lida');
+      },
+      onTogglePin: (selected) => {
+        const isPinned = !(selected.pinned || selected.isPinned);
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === selected.id ? { ...c, pinned: isPinned, isPinned: isPinned } : c
+          )
+        );
+        addToast(isPinned ? 'Conversa fixada no topo!' : 'Conversa desafixada!');
+      },
+      onToggleFavorite: (selected) => {
+        const isFav = !(selected.favorite || selected.isFavorite);
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === selected.id ? { ...c, favorite: isFav, isFavorite: isFav } : c
+          )
+        );
+        addToast(isFav ? 'Adicionada aos favoritos!' : 'Removida dos favoritos!');
+      },
+      onToggleMute: (selected) => {
+        const isMuted = !selected.muted;
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === selected.id ? { ...c, muted: isMuted } : c
+          )
+        );
+        addToast(isMuted ? 'Notificações silenciadas' : 'Notificações ativadas');
+      },
+      onToggleArchive: (selected) => {
+        const isArchived = !selected.isArchived;
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === selected.id ? { ...c, isArchived } : c
+          )
+        );
+        addToast(isArchived ? `Conversa arquivada` : `Conversa desarquivada`);
+      },
+      onOpenContactPanel: (selected) => {
+        setActiveChatId(selected.id);
+        setShowMobileChat(true);
+        addToast(`Exibindo atributos de: ${selected.name}`, 'info');
+      },
+      onDeleteChat: (selected) => {
+        if (confirm(`Deseja realmente excluir a conversa com "${selected.name}"?`)) {
+          void deleteConversation(selected);
+        }
+      },
+      onDuplicateChat: (selected) => {
+        const dup: Chat = {
+          ...selected,
+          id: `dup-${Date.now()}`,
+          name: `${selected.name} (Cópia)`,
+        };
+        setChats((prev) => [dup, ...prev]);
+        addToast(`Atendimento "${selected.name}" duplicado com sucesso!`);
+      },
+      onExportChat: (selected) => {
+        const dataStr =
+          'data:text/json;charset=utf-8,' +
+          encodeURIComponent(JSON.stringify(selected.messages, null, 2));
+        const downloadAnchor = document.createElement('a');
+        downloadAnchor.setAttribute('href', dataStr);
+        downloadAnchor.setAttribute(
+          'download',
+          `historico_${selected.name.replace(/\s+/g, '_')}.json`
+        );
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        downloadAnchor.remove();
+        addToast('Histórico exportado com sucesso!');
+      },
+      onPrintChat: (selected) => {
+        addToast(`Gerando impressão da conversa com ${selected.name}...`, 'info');
+        setTimeout(() => window.print(), 300);
+      },
+    });
+
+    openContextMenu(e, items, `Ações: ${chatItem.name}`);
+  };
+  const [activeNavTab, setActiveNavTab] = useState<NavTab>('chats');
+  const [showMobileChat, setShowMobileChat] = useState<boolean>(false);
+  const [selectedInbox, setSelectedInbox] = useState<string>('todas');
+  const { conversations, status: conversationsStatus, error: conversationsError, hasNextPage, isLoadingMore, retry: retryConversations, loadMore, applyOutgoingMessage, applyConversationUpdate, removeConversation, replaceConversation, upsertRealtimeConversation, addCreatedConversation, applyRealtimeMessage } = useConversations(currentAccount?.id ?? null, selectedInbox);
+  const [activeFilter, setActiveFilter] = useState<FilterCategory>('minhas');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [user, setUser] = useState<UserProfile>(currentUser);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+  const [selectedAccount, setSelectedAccount] = useState<MultiTenantAccount>(ACCOUNTS_LIST[4]); // Será substituído pelo profile após autenticação.
+
+  async function deleteConversation(chat: Chat) {
+    const conversationId = Number(chat.id);
+    if (!currentAccount || !Number.isInteger(conversationId)) {
+      // It keeps prototype-only chats removable without pretending the API did it.
+      setChats(current => current.filter(item => item.id !== chat.id));
+      return;
+    }
+    try {
+      await conversationService.remove(currentAccount.id, conversationId);
+      removeConversation(conversationId);
+      if (activeChatId === chat.id) {
+        setActiveChatId('');
+        setShowMobileChat(false);
+      }
+      addToast(`Conversa com "${chat.name}" excluída`);
+    } catch (cause) {
+      addToast(`Não foi possível excluir a conversa: ${errorMessageForUser(cause)}`, 'error');
+    }
+  }
+
+  useEffect(() => {
+    if (!authenticatedUser) return;
+    setUser({
+      name: authenticatedUser.displayName,
+      phone: authenticatedUser.email,
+      about: authenticatedUser.role || 'Agente Chatwoot',
+      avatar: authenticatedUser.avatarUrl || currentUser.avatar,
+    });
+    const active = currentAccount || authenticatedUser.accounts[0];
+    if (active) setSelectedAccount({ id: String(active.id), name: active.name, role: active.role });
+  }, [authenticatedUser, currentAccount]);
+
+  useEffect(() => {
+    setSelectedInbox('todas');
+  }, [currentAccount?.id]);
+
+  const handleAccountSelection = async (account: MultiTenantAccount) => {
+    try {
+      await selectAccount(Number(account.id));
+    } catch (cause) {
+      addToast(errorMessageForUser(cause), 'error');
+    }
+  };
+
+  // Resizable Chat List Column width (280px to 750px)
+  const [chatListWidth, setChatListWidth] = useState<number>(() => {
+    const saved = localStorage.getItem('wa_chat_list_width');
+    return saved ? Math.max(280, Math.min(750, parseInt(saved, 10))) : 450;
+  });
+  const [isResizingChatList, setIsResizingChatList] = useState(false);
+  const isResizingChatListRef = useRef(false);
+
+  useEffect(() => {
+    localStorage.setItem('wa_chat_list_width', String(chatListWidth));
+  }, [chatListWidth]);
+
+  const handleMouseDownChatList = (e: React.MouseEvent) => {
+    e.preventDefault();
+    isResizingChatListRef.current = true;
+    setIsResizingChatList(true);
+
+    const startX = e.clientX;
+    const startWidth = chatListWidth;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      if (!isResizingChatListRef.current) return;
+      const deltaX = moveEvent.clientX - startX;
+      const newWidth = startWidth + deltaX;
+      if (newWidth >= 280 && newWidth <= 750) {
+        setChatListWidth(newWidth);
+      }
+    };
+
+    const onMouseUp = () => {
+      isResizingChatListRef.current = false;
+      setIsResizingChatList(false);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
+
+  // Theme & Wallpaper State
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    const saved = localStorage.getItem('wa_dark_mode');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  const [wallpaperId, setWallpaperId] = useState<WallpaperId>(() => {
+    const saved = localStorage.getItem('wa_wallpaper_id');
+    return (saved as WallpaperId) || (isDarkMode ? 'dark-doodle' : 'light-beige-doodle');
+  });
+
+  useEffect(() => {
+    localStorage.setItem('wa_dark_mode', String(isDarkMode));
+  }, [isDarkMode]);
+
+  useEffect(() => {
+    localStorage.setItem('wa_wallpaper_id', wallpaperId);
+  }, [wallpaperId]);
+
+  const toggleDarkMode = () => {
+    setIsDarkMode((prev) => {
+      const next = !prev;
+      setWallpaperId(next ? 'dark-doodle' : 'light-beige-doodle');
+      return next;
+    });
+  };
+
+  // System Width & Height Scale State
+  const [uiWidthScale, setUiWidthScale] = useState<number>(() => {
+    const saved = localStorage.getItem('wa_ui_width_scale');
+    return saved ? parseInt(saved, 10) : 100;
+  });
+
+  const [uiHeightScale, setUiHeightScale] = useState<number>(() => {
+    const saved = localStorage.getItem('wa_ui_height_scale');
+    return saved ? parseInt(saved, 10) : 100;
+  });
+
+  const [uiFontScale, setUiFontScale] = useState<number>(() => {
+    const saved = localStorage.getItem('wa_ui_font_scale');
+    return saved ? parseInt(saved, 10) : 100;
+  });
+
+  const [showDimensionModal, setShowDimensionModal] = useState<boolean>(false);
+
+  useEffect(() => {
+    localStorage.setItem('wa_ui_width_scale', String(uiWidthScale));
+  }, [uiWidthScale]);
+
+  useEffect(() => {
+    localStorage.setItem('wa_ui_height_scale', String(uiHeightScale));
+  }, [uiHeightScale]);
+
+  useEffect(() => {
+    localStorage.setItem('wa_ui_font_scale', String(uiFontScale));
+  }, [uiFontScale]);
+
+  const handleChangeDimensions = (w: number, h: number, f: number) => {
+    setUiWidthScale(w);
+    setUiHeightScale(h);
+    setUiFontScale(f);
+  };
+
+  // Modal States
+  const [previewImage, setPreviewImage] = useState<{
+    url: string;
+    title?: string;
+    subtitle?: string;
+  } | null>(null);
+  const [selectedSettingsTab, setSelectedSettingsTab] = useState<SettingsTab>('conta');
+  const [showContactsModal, setShowContactsModal] = useState<boolean>(false);
+  const [showNewConversationModal, setShowNewConversationModal] = useState<boolean>(false);
+  const [showNewGroupModal, setShowNewGroupModal] = useState<boolean>(false);
+
+  // Selected Chat Object
+  const listChats = useMemo(() => conversations.map((conversation) => toChatListItem(conversation, inboxes)), [conversations, inboxes]);
+  const contactListItems = useMemo(() => contactDirectory.contacts.map(toContactListItem), [contactDirectory.contacts]);
+  // O painel principal só pode abrir uma conversa obtida do Chatwoot. Os chats
+  // de protótipo continuam restritos às telas ainda não integradas (contatos,
+  // status e chamadas), sem contaminar o atendimento real.
+  const activeChat = listChats.find((c) => c.id === activeChatId);
+  const selectedConversationId = useMemo(() => conversations.some((conversation) => String(conversation.id) === activeChatId) ? Number(activeChatId) : null, [activeChatId, conversations]);
+  const messageHistory = useConversationMessages(currentAccount?.id ?? null, selectedConversationId);
+  const activeChatWithHistory = useMemo(() => selectedConversationId
+    ? activeChat && { ...activeChat, messages: toChatMessages(messageHistory.messages) }
+    : activeChat,
+  [activeChat, messageHistory.messages, selectedConversationId]);
+  const selectedConversation = useMemo(() => conversations.find((conversation) => conversation.id === selectedConversationId) || null, [conversations, selectedConversationId]);
+  const conversationManagement = useConversationManagement(currentAccount?.id ?? null, selectedConversation?.inboxId ?? null);
+  const contactDetails = useContactDetails(currentAccount?.id ?? null, selectedConversation?.contactId ?? null);
+  const updateSelectedContact = async (update: Parameters<typeof contactDetails.update>[0]) => {
+    const updated = await contactDetails.update(update);
+    if (updated && selectedConversationId) applyConversationUpdate(selectedConversationId, { contactName: updated.name, contactId: updated.id });
+    return updated;
+  };
+  const unreadRefreshTimer = useRef<number | null>(null);
+  const openedReadConversationRef = useRef<number | null>(null);
+  const markSelectedConversationRead = useCallback(() => {
+    if (!selectedConversationId || !selectedConversation || selectedConversation.unreadCount <= 0) return;
+    applyConversationUpdate(selectedConversationId, { unreadCount: 0 });
+    void runConversationAction(conversationManagement.markRead(selectedConversationId), replaceConversation);
+  }, [applyConversationUpdate, conversationManagement, replaceConversation, selectedConversation, selectedConversationId]);
+  const realtimeHandlers = useMemo(() => ({
+    onConversation: upsertRealtimeConversation,
+    onMessage: (message: ConversationMessage, unreadCount?: number, lastActivityAt?: number) => {
+      applyRealtimeMessage(message, unreadCount, lastActivityAt);
+      messageHistory.upsertRealtimeMessage(message);
+    },
+    // message.created already contains the new unread count. Reloading the
+    // entire list here remounted the conversation and forced the "Minhas" tab.
+    onUnreadInvalidated: () => undefined,
+    onReconnect: () => {
+      void retryConversations();
+      void messageHistory.retry();
+    },
+    onContact: (contact) => {
+      contactDetails.applyRealtimeUpdate(contact);
+      if (selectedConversation?.contactId === contact.id && selectedConversationId) {
+        applyConversationUpdate(selectedConversationId, { contactName: contact.name, contactId: contact.id });
+      }
+    },
+  }), [applyConversationUpdate, applyRealtimeMessage, contactDetails.applyRealtimeUpdate, messageHistory.retry, messageHistory.upsertRealtimeMessage, retryConversations, selectedConversation?.contactId, selectedConversationId, upsertRealtimeConversation]);
+  const { connectionStatus: realtimeConnectionStatus, typing } = useChatwootRealtime(authenticatedUser, currentAccount, selectedConversationId, realtimeHandlers);
+
+  useEffect(() => {
+    if (!selectedConversationId) return;
+    const interval = window.setInterval(() => { void messageHistory.refreshLatest(); }, 3_000);
+    return () => window.clearInterval(interval);
+  }, [messageHistory.refreshLatest, selectedConversationId]);
+
+  useEffect(() => () => {
+    if (unreadRefreshTimer.current !== null) window.clearTimeout(unreadRefreshTimer.current);
+  }, []);
+
+  // Seleciona uma conversa somente quando ainda não há seleção. Atualizações
+  // em tempo real não podem trocar o atendimento que o agente está vendo.
+  useEffect(() => {
+    if (!activeChatId && conversations[0]) setActiveChatId(String(conversations[0].id));
+  }, [activeChatId, conversations]);
+
+  useEffect(() => {
+    if (!selectedConversationId || !selectedConversation || openedReadConversationRef.current === selectedConversationId) return;
+    openedReadConversationRef.current = selectedConversationId;
+    markSelectedConversationRead();
+  }, [markSelectedConversationRead, selectedConversation, selectedConversationId]);
+
+  const runConversationAction = async <T,>(operation: Promise<T | null>, onSuccess: (result: T) => void) => {
+    try {
+      const result = await operation;
+      if (result) onSuccess(result);
+    } catch (cause) {
+      addToast(errorMessageForUser(cause), 'error');
+    }
+  };
+
+  const createDirectoryContact = async (input: { name: string; phoneNumber?: string; email?: string; inboxId?: number }): Promise<Chat | null> => {
+    const created = await contactDirectory.create(input);
+    return created ? toContactListItem(created) : null;
+  };
+
+  const updateDirectoryContact = async (chatId: string, updates: Partial<Chat>): Promise<void> => {
+    const contactId = Number(chatId);
+    if (!Number.isInteger(contactId)) throw new Error('Contato inválido.');
+    const supportedUpdate = {
+      ...(updates.name === undefined ? {} : { name: updates.name }),
+      ...(updates.phone === undefined ? {} : { phoneNumber: updates.phone || null }),
+      ...(updates.email === undefined ? {} : { email: updates.email || null }),
+      ...(updates.isBlocked === undefined ? {} : { blocked: updates.isBlocked }),
+      ...(updates.description === undefined ? {} : { additionalAttributes: { description: updates.description || null } }),
+    };
+    if (Object.keys(supportedUpdate).length === 0) {
+      throw new Error('Esta alteração de contato ainda não é suportada pela integração.');
+    }
+    const updated = await contactDirectory.update(contactId, supportedUpdate);
+    if (!updated) throw new Error('Não foi possível atualizar o contato agora.');
+  };
+
+  const deleteDirectoryContact = async (chatId: string): Promise<void> => {
+    const contactId = Number(chatId);
+    if (!Number.isInteger(contactId)) throw new Error('Contato inválido.');
+    const removed = await contactDirectory.remove(contactId);
+    if (!removed) throw new Error('Não foi possível excluir o contato agora.');
+  };
+
+  const startContactConversation = async ({ contactId, inboxId, initialContent, private: isPrivate, files = [] }: { contactId: number; inboxId: number; initialContent?: string; private: boolean; files?: File[] }) => {
+    if (!currentAccount) throw new Error('Selecione uma conta antes de iniciar o atendimento.');
+    const existing = await conversationService.findReusable({ accountId: currentAccount.id, contactId, inboxId });
+    const conversation = existing || await conversationService.create({ accountId: currentAccount.id, contactId, inboxId });
+    if (!existing) addCreatedConversation(conversation);
+    setActiveChatId(String(conversation.id));
+    setActiveNavTab('chats');
+    setShowContactsModal(false);
+    setShowMobileChat(true);
+
+    if (!initialContent && files.length === 0) return;
+    const echoId = globalThis.crypto?.randomUUID?.() || `cw-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    try {
+      const message = await messageService.create({
+        accountId: currentAccount.id,
+        conversationId: conversation.id,
+        content: initialContent,
+        private: isPrivate,
+        echoId,
+        files,
+      });
+      applyOutgoingMessage(message);
+    } catch (cause) {
+      addToast(`Conversa criada, mas a mensagem inicial não foi enviada: ${errorMessageForUser(cause)}`, 'error');
+    }
+  };
+
+  // Filtering & Sorting chats by search query, inbox channel, status, combination rules, and sort options
+  const filteredAndSortedChats = useMemo(() => {
+    let list = listChats.filter((c) => {
+      // Exclude archived chats unless explicitly searching
+      if (c.isArchived && !searchQuery.trim()) return false;
+
+      // Search query filter
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchName = c.name.toLowerCase().includes(q);
+        const matchMsg = c.lastMessage.toLowerCase().includes(q);
+        const matchPhone = c.phone?.toLowerCase().includes(q);
+        const matchId = c.identifier?.toLowerCase().includes(q);
+        const matchTag = c.tags?.some((t) => t.label.toLowerCase().includes(q));
+        if (!matchName && !matchMsg && !matchPhone && !matchId && !matchTag) {
+          return false;
+        }
+      }
+
+      // Filter by selected inbox channel / view from sidebar
+      if (selectedInbox === 'mencoes') {
+        const hasMention = c.messages.some((m) => m.text?.includes('@'));
+        if (!hasMention && c.id !== 'c-jullyanna') return false;
+      } else if (selectedInbox === 'participantes') {
+        if (!c.isGroup && !c.name.toLowerCase().includes('equipe') && !c.name.toLowerCase().includes('grupo')) {
+          return false;
+        }
+      } else if (selectedInbox === 'nao_atendidas') {
+        if (!c.unassigned && (!c.unreadCount || c.unreadCount === 0) && c.id !== 'c-danielle') {
+          return false;
+        }
+      } else if (selectedInbox !== 'todas' && !/^\d+$/.test(selectedInbox)) {
+        // Channel name matching
+        if (!c.channelName) return false;
+        const normInbox = selectedInbox.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const normChannel = c.channelName.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (!normChannel || !normInbox) return false;
+        const isMatch =
+          normChannel === normInbox ||
+          normChannel.includes(normInbox) ||
+          normInbox.includes(normChannel);
+        if (!isMatch) return false;
+      }
+
+      // Filter Category Pills
+      if (activeFilter === 'minhas') {
+        if (c.unassigned || c.id === 'c10' || c.id === 'c11') return false;
+      } else if (activeFilter === 'nao_atribuidas') {
+        if (!c.unassigned && c.id !== 'c10' && c.id !== 'c11') return false;
+      }
+
+      // Quick Status Filter
+      if (selectedStatus !== 'todas') {
+        const statusVal = c.status || 'aberta';
+        if (selectedStatus === 'abertas' && statusVal !== 'aberta') return false;
+        if (selectedStatus === 'abertas_pendentes' && statusVal !== 'aberta' && statusVal !== 'pendente') return false;
+        if (selectedStatus === 'resolvidas' && statusVal !== 'resolvida') return false;
+        if (selectedStatus === 'pendentes' && statusVal !== 'pendente') return false;
+        if (selectedStatus === 'adiadas' && statusVal !== 'adiada') return false;
+      }
+
+      // Combination Filter Rules
+      for (const rule of filterRules) {
+        let targetVal = '';
+        if (rule.field === 'status') targetVal = c.status || 'aberta';
+        else if (rule.field === 'priority') targetVal = c.priority || 'media';
+        else if (rule.field === 'assignedAgent') targetVal = c.assignedAgent || 'Não Atribuído';
+        else if (rule.field === 'inbox') targetVal = c.channelName || '';
+        else if (rule.field === 'team') targetVal = c.teamName || 'Comercial';
+        else if (rule.field === 'identifier') targetVal = c.identifier || c.phone || '';
+        else if (rule.field === 'campaign') targetVal = c.campaignName || '';
+
+        const ruleVal = rule.value.toLowerCase();
+        const chatTarget = targetVal.toLowerCase();
+
+        if (rule.operator === 'equals') {
+          if (chatTarget !== ruleVal && !chatTarget.includes(ruleVal)) return false;
+        } else if (rule.operator === 'not_equals') {
+          if (chatTarget === ruleVal || chatTarget.includes(ruleVal)) return false;
+        } else if (rule.operator === 'present') {
+          if (!chatTarget || chatTarget.trim().length === 0) return false;
+        } else if (rule.operator === 'not_present') {
+          if (chatTarget && chatTarget.trim().length > 0) return false;
+        }
+      }
+
+      return true;
+    });
+
+    // Sorting Logic
+    return list.sort((a, b) => {
+      // Pinned chats always sort to the top
+      const aPinned = a.pinned || a.isPinned;
+      const bPinned = b.pinned || b.isPinned;
+      if (aPinned && !bPinned) return -1;
+      if (!aPinned && bPinned) return 1;
+
+      if (selectedSort === 'last_activity_asc') {
+        return (a.time || '').localeCompare(b.time || '');
+      } else if (selectedSort === 'created_at_desc') {
+        return (b.createdAt || '').localeCompare(a.createdAt || '');
+      } else if (selectedSort === 'created_at_asc') {
+        return (a.createdAt || '').localeCompare(b.createdAt || '');
+      } else if (selectedSort === 'priority_desc') {
+        const priorityRank: Record<string, number> = { urgente: 4, alta: 3, media: 2, baixa: 1 };
+        const rankA = priorityRank[a.priority || 'media'] || 2;
+        const rankB = priorityRank[b.priority || 'media'] || 2;
+        return rankB - rankA;
+      } else if (selectedSort === 'priority_asc') {
+        const priorityRank: Record<string, number> = { urgente: 4, alta: 3, media: 2, baixa: 1 };
+        const rankA = priorityRank[a.priority || 'media'] || 2;
+        const rankB = priorityRank[b.priority || 'media'] || 2;
+        return rankA - rankB;
+      } else if (selectedSort === 'priority_and_created') {
+        const priorityRank: Record<string, number> = { urgente: 4, alta: 3, media: 2, baixa: 1 };
+        const rankA = priorityRank[a.priority || 'media'] || 2;
+        const rankB = priorityRank[b.priority || 'media'] || 2;
+        if (rankA !== rankB) return rankB - rankA;
+        return (b.createdAt || '').localeCompare(a.createdAt || '');
+      } else if (selectedSort === 'pending_long_first') {
+        const durA = a.pendingResponseDurationMinutes || 0;
+        const durB = b.pendingResponseDurationMinutes || 0;
+        return durB - durA;
+      } else if (selectedSort === 'pending_short_first') {
+        const durA = a.pendingResponseDurationMinutes || 0;
+        const durB = b.pendingResponseDurationMinutes || 0;
+        return durA - durB;
+      }
+
+      return 0;
+    });
+  }, [listChats, searchQuery, selectedInbox, activeFilter, selectedStatus, filterRules, selectedSort]);
+
+  // Handle sending message
+  const handleSendMessage = (chatId: string, text: string, attachments?: File[], isPrivate?: boolean) => {
+    if (selectedConversationId && chatId === String(selectedConversationId)) {
+      return messageHistory.send(text, Boolean(isPrivate), attachments).then((message) => {
+        if (message) applyOutgoingMessage(message);
+        return Boolean(message);
+      });
+    }
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const legacyAttachments: Attachment[] | undefined = attachments?.map((file, index) => ({
+      id: `att-${Date.now()}-${index}`,
+      type: file.type.startsWith('image/') ? 'image' : file.type.startsWith('audio/') ? 'audio' : file.type.startsWith('video/') ? 'video' : 'file',
+      url: '',
+      title: file.name,
+      size: `${Math.ceil(file.size / 1024)} KB`,
+    }));
+
+    const newMsg: Message = {
+      id: `msg-${Date.now()}`,
+      sender: 'me',
+      text,
+      time: timeStr,
+      status: 'read',
+      dateLabel: 'Hoje',
+      attachments: legacyAttachments,
+      isPrivate,
+    };
+
+    setChats((prevChats) =>
+      prevChats.map((c) => {
+        if (c.id === chatId) {
+          const updatedMessages = [...c.messages, newMsg];
+          const displayLastMessage = isPrivate
+            ? `🔒 Nota: ${text}`
+            : text || (attachments ? `${attachments.length} anexo(s)` : 'Anexo');
+          return {
+            ...c,
+            messages: updatedMessages,
+            lastMessage: displayLastMessage,
+            lastMessageByMe: true,
+            time: timeStr,
+          };
+        }
+        return c;
+      })
+    );
+  };
+
+  // Compute counts for filter pills
+  const unreadCountTotal = conversations.reduce((total, conversation) => total + conversation.unreadCount, 0);
+  // Favoritos/fixação não fazem parte do DTO da lista do Chatwoot nesta fase.
+  const favoritesCountTotal = 0;
+
+  // Update contact details
+  const handleUpdateContact = (chatId: string, updates: Partial<Chat>) => {
+    setChats((prev) =>
+      prev.map((c) => (c.id === chatId ? { ...c, ...updates } : c))
+    );
+  };
+
+  // Delete contact
+  const handleDeleteContact = (chatId: string) => {
+    setChats((prev) => prev.filter((c) => c.id !== chatId));
+  };
+
+  // Create new chat
+  const handleCreateNewChat = (
+    name: string,
+    phone: string,
+    channelName: string = 'Whatsapp Oficial(1420)',
+    initialMessageText?: string,
+    isPrivate?: boolean,
+    attachments?: Attachment[]
+  ) => {
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const messages: Message[] = [];
+    let displayLastMessage = 'Conversa criada';
+
+    if (initialMessageText?.trim() || (attachments && attachments.length > 0)) {
+      const text = initialMessageText?.trim() || '';
+      messages.push({
+        id: `msg-${Date.now()}`,
+        sender: 'me',
+        text,
+        time: timeStr,
+        status: 'read',
+        dateLabel: 'Hoje',
+        isPrivate: !!isPrivate,
+        attachments,
+      });
+      displayLastMessage = isPrivate
+        ? `🔒 Nota: ${text || 'Anexo'}`
+        : text || (attachments ? `${attachments.length} anexo(s)` : 'Anexo');
+    }
+
+    const newChat: Chat = {
+      id: `chat-${Date.now()}`,
+      name,
+      phone,
+      about: phone,
+      avatar: name.trim().substring(0, 2).toUpperCase(),
+      avatarType: 'logo',
+      avatarBg: '#0284c7',
+      channelName,
+      lastMessage: displayLastMessage,
+      lastMessageByMe: true,
+      time: timeStr,
+      lastMessageRelative: 'agora',
+      messages,
+      unassigned: false,
+    };
+
+    setChats((prev) => [newChat, ...prev]);
+    setActiveChatId(newChat.id);
+    setShowMobileChat(true);
+  };
+
+  // Create new group
+  const handleCreateNewGroup = (
+    groupName: string,
+    description: string,
+    channelName: string = 'Whatsapp Oficial(1420)',
+    selectedContactIds: string[] = []
+  ) => {
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const newGroupChat: Chat = {
+      id: `group-${Date.now()}`,
+      name: groupName,
+      avatar: groupName.trim().substring(0, 2).toUpperCase(),
+      avatarType: 'group',
+      avatarBg: '#0284c7',
+      channelName,
+      lastMessage: 'Grupo criado',
+      lastMessageByMe: true,
+      time: timeStr,
+      lastMessageRelative: 'agora',
+      isGroup: true,
+      membersCount: selectedContactIds.length + 1,
+      description: description || 'Descrição do grupo',
+      messages: [
+        {
+          id: `msg-${Date.now()}`,
+          sender: 'me',
+          senderName: 'Você',
+          text: `Você criou o grupo "${groupName}"`,
+          time: timeStr,
+          status: 'read',
+          dateLabel: 'Hoje',
+        },
+      ],
+      unassigned: false,
+    };
+
+    setChats((prev) => [newGroupChat, ...prev]);
+    setActiveChatId(newGroupChat.id);
+    setShowMobileChat(true);
+  };
+
+  return (
+    <div
+      className={`w-screen h-screen flex flex-col font-sans antialiased overflow-hidden select-none transition-colors ${
+        isDarkMode ? 'bg-[#0e0c0c]' : 'bg-[#f0f2f5]'
+      }`}
+      style={{
+        zoom: `${(uiWidthScale / 100) * (uiFontScale / 100)}`,
+      }}
+    >
+      {/* Main WhatsApp Applet Layout */}
+      <div className="flex-1 flex overflow-x-auto overflow-y-hidden relative">
+        {/* Far Left Navigation Rail (60px) */}
+        <NavRail
+          activeTab={activeNavTab}
+          onTabChange={(tab) => {
+            setActiveNavTab(tab);
+          }}
+          selectedInbox={selectedInbox}
+          onSelectInbox={setSelectedInbox}
+          selectedSettingsTab={selectedSettingsTab}
+          onSelectSettingsTab={(tabKey) => setSelectedSettingsTab(tabKey as SettingsTab)}
+          userAvatar={user.avatar}
+          isDarkMode={isDarkMode}
+          onToggleDarkMode={toggleDarkMode}
+          selectedAccount={selectedAccount}
+          onSelectAccount={(account) => void handleAccountSelection(account)}
+          accounts={authenticatedUser?.accounts.map((account) => ({ id: String(account.id), name: account.name, role: account.role }))}
+          inboxes={inboxes}
+          inboxesStatus={inboxesStatus}
+          inboxesError={inboxesError}
+          onRetryInboxes={() => void retryInboxes()}
+          onLogout={() => void logout()}
+          onOpenDimensionsModal={() => setShowDimensionModal(true)}
+          isSuperAdmin={authenticatedUser?.isSuperAdmin}
+          onOpenSuperAdmin={() => window.location.assign(superAdminUrl)}
+          onNewChatClick={() => {
+            setShowNewConversationModal(true);
+            setIsSidebarCollapsed(false);
+            setActiveNavTab('chats');
+          }}
+        />
+
+        {/* Dynamic Secondary Views (Status, Calls, Communities, Settings) */}
+        {activeNavTab === 'status' && (
+          <StatusView
+            statuses={mockStatuses}
+            onClose={() => setActiveNavTab('chats')}
+          />
+        )}
+
+        {activeNavTab === 'calls' && (
+          <CallsView
+            calls={mockCallLogs}
+            onClose={() => setActiveNavTab('chats')}
+          />
+        )}
+
+        {(activeNavTab === 'communities' || (activeNavTab as string) === 'contacts') && (
+          <ContactsView
+            contacts={contactListItems}
+            contactsStatus={contactDirectory.status}
+            contactsError={contactDirectory.error}
+            onRetryContacts={() => void contactDirectory.retry()}
+            accountId={currentAccount?.id ?? null}
+            inboxes={inboxes}
+            defaultInboxId={/^\d+$/.test(selectedInbox) ? Number(selectedInbox) : inboxes[0]?.id ?? null}
+            onCreateContact={createDirectoryContact}
+            onStartConversation={startContactConversation}
+            isCreatingContact={contactDirectory.isCreating}
+            onOpenConversation={(conversationId) => {
+              setActiveChatId(String(conversationId));
+              setActiveNavTab('chats');
+              setShowMobileChat(true);
+            }}
+            onCreateNewChat={(name, phone, channelName, initialMessageText, isPrivate, attachments) => {
+              handleCreateNewChat(name, phone, channelName, initialMessageText, isPrivate, attachments);
+              setActiveNavTab('chats');
+              setShowMobileChat(true);
+            }}
+            onUpdateContact={updateDirectoryContact}
+            onDeleteContact={deleteDirectoryContact}
+            isMutatingContact={contactDirectory.isMutating}
+            onClose={() => setActiveNavTab('chats')}
+            isDarkMode={isDarkMode}
+          />
+        )}
+
+        {activeNavTab === 'settings' && (
+          <SettingsView
+            user={user}
+            onUpdateUser={(updated) => setUser(updated)}
+            onClose={() => setActiveNavTab('chats')}
+            isDarkMode={isDarkMode}
+            onToggleDarkMode={toggleDarkMode}
+            wallpaperId={wallpaperId}
+            onSelectWallpaper={(id) => setWallpaperId(id)}
+            activeTab={selectedSettingsTab}
+            onTabChange={(tab) => setSelectedSettingsTab(tab)}
+            uiWidthScale={uiWidthScale}
+            uiHeightScale={uiHeightScale}
+            uiFontScale={uiFontScale}
+            onChangeDimensions={handleChangeDimensions}
+            accountId={currentAccount?.id ?? null}
+            inboxes={inboxes}
+            inboxesStatus={inboxesStatus}
+            inboxesError={inboxesError}
+            onRefreshInboxes={retryInboxes}
+          />
+        )}
+
+        {activeNavTab === 'media' && (
+          <AppsView
+            onClose={() => setActiveNavTab('chats')}
+            isDarkMode={isDarkMode}
+          />
+        )}
+
+        {/* Full-screen Contacts & Clients Manager Screen */}
+        {(showContactsModal || activeNavTab === 'contacts') && (
+          <div className="flex-1 h-full overflow-hidden flex flex-col z-30">
+            <ContactsView
+              contacts={contactListItems}
+              contactsStatus={contactDirectory.status}
+              contactsError={contactDirectory.error}
+              onRetryContacts={() => void contactDirectory.retry()}
+              accountId={currentAccount?.id ?? null}
+              inboxes={inboxes}
+              defaultInboxId={/^\d+$/.test(selectedInbox) ? Number(selectedInbox) : inboxes[0]?.id ?? null}
+              onCreateContact={createDirectoryContact}
+              onStartConversation={startContactConversation}
+              isCreatingContact={contactDirectory.isCreating}
+              onOpenConversation={(conversationId) => {
+                setActiveChatId(String(conversationId));
+                setShowContactsModal(false);
+                setActiveNavTab('chats');
+                setShowMobileChat(true);
+              }}
+              onCreateNewChat={(name, phone, channelName, initialMessageText, isPrivate, attachments) => {
+                handleCreateNewChat(name, phone, channelName, initialMessageText, isPrivate, attachments);
+                setShowContactsModal(false);
+                setActiveNavTab('chats');
+                setShowMobileChat(true);
+              }}
+              onUpdateContact={updateDirectoryContact}
+              onDeleteContact={deleteDirectoryContact}
+              isMutatingContact={contactDirectory.isMutating}
+              onClose={() => {
+                setShowContactsModal(false);
+                setActiveNavTab('chats');
+              }}
+              isDarkMode={isDarkMode}
+            />
+          </div>
+        )}
+
+        {/* Primary Chats View (List + Active Chat Pane) */}
+        {!showContactsModal &&
+          activeNavTab !== 'contacts' &&
+          activeNavTab !== 'status' &&
+          activeNavTab !== 'calls' &&
+          activeNavTab !== 'communities' &&
+          activeNavTab !== 'settings' &&
+          activeNavTab !== 'media' && (
+            <div className="flex-1 flex flex-row h-full overflow-x-auto overflow-y-hidden min-w-0">
+              {/* Left Chat List Column (Collapsible & Resizable on Desktop) */}
+              <div
+                style={{ width: window.innerWidth >= 768 ? `${chatListWidth}px` : '100%' }}
+                className={`border-r flex flex-col h-full flex-shrink-0 relative transition-all duration-75 select-none ${
+                  showMobileChat ? 'hidden' : 'flex'
+                } ${isSidebarCollapsed ? 'md:hidden' : 'md:flex'} ${
+                  isDarkMode
+                    ? 'bg-[#151717] border-[#1e1f1f]'
+                    : 'bg-white border-[#d1d7db]'
+                }`}
+              >
+                {/* Resizable Border Handle (Right Edge) */}
+                <div
+                  onMouseDown={handleMouseDownChatList}
+                  title="Arrastar para redimensionar lista de conversas"
+                  className={`absolute -right-1.5 top-0 bottom-0 w-3 cursor-col-resize z-50 hidden md:flex items-center justify-center group transition-colors ${
+                    isResizingChatList ? 'bg-[#00a884]' : 'hover:bg-[#00a884]/40'
+                  }`}
+                >
+                  <div
+                    className={`w-1 h-8 rounded-full transition-colors flex items-center justify-center ${
+                      isResizingChatList ? 'bg-white' : 'bg-[#8696a0]/40 group-hover:bg-[#00a884]'
+                    }`}
+                  >
+                    <GripVertical className="w-3 h-3 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
+                </div>
+                <ChatListHeader
+                  searchQuery={searchQuery}
+                  onSearchChange={setSearchQuery}
+                  activeFilter={activeFilter}
+                  onFilterChange={setActiveFilter}
+                  selectedInbox={selectedInbox}
+                  onResetInbox={() => setSelectedInbox('todas')}
+                  onNewChatClick={() => setShowNewConversationModal(true)}
+                  onNewContactClick={() => setShowContactsModal(true)}
+                  onNewGroupClick={() => setShowNewGroupModal(true)}
+                  onMenuClick={() => setActiveNavTab('settings')}
+                  isDarkMode={isDarkMode}
+                  unreadCountTotal={unreadCountTotal}
+                  favoritesCountTotal={favoritesCountTotal}
+                  onToggleSidebar={() => setIsSidebarCollapsed(true)}
+                  selectedStatus={selectedStatus}
+                  onStatusChange={setSelectedStatus}
+                  selectedSort={selectedSort}
+                  onSortChange={setSelectedSort}
+                  filterRules={filterRules}
+                  onFilterRulesChange={setFilterRules}
+                />
+
+                {/* Scrollable Chat List */}
+                <div className="flex-1 overflow-y-auto pb-24 md:pb-0 transition-colors" onScroll={(event) => {
+                  const element = event.currentTarget;
+                  if (hasNextPage && element.scrollTop + element.clientHeight >= element.scrollHeight - 120) loadMore();
+                }}>
+                  {conversationsStatus === 'loading' ? (
+                    <div className={`p-8 text-center text-sm ${isDarkMode ? 'text-[#8696a0]' : 'text-[#667781]'}`}>Carregando conversas…</div>
+                  ) : conversationsStatus === 'error' ? (
+                    <div className={`p-8 text-center text-sm ${isDarkMode ? 'text-[#8696a0]' : 'text-[#667781]'}`}><p>{conversationsError || 'Não foi possível carregar as conversas.'}</p><button type="button" onClick={() => void retryConversations()} className="mt-3 text-[#00a884] hover:underline">Tentar novamente</button></div>
+                  ) : filteredAndSortedChats.length > 0 ? (
+                    filteredAndSortedChats.map((c) => (
+                      <ChatListItem
+                        key={c.id}
+                        chat={c}
+                        isSelected={c.id === activeChatId}
+                        onContextMenu={handleChatContextMenu}
+                        onSelect={(selected) => {
+                          setActiveChatId(selected.id);
+                          setShowMobileChat(true);
+                        }}
+                        isDarkMode={isDarkMode}
+                      />
+                    ))
+                  ) : (
+                    <div
+                      className={`p-8 text-center text-sm ${
+                        isDarkMode ? 'text-[#8696a0]' : 'text-[#667781]'
+                      }`}
+                    >
+                      Nenhuma conversa encontrada
+                    </div>
+                  )}
+                  {isLoadingMore && <div className={`p-4 text-center text-xs ${isDarkMode ? 'text-[#8696a0]' : 'text-[#667781]'}`}>Carregando mais conversas…</div>}
+                </div>
+              </div>
+
+              {/* Right Active Chat Window Pane */}
+              <div
+                className={`flex-1 h-full min-w-0 md:min-w-[340px] flex flex-col overflow-hidden ${
+                  showMobileChat ? 'flex' : 'hidden md:flex'
+                }`}
+              >
+                {activeChatWithHistory ? <ChatArea
+                  chat={activeChatWithHistory}
+                  allChats={listChats}
+                  onSelectChat={(selected) => {
+                    setActiveChatId(selected.id);
+                    setShowMobileChat(true);
+                  }}
+                  onSendMessage={handleSendMessage}
+                  onImageClick={(url, title, subtitle) =>
+                    setPreviewImage({ url, title, subtitle })
+                  }
+                  onSearchInChat={() => {}}
+                  historyStatus={selectedConversationId ? messageHistory.status : 'idle'}
+                  historyError={messageHistory.error}
+                  hasOlderMessages={messageHistory.hasOlderMessages}
+                  isLoadingOlder={messageHistory.isLoadingOlder}
+                  onRetryHistory={() => void messageHistory.retry()}
+                  onLoadOlderMessages={messageHistory.loadOlder}
+                  onRetryMessage={(messageId) => void messageHistory.retrySend(Number(messageId)).then((message) => {
+                    if (message) applyOutgoingMessage(message);
+                  })}
+                  onDeleteMessage={(messageId) => messageHistory.remove(Number(messageId))}
+                  conversation={selectedConversation}
+                  managementCatalogs={conversationManagement.catalogs}
+                  managementCatalogStatus={conversationManagement.catalogStatus}
+                  managementCatalogError={conversationManagement.catalogError}
+                  managementPendingAction={conversationManagement.pendingAction}
+                  onRetryManagementCatalogs={() => void conversationManagement.retryCatalogs()}
+                  onSetConversationStatus={(status) => {
+                    if (!selectedConversationId) return;
+                    void runConversationAction(conversationManagement.setStatus(selectedConversationId, status), (update) => applyConversationUpdate(selectedConversationId, update));
+                  }}
+                  onSetConversationPriority={(priority) => {
+                    if (!selectedConversationId) return;
+                    void runConversationAction(conversationManagement.setPriority(selectedConversationId, priority), (update) => applyConversationUpdate(selectedConversationId, update));
+                  }}
+                  onAssignConversationAgent={(agentId) => {
+                    if (!selectedConversationId) return;
+                    void runConversationAction(conversationManagement.assignAgent(selectedConversationId, agentId), (update) => applyConversationUpdate(selectedConversationId, update));
+                  }}
+                  onAssignConversationTeam={(teamId) => {
+                    if (!selectedConversationId) return;
+                    void runConversationAction(conversationManagement.assignTeam(selectedConversationId, teamId), (update) => applyConversationUpdate(selectedConversationId, update));
+                  }}
+                  onSetConversationLabels={(labels) => {
+                    if (!selectedConversationId) return;
+                    void runConversationAction(conversationManagement.setLabels(selectedConversationId, labels), (update) => applyConversationUpdate(selectedConversationId, update));
+                  }}
+                  onMarkConversationRead={() => {
+                    if (!selectedConversationId) return;
+                    void runConversationAction(conversationManagement.markRead(selectedConversationId), replaceConversation);
+                  }}
+                  onMarkConversationUnread={() => {
+                    if (!selectedConversationId) return;
+                    void runConversationAction(conversationManagement.markUnread(selectedConversationId), replaceConversation);
+                  }}
+                  onReachLatestMessage={markSelectedConversationRead}
+                  realtimeConnectionStatus={realtimeConnectionStatus}
+                  typingName={typing?.name ?? null}
+                  contact={contactDetails.contact}
+                  contactNotes={contactDetails.notes}
+                  contactStatus={selectedConversation ? contactDetails.status : 'idle'}
+                  contactError={contactDetails.error}
+                  isContactSaving={contactDetails.isSaving}
+                  isCreatingContactNote={contactDetails.isCreatingNote}
+                  onRetryContact={() => void contactDetails.retry()}
+                  onUpdateContact={updateSelectedContact}
+                  onCreateContactNote={contactDetails.createNote}
+                  accountId={currentAccount?.id ?? null}
+                  isDarkMode={isDarkMode}
+                  wallpaperId={wallpaperId}
+                  isSidebarCollapsed={isSidebarCollapsed}
+                  onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
+                  onMobileBack={() => setShowMobileChat(false)}
+                /> : (
+                  <div className={`h-full flex items-center justify-center text-center p-8 ${isDarkMode ? 'bg-[#0b141a] text-[#8696a0]' : 'bg-[#f0f2f5] text-[#667781]'}`}>
+                    <div>
+                      <MessageSquare className="w-10 h-10 mx-auto mb-3 opacity-60" />
+                      <h2 className="font-semibold text-base text-inherit">{conversationsStatus === 'loading' ? 'Carregando conversas…' : 'Nenhuma conversa selecionada'}</h2>
+                      <p className="mt-1 text-sm">{conversationsStatus === 'loading' ? 'Aguarde enquanto buscamos os atendimentos da conta.' : 'Selecione uma conversa da lista para ver o histórico real.'}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+      </div>
+
+      {/* Floating Mobile Navigation Bar */}
+      {!showMobileChat && !showContactsModal && activeNavTab !== 'contacts' && (
+        <FloatingMobileNav
+          activeTab={activeNavTab}
+          onTabChange={(tab) => {
+            setActiveNavTab(tab);
+            setShowMobileChat(false);
+          }}
+          isDarkMode={isDarkMode}
+          unreadCountTotal={unreadCountTotal}
+        />
+      )}
+
+      {/* Image Fullscreen Modal */}
+      {previewImage && (
+        <ImagePreviewModal
+          imageUrl={previewImage.url}
+          title={previewImage.title}
+          subtitle={previewImage.subtitle}
+          onClose={() => setPreviewImage(null)}
+        />
+      )}
+
+      {/* System Dimension & Scale Adjustment Modal */}
+      {showDimensionModal && (
+        <DimensionModal
+          widthScale={uiWidthScale}
+          heightScale={uiHeightScale}
+          fontScale={uiFontScale}
+          onChangeDimensions={handleChangeDimensions}
+          onClose={() => setShowDimensionModal(false)}
+          isDarkMode={isDarkMode}
+        />
+      )}
+
+      {/* New Conversation Modal (Dedicated Modal with Automatic Existing Chat Checker & Inbox Details) */}
+      {showNewConversationModal && (
+        <NewConversationModal
+          contacts={contactListItems}
+          contactsStatus={contactDirectory.status}
+          contactsError={contactDirectory.error}
+          onRetryContacts={() => void contactDirectory.retry()}
+          inboxes={inboxes}
+          defaultInboxId={/^\d+$/.test(selectedInbox) ? Number(selectedInbox) : inboxes[0]?.id ?? null}
+          onCreateContact={createDirectoryContact}
+          onStartConversation={startContactConversation}
+          onClose={() => setShowNewConversationModal(false)}
+          isDarkMode={isDarkMode}
+        />
+      )}
+
+      {/* New Group Modal */}
+      {showNewGroupModal && (
+        <NewGroupModal
+          chats={chats}
+          onCreateGroup={handleCreateNewGroup}
+          onClose={() => setShowNewGroupModal(false)}
+          isDarkMode={isDarkMode}
+        />
+      )}
+
+      {/* Global Context Menu */}
+      <ContextMenu
+        x={menuState.x}
+        y={menuState.y}
+        isOpen={menuState.isOpen}
+        onClose={closeContextMenu}
+        items={menuState.items}
+        title={menuState.title}
+        isDarkMode={isDarkMode}
+      />
+
+      {/* Floating Toast Notifications */}
+      <ToastContainer
+        toasts={toasts}
+        onDismiss={removeToast}
+        isDarkMode={isDarkMode}
+      />
+    </div>
+  );
+}

@@ -1,0 +1,11 @@
+{
+  "name": "Remix Remix WhatsApp Web",
+  "description": "WhatsApp Web Dark Mode interface replica with exact visual design, chat list, messages, and interactive features.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
