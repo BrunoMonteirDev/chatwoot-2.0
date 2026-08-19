@@ -19,6 +19,10 @@ describe('normalizeConversation', () => {
     expect(normalizeConversation({ id: 4, inbox_id: 1, status: 'pending', priority: null, unread_count: 3, last_activity_at: 123, labels: [], messages: [{ content: 'Retorno', message_type: 1 }], meta: { sender: { name: 'João' }, channel: 'Channel::Email' } }))
       .toMatchObject({ id: 4, contactName: 'João', lastMessage: 'Retorno', lastMessageByCurrentUser: true, unreadCount: 3 });
   });
+
+  it('identifica um grupo pela metadata pública do contato', () => {
+    expect(normalizeConversation({ id: 5, inbox_id: 1, status: 'open', priority: null, unread_count: 0, last_activity_at: 123, labels: [], messages: [], meta: { sender: { name: 'Equipe', additional_attributes: { whatsapp_chat_type: 'group' } } } }).isGroup).toBe(true);
+  });
 });
 
 describe('normalizeInbox', () => {

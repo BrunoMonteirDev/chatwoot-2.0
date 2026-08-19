@@ -12,9 +12,7 @@ import {
   ChatSortOption,
   ChatFilterRule,
 } from './types';
-import { initialChats, currentUser, mockStatuses, mockCallLogs } from './data/mockData';
-
-import { NavRail, ACCOUNTS_LIST } from './components/NavRail';
+import { NavRail } from './components/NavRail';
 import { ChatListHeader } from './components/ChatListHeader';
 import { ChatListItem } from './components/ChatListItem';
 import { ChatArea } from './components/ChatArea';
@@ -50,13 +48,16 @@ import { conversationService } from './integrations/chatwoot/conversations';
 import { messageService } from './integrations/chatwoot/messages';
 import type { ConversationMessage } from './domain/currentUser';
 
+const emptyUser: UserProfile = { name: '', phone: '', about: '', avatar: '' };
+const emptyAccount: MultiTenantAccount = { id: '', name: '', role: '' };
+
 export default function App() {
   const { user: authenticatedUser, currentAccount, selectAccount, logout } = useAuth();
   const superAdminUrl = import.meta.env.VITE_SUPER_ADMIN_URL || '/super_admin';
   const { inboxes, status: inboxesStatus, error: inboxesError, retry: retryInboxes } = useInboxes(currentAccount?.id ?? null);
   const contactDirectory = useContacts(currentAccount?.id ?? null);
-  const [chats, setChats] = useState<Chat[]>(initialChats);
-  const [activeChatId, setActiveChatId] = useState<string>('me');
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [activeChatId, setActiveChatId] = useState<string>('');
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const { menuState, openContextMenu, closeContextMenu } = useContextMenu();
 
@@ -175,9 +176,9 @@ export default function App() {
   const { conversations, status: conversationsStatus, error: conversationsError, hasNextPage, isLoadingMore, retry: retryConversations, loadMore, applyOutgoingMessage, applyConversationUpdate, removeConversation, replaceConversation, upsertRealtimeConversation, addCreatedConversation, applyRealtimeMessage } = useConversations(currentAccount?.id ?? null, selectedInbox);
   const [activeFilter, setActiveFilter] = useState<FilterCategory>('minhas');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [user, setUser] = useState<UserProfile>(currentUser);
+  const [user, setUser] = useState<UserProfile>(emptyUser);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
-  const [selectedAccount, setSelectedAccount] = useState<MultiTenantAccount>(ACCOUNTS_LIST[4]); // Será substituído pelo profile após autenticação.
+  const [selectedAccount, setSelectedAccount] = useState<MultiTenantAccount>(emptyAccount);
 
   async function deleteConversation(chat: Chat) {
     const conversationId = Number(chat.id);
@@ -205,7 +206,7 @@ export default function App() {
       name: authenticatedUser.displayName,
       phone: authenticatedUser.email,
       about: authenticatedUser.role || 'Agente Chatwoot',
-      avatar: authenticatedUser.avatarUrl || currentUser.avatar,
+      avatar: authenticatedUser.avatarUrl || '',
     });
     const active = currentAccount || authenticatedUser.accounts[0];
     if (active) setSelectedAccount({ id: String(active.id), name: active.name, role: active.role });
@@ -349,14 +350,14 @@ export default function App() {
   // status e chamadas), sem contaminar o atendimento real.
   const activeChat = listChats.find((c) => c.id === activeChatId);
   const selectedConversationId = useMemo(() => conversations.some((conversation) => String(conversation.id) === activeChatId) ? Number(activeChatId) : null, [activeChatId, conversations]);
-  const messageHistory = useConversationMessages(currentAccount?.id ?? null, selectedConversationId);
+  const selectedConversation = useMemo(() => conversations.find((conversation) => conversation.id === selectedConversationId) || null, [conversations, selectedConversationId]);
+  const contactDetails = useContactDetails(currentAccount?.id ?? null, selectedConversation?.contactId ?? null);
+  const messageHistory = useConversationMessages(currentAccount?.id ?? null, selectedConversationId, selectedConversation?.inboxId ?? null, contactDetails.contact?.phoneNumber);
   const activeChatWithHistory = useMemo(() => selectedConversationId
     ? activeChat && { ...activeChat, messages: toChatMessages(messageHistory.messages) }
     : activeChat,
   [activeChat, messageHistory.messages, selectedConversationId]);
-  const selectedConversation = useMemo(() => conversations.find((conversation) => conversation.id === selectedConversationId) || null, [conversations, selectedConversationId]);
   const conversationManagement = useConversationManagement(currentAccount?.id ?? null, selectedConversation?.inboxId ?? null);
-  const contactDetails = useContactDetails(currentAccount?.id ?? null, selectedConversation?.contactId ?? null);
   const updateSelectedContact = async (update: Parameters<typeof contactDetails.update>[0]) => {
     const updated = await contactDetails.update(update);
     if (updated && selectedConversationId) applyConversationUpdate(selectedConversationId, { contactName: updated.name, contactId: updated.id });
@@ -392,10 +393,12 @@ export default function App() {
   const { connectionStatus: realtimeConnectionStatus, typing } = useChatwootRealtime(authenticatedUser, currentAccount, selectedConversationId, realtimeHandlers);
 
   useEffect(() => {
-    if (!selectedConversationId) return;
+    // ActionCable is authoritative while connected. Poll only while it is
+    // reconnecting/disconnected, avoiding redundant history requests.
+    if (!selectedConversationId || realtimeConnectionStatus === 'connected') return;
     const interval = window.setInterval(() => { void messageHistory.refreshLatest(); }, 3_000);
     return () => window.clearInterval(interval);
-  }, [messageHistory.refreshLatest, selectedConversationId]);
+  }, [messageHistory.refreshLatest, realtimeConnectionStatus, selectedConversationId]);
 
   useEffect(() => () => {
     if (unreadRefreshTimer.current !== null) window.clearTimeout(unreadRefreshTimer.current);
@@ -612,9 +615,10 @@ export default function App() {
   }, [listChats, searchQuery, selectedInbox, activeFilter, selectedStatus, filterRules, selectedSort]);
 
   // Handle sending message
-  const handleSendMessage = (chatId: string, text: string, attachments?: File[], isPrivate?: boolean) => {
+  const handleSendMessage = (chatId: string, text: string, attachments?: File[], isPrivate?: boolean, replyTo?: import('./types').ReplyTo | null) => {
     if (selectedConversationId && chatId === String(selectedConversationId)) {
-      return messageHistory.send(text, Boolean(isPrivate), attachments).then((message) => {
+      const inReplyTo = replyTo?.id && /^\d+$/.test(replyTo.id) ? Number(replyTo.id) : undefined;
+      return messageHistory.send(text, Boolean(isPrivate), attachments, inReplyTo).then((message) => {
         if (message) applyOutgoingMessage(message);
         return Boolean(message);
       });
@@ -819,14 +823,14 @@ export default function App() {
         {/* Dynamic Secondary Views (Status, Calls, Communities, Settings) */}
         {activeNavTab === 'status' && (
           <StatusView
-            statuses={mockStatuses}
+            statuses={[]}
             onClose={() => setActiveNavTab('chats')}
           />
         )}
 
         {activeNavTab === 'calls' && (
           <CallsView
-            calls={mockCallLogs}
+            calls={[]}
             onClose={() => setActiveNavTab('chats')}
           />
         )}
@@ -1052,6 +1056,9 @@ export default function App() {
                     if (message) applyOutgoingMessage(message);
                   })}
                   onDeleteMessage={(messageId) => messageHistory.remove(Number(messageId))}
+                  onReactMessage={(messageId, emoji) => messageHistory.react(Number(messageId), emoji)}
+                  onEditMessage={(messageId, content) => messageHistory.edit(Number(messageId), content)}
+                  onRevokeMessage={(messageId) => messageHistory.revoke(Number(messageId))}
                   conversation={selectedConversation}
                   managementCatalogs={conversationManagement.catalogs}
                   managementCatalogStatus={conversationManagement.catalogStatus}

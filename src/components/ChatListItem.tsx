@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { MessageSquare, User, Lock, CornerDownLeft, Pin, Star, VolumeX } from 'lucide-react';
+import { MessageSquare, User, Users, Lock, CornerDownLeft, Pin, Star, VolumeX } from 'lucide-react';
 import { Chat } from '../types';
 import { getChannelIcon } from './ChannelIcons';
 
@@ -68,6 +68,8 @@ export const ChatListItem: React.FC<Props> = ({
               className="w-full h-full object-cover"
               referrerPolicy="no-referrer"
             />
+          ) : chat.avatarType === 'group' ? (
+            <Users className="h-5 w-5 text-white" />
           ) : (
             <span className="text-white font-bold text-xs">
               {chat.avatar || chat.name.substring(0, 2).toUpperCase()}
@@ -182,4 +184,3 @@ export const ChatListItem: React.FC<Props> = ({
     </div>
   );
 };
-

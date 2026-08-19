@@ -57,18 +57,6 @@ import {
   getChannelIcon,
 } from './ChannelIcons';
 
-export const ACCOUNTS_LIST: MultiTenantAccount[] = [
-  { id: '21', name: 'Black Rigor', role: 'Administrator' },
-  { id: '30', name: 'BNI Amizade', role: 'Administrator' },
-  { id: '1', name: 'BOTCOM', role: 'Administrator' },
-  { id: '39', name: 'Casa da Paz', role: 'Administrator' },
-  { id: '22', name: 'ChatBotcom', role: 'Administrator' },
-  { id: '38', name: 'Frunê', role: 'Administrator' },
-  { id: '33', name: 'iCONTROL', role: 'Administrator' },
-  { id: '27', name: 'Kopla Testes', role: 'Administrator' },
-  { id: '31', name: 'La Trovo', role: 'Administrator' },
-];
-
 interface Props {
   activeTab: NavTab;
   onTabChange: (tab: NavTab) => void;
@@ -205,8 +193,8 @@ export const NavRail: React.FC<Props> = ({
   const [searchQuery, setSearchQuery] = useState('');
 
   // Multi-Tenant Account Switcher state
-  const availableAccounts = accounts?.length ? accounts : ACCOUNTS_LIST;
-  const [internalAccount, setInternalAccount] = useState<MultiTenantAccount>(availableAccounts[0]);
+  const availableAccounts = accounts || [];
+  const [internalAccount, setInternalAccount] = useState<MultiTenantAccount>({ id: '', name: '', role: '' });
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
   const [accountSearch, setAccountSearch] = useState('');
 

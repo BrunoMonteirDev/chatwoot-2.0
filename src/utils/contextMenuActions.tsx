@@ -27,9 +27,12 @@ import {
   RefreshCw,
   CopyPlus,
   SlidersHorizontal,
+  SmilePlus,
 } from 'lucide-react';
 import { ContextMenuItem } from '../components/ContextMenu';
 import { Chat, Message } from '../types';
+
+export const QUICK_REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'] as const;
 
 /**
  * Builds context menu items for a Chat in the conversation list
@@ -138,11 +141,10 @@ export function getMessageContextMenuItems(
   options: {
     onReply?: (msg: Message) => void;
     onCopyText?: (msg: Message) => void;
-    onStarMessage?: (msg: Message) => void;
-    onForwardMessage?: (msg: Message) => void;
     onDeleteMessage?: (msg: Message) => void;
-    onPrivateNoteToggle?: (msg: Message) => void;
-    onPrintMessage?: (msg: Message) => void;
+    onEditMessage?: (msg: Message) => void;
+    onRevokeMessage?: (msg: Message) => void;
+    onReact?: (msg: Message, emoji: string) => void;
   }
 ): ContextMenuItem[] {
   return [
@@ -160,35 +162,35 @@ export function getMessageContextMenuItems(
       },
       shortcut: 'Ctrl+C',
     },
+    ...(options.onReact ? [
+      { divider: true, label: '' },
+      ...QUICK_REACTION_EMOJIS.map((emoji) => ({
+        label: `Reagir ${emoji}`,
+        icon: <SmilePlus />,
+        action: () => options.onReact?.(msg, emoji),
+      })),
+    ] : []),
+    ...(msg.sender === 'me' && msg.whatsappTransport === 'evolution' && !msg.isRevoked && !msg.attachments?.length ? [{
+      label: 'Editar no WhatsApp', icon: <Edit2 />, action: () => options.onEditMessage?.(msg),
+    }] : []),
+    ...(msg.sender === 'me' && msg.whatsappTransport === 'evolution' && !msg.isRevoked ? [{
+      label: 'Apagar para todos', icon: <Trash2 />, danger: true, action: () => options.onRevokeMessage?.(msg),
+    }] : []),
+    ...(msg.attachments?.length ? [{
+      label: 'Baixar arquivo',
+      icon: <Download />,
+      action: () => {
+        const attachment = msg.attachments?.[0];
+        if (!attachment?.url) return;
+        const link = document.createElement('a');
+        link.href = attachment.url;
+        link.download = attachment.title || 'anexo';
+        link.rel = 'noopener';
+        link.click();
+      },
+    }, { divider: true, label: '' }] : []),
     {
-      label: 'Favoritar Mensagem',
-      icon: <Star />,
-      action: () => options.onStarMessage?.(msg),
-    },
-    {
-      label: 'Encaminhar / Compartilhar',
-      icon: <Share2 />,
-      action: () => options.onForwardMessage?.(msg),
-    },
-    { divider: true, label: '' },
-    {
-      label: 'Imprimir Mensagem',
-      icon: <Printer />,
-      action: () => options.onPrintMessage?.(msg),
-    },
-    {
-      label: 'Histórico de Envios',
-      icon: <History />,
-      action: () => {},
-    },
-    {
-      label: msg.isPrivate ? 'Converter para Pública' : 'Tornar Nota Privada',
-      icon: <Lock />,
-      action: () => options.onPrivateNoteToggle?.(msg),
-    },
-    { divider: true, label: '' },
-    {
-      label: 'Excluir Mensagem',
+      label: 'Excluir somente aqui',
       icon: <Trash2 />,
       danger: true,
       action: () => options.onDeleteMessage?.(msg),

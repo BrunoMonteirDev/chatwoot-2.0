@@ -42,4 +42,20 @@ describe('inboxService', () => {
     expect(vi.mocked(fetch).mock.calls[1][0]).toBe('/api/v1/accounts/12/inbox_members');
     expect(vi.mocked(fetch).mock.calls[1][1]).toMatchObject({ method: 'PATCH', body: JSON.stringify({ inbox_id: 5, user_ids: [2] }) });
   });
+
+  it('adiciona um transport sem apagar o outro ou expor credenciais', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ id: 5, name: 'WhatsApp', avatar_url: null, channel_type: 'Channel::Api', additional_attributes: {} }), { status: 200 }));
+    const inbox = { id: 5, name: 'WhatsApp', avatarUrl: null, channelType: 'Channel::Api', channelId: 1, webhookUrl: null, inboxIdentifier: 'token', additionalAttributes: { whatsapp_transports: ['meta_cloud'], meta_waba_id: 'waba', meta_phone_number_id: 'phone' } };
+    await inboxService.saveWhatsAppTransport(12, inbox, 'evolution', { evolution_provider: 'evolution', evolution_instance_name: 'cw-x' });
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body.channel.additional_attributes).toMatchObject({ whatsapp_mode: 'hybrid', whatsapp_transports: ['meta_cloud', 'evolution'], meta_waba_id: 'waba', evolution_instance_name: 'cw-x' });
+    expect(JSON.stringify(body)).not.toContain('accessToken');
+  });
+
+  it('exclui a inbox pelo endpoint da conta sem tentar apagar a instância Evolution', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response('', { status: 200 }));
+    await expect(inboxService.delete(12, 5)).resolves.toBeUndefined();
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/v1/accounts/12/inboxes/5');
+    expect((vi.mocked(fetch).mock.calls[0][1] as RequestInit).method).toBe('DELETE');
+  });
 });

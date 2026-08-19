@@ -55,6 +55,7 @@ export const normalizeConversation = (conversation: ChatwootConversationDto): Co
     teamId: conversation.meta?.team?.id ?? null,
     teamName: conversation.meta?.team?.name || null,
     labels: conversation.labels || [],
+    isGroup: conversation.meta?.sender?.additional_attributes?.whatsapp_chat_type === 'group',
   };
 };
 
@@ -148,6 +149,7 @@ export const normalizeMessage = (message: ChatwootMessageDto): ConversationMessa
         : message.status === 2 || message.status === 'read' ? 'read'
           : message.status === 3 || message.status === 'failed' ? 'failed' : null,
     echoId: message.echo_id,
+    sourceId: message.source_id ?? null,
     senderName: message.sender?.available_name || message.sender?.name || null,
     senderAvatarUrl: message.sender?.thumbnail || null,
     origin: message.content_attributes?.evolution_origin === 'mobile'

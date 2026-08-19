@@ -8,44 +8,9 @@ export interface GroupMember {
   avatar?: string;
 }
 
-export const defaultGroupMembers: GroupMember[] = [
-  {
-    id: 'm-ricardo',
-    name: 'Ricardo Freitas',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80',
-  },
-  {
-    id: 'm-diego',
-    name: '~ Diego Jacob',
-    displayName: 'Diego Jacob',
-    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=150&q=80',
-  },
-  {
-    id: 'm-vinicius',
-    name: 'Vinicius Prado Salgado',
-    avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=150&q=80',
-  },
-  {
-    id: 'm-allan',
-    name: 'Allan Silva',
-    avatar: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=150&q=80',
-  },
-  {
-    id: 'm-frune',
-    name: 'Frunê',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
-  },
-  {
-    id: 'm-tiago',
-    name: 'Tiago Carvalho',
-    avatar: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?auto=format&fit=crop&w=150&q=80',
-  },
-  {
-    id: 'm-ferlon',
-    name: 'Férlon Piran',
-    avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=150&q=80',
-  },
-];
+// Participants originate from the selected group's Evolution metadata and
+// received messages. No placeholder people are shown in production.
+export const defaultGroupMembers: GroupMember[] = [];
 
 interface MentionsPopupProps {
   isOpen: boolean;

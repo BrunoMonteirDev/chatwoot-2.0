@@ -8,7 +8,7 @@ export const toChatListItem = (conversation: ConversationSummary, inboxes: Inbox
   const inbox = inboxes.find((item) => item.id === conversation.inboxId);
   return {
     id: String(conversation.id), name: conversation.contactName, avatar: conversation.contactAvatarUrl || conversation.contactName.slice(0, 2).toUpperCase(),
-    avatarType: conversation.contactAvatarUrl ? 'image' : 'initials', avatarBg: '#00a884', lastMessage: conversation.lastMessage,
+    avatarType: conversation.contactAvatarUrl ? 'image' : conversation.isGroup ? 'group' : 'initials', avatarBg: '#00a884', isGroup: conversation.isGroup, lastMessage: conversation.lastMessage,
     lastMessageByMe: conversation.lastMessageByCurrentUser, time: new Date(conversation.lastActivityAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     lastActivityAt: new Date(conversation.lastActivityAt * 1000).toISOString(), unreadCount: conversation.unreadCount,
     channelName: inbox?.name || conversation.channelType || 'Canal', assignedAgent: conversation.assigneeName || undefined,

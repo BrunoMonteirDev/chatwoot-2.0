@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ConversationMessage } from '../../domain/currentUser';
-import { mergeRealtimeMessage } from './useConversationMessages';
+import { mergeRealtimeMessage, optimisticReactionList } from './useConversationMessages';
 
 const message = (overrides: Partial<ConversationMessage> = {}): ConversationMessage => ({
   id: 10, conversationId: 31, kind: 'outgoing', contentType: 'text', content: 'Olá', createdAt: 100,
@@ -20,5 +20,16 @@ describe('mergeRealtimeMessage', () => {
     const withEarlier = mergeRealtimeMessage(duplicate, message({ id: 98, echoId: undefined, createdAt: 90 }));
     expect(withEarlier).toHaveLength(2);
     expect(withEarlier.map(item => item.id)).toEqual([98, 99]);
+  });
+
+  it('troca e remove apenas a reaction do próprio atendente', () => {
+    const initial = [{ sender_id: 'self', emoji: '❤️', transport: 'evolution', origin: 'platform' }, { sender_id: 'contact:5511', emoji: '👍', transport: 'evolution', origin: 'contact' }];
+    expect(optimisticReactionList(initial, 'evolution', '😂')).toEqual([
+      { sender_id: 'contact:5511', emoji: '👍', transport: 'evolution', origin: 'contact' },
+      { sender_id: 'self', emoji: '😂', transport: 'evolution', origin: 'platform' },
+    ]);
+    expect(optimisticReactionList(initial, 'evolution', '❤️')).toEqual([
+      { sender_id: 'contact:5511', emoji: '👍', transport: 'evolution', origin: 'contact' },
+    ]);
   });
 });

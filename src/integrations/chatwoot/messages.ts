@@ -17,6 +17,7 @@ export interface CreateMessageParams {
   private: boolean;
   echoId: string;
   files?: File[];
+  inReplyTo?: number;
 }
 
 export interface MessageHistoryPage {
@@ -40,10 +41,10 @@ export const messageService = {
     return { messages, hasOlderMessages: messages.length === MESSAGE_PAGE_SIZE };
   },
 
-  async create({ accountId, conversationId, content, private: isPrivate, echoId, files = [] }: CreateMessageParams): Promise<ConversationMessage> {
+  async create({ accountId, conversationId, content, private: isPrivate, echoId, files = [], inReplyTo }: CreateMessageParams): Promise<ConversationMessage> {
     const payload = files.length
-      ? buildAttachmentPayload(content, isPrivate, echoId, files)
-      : { content, private: isPrivate, echo_id: echoId };
+      ? buildAttachmentPayload(content, isPrivate, echoId, files, inReplyTo)
+      : { content, private: isPrivate, echo_id: echoId, ...(inReplyTo ? { content_attributes: { in_reply_to: inReplyTo } } : {}) };
     const response = await chatwootApiClient.post<ChatwootMessageDto>(
       `/api/v1/accounts/${accountId}/conversations/${conversationId}/messages`,
       payload
@@ -55,11 +56,12 @@ export const messageService = {
   },
 };
 
-const buildAttachmentPayload = (content: string, isPrivate: boolean, echoId: string, files: File[]): FormData => {
+const buildAttachmentPayload = (content: string, isPrivate: boolean, echoId: string, files: File[], inReplyTo?: number): FormData => {
   const formData = new FormData();
   if (content) formData.append('content', content);
   files.forEach((file) => formData.append('attachments[]', file));
   formData.append('private', String(isPrivate));
   formData.append('echo_id', echoId);
+  if (inReplyTo) formData.append('content_attributes', JSON.stringify({ in_reply_to: inReplyTo }));
   return formData;
 };

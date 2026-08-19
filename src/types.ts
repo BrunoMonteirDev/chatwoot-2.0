@@ -20,6 +20,8 @@ export interface Attachment {
 }
 
 export interface ReplyTo {
+  id?: string;
+  externalId?: string | null;
   senderName: string;
   text: string;
   color?: string;
@@ -30,6 +32,13 @@ export interface LinkPreview {
   url: string;
   description?: string;
   title?: string;
+}
+
+export interface MessageReaction {
+  emoji: string;
+  senderId: string;
+  transport: 'evolution' | 'meta_cloud';
+  origin?: 'contact' | 'mobile' | 'platform';
 }
 
 export interface Message {
@@ -52,6 +61,13 @@ export interface Message {
   isPrivate?: boolean;
   isActivity?: boolean;
   isStarred?: boolean;
+  reactions?: MessageReaction[];
+  sourceId?: string | null;
+  whatsappTransport?: 'evolution' | 'meta_cloud' | null;
+  whatsappRemoteJid?: string | null;
+  whatsappFromMe?: boolean | null;
+  isEdited?: boolean;
+  isRevoked?: boolean;
 }
 
 export interface Tag {

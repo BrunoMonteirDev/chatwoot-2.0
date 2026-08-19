@@ -49,6 +49,7 @@ export interface ConversationSummary {
   teamId: number | null;
   teamName: string | null;
   labels: string[];
+  isGroup: boolean;
 }
 
 export interface ContactProfile {
@@ -125,6 +126,7 @@ export interface ConversationMessage {
   updatedAt: number | null;
   status: 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | null;
   echoId?: string;
+  sourceId?: string | null;
   error?: string | null;
   senderName: string | null;
   senderAvatarUrl: string | null;

@@ -69,7 +69,7 @@ export interface ChatwootInboxesResponse {
   payload: ChatwootInboxDto[];
 }
 
-interface ChatwootContactSummaryDto { id?: number; name?: string; thumbnail?: string | null; }
+interface ChatwootContactSummaryDto { id?: number; name?: string; thumbnail?: string | null; additional_attributes?: Record<string, unknown> | null; }
 interface ChatwootMessagePreviewDto { content?: string | null; message_type?: number; private?: boolean; attachments?: unknown[]; }
 interface ChatwootAgentSummaryDto { id?: number; name?: string; available_name?: string; }
 interface ChatwootTeamSummaryDto { id?: number; name?: string; }
@@ -156,6 +156,7 @@ export interface ChatwootMessageDto {
   sender?: { name?: string; available_name?: string; thumbnail?: string | null } | null;
   attachments?: ChatwootAttachmentDto[] | null;
   echo_id?: string;
+  source_id?: string | null;
 }
 
 export interface ChatwootMessagesResponse {

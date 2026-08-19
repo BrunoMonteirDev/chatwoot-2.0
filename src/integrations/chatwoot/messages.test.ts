@@ -37,6 +37,19 @@ describe('messageService', () => {
     expect(vi.mocked(fetch).mock.calls[0][1]).toMatchObject({ method: 'POST', body: JSON.stringify({ content: 'Nota interna', private: true, echo_id: 'echo-52' }) });
   });
 
+  it('envia a referência da mensagem original no contrato suportado pelo MessageBuilder', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
+      id: 54, conversation_id: 31, content: 'Resposta', message_type: 1,
+      content_type: 'text', status: 'sent', private: false, created_at: 103, attachments: [],
+      content_attributes: { in_reply_to: 51 },
+    }), { status: 200 }));
+
+    await messageService.create({ accountId: 2, conversationId: 31, content: 'Resposta', private: false, echoId: 'echo-54', inReplyTo: 51 });
+    expect(vi.mocked(fetch).mock.calls[0][1]).toMatchObject({
+      body: JSON.stringify({ content: 'Resposta', private: false, echo_id: 'echo-54', content_attributes: { in_reply_to: 51 } }),
+    });
+  });
+
   it('envia anexos como multipart sem alterar o contrato JSON de mensagens simples', async () => {
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
       id: 53, conversation_id: 31, content: 'Veja o arquivo', message_type: 1,

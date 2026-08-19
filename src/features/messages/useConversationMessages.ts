@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ConversationMessage } from '../../domain/currentUser';
 import { errorMessageForUser } from '../../integrations/chatwoot/errors';
 import { messageService } from '../../integrations/chatwoot/messages';
+import { parseExternalMessageId } from '../../integrations/whatsapp/provider';
+import { fallbackRemoteJid, whatsappReactionService, type WhatsAppReactionTransport } from '../../integrations/whatsapp/reactions';
+import { whatsappMessageMutationService } from '../../integrations/whatsapp/messageMutations';
 
 export const mergeRealtimeMessage = (current: ConversationMessage[], incoming: ConversationMessage): ConversationMessage[] => {
   const index = current.findIndex(message => message.id === incoming.id || (incoming.echoId && message.echoId === incoming.echoId));
@@ -14,7 +17,29 @@ export const mergeRealtimeMessage = (current: ConversationMessage[], incoming: C
   return [...current, incoming].sort((a, b) => a.createdAt - b.createdAt || a.id - b.id);
 };
 
-export const useConversationMessages = (accountId: number | null, conversationId: number | null) => {
+type StoredReaction = { sender_id: string; emoji: string; transport: WhatsAppReactionTransport; origin: 'contact' | 'mobile' | 'platform' };
+
+const storedReactions = (value: unknown): StoredReaction[] => Array.isArray(value)
+  ? value.flatMap((item): StoredReaction[] => {
+    if (!item || typeof item !== 'object') return [];
+    const reaction = item as Record<string, unknown>;
+    if (typeof reaction.sender_id !== 'string' || typeof reaction.emoji !== 'string' || (reaction.transport !== 'evolution' && reaction.transport !== 'meta_cloud')) return [];
+    return [{ sender_id: reaction.sender_id, emoji: reaction.emoji, transport: reaction.transport, origin: reaction.origin === 'contact' || reaction.origin === 'mobile' || reaction.origin === 'platform' ? reaction.origin : 'contact' }];
+  })
+  : [];
+
+const reactionListEquals = (left: unknown, right: StoredReaction[]) => JSON.stringify(storedReactions(left)) === JSON.stringify(right);
+
+export const optimisticReactionList = (current: unknown, transport: WhatsAppReactionTransport, emoji: string): StoredReaction[] => {
+  const reactions = storedReactions(current);
+  const own = reactions.find((reaction) => reaction.sender_id === 'self' && reaction.transport === transport);
+  const withoutOwn = reactions.filter((reaction) => reaction.sender_id !== 'self' || reaction.transport !== transport);
+  // Choosing the same emoji toggles it off; choosing a different one replaces
+  // our old reaction while retaining reactions made by the contact.
+  return own?.emoji === emoji || !emoji ? withoutOwn : [...withoutOwn, { sender_id: 'self', emoji, transport, origin: 'platform' }];
+};
+
+export const useConversationMessages = (accountId: number | null, conversationId: number | null, inboxId: number | null, fallbackPhoneNumber?: string | null) => {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -23,6 +48,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
   const abortRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
   const inFlightEchoIds = useRef(new Set<string>());
+  const reactionInFlight = useRef(new Set<string>());
 
   const load = useCallback(async (before?: number, prepend = false) => {
     if (!accountId || !conversationId) return;
@@ -65,7 +91,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
 
   const createEchoId = () => globalThis.crypto?.randomUUID?.() || `cw-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-  const send = useCallback(async (content: string, isPrivate: boolean, files: File[] = []) => {
+  const send = useCallback(async (content: string, isPrivate: boolean, files: File[] = [], inReplyTo?: number) => {
     if (!accountId || !conversationId || (!content.trim() && files.length === 0)) return null;
     const echoId = createEchoId();
     const optimistic: ConversationMessage = {
@@ -82,13 +108,13 @@ export const useConversationMessages = (accountId: number | null, conversationId
       senderAvatarUrl: null,
       origin: isPrivate ? null : 'platform',
       attachments: [],
-      contentAttributes: {},
+      contentAttributes: inReplyTo ? { in_reply_to: inReplyTo } : {},
     };
     inFlightEchoIds.current.add(echoId);
     setMessages(current => [...current, optimistic]);
     setStatus('ready');
     try {
-      const created = await messageService.create({ accountId, conversationId, content: optimistic.content, private: isPrivate, echoId, files });
+      const created = await messageService.create({ accountId, conversationId, content: optimistic.content, private: isPrivate, echoId, files, inReplyTo });
       setMessages(current => current.map(message => message.echoId === echoId || message.id === optimistic.id ? created : message));
       return created;
     } catch (cause) {
@@ -129,6 +155,63 @@ export const useConversationMessages = (accountId: number | null, conversationId
     }
   }, [accountId, conversationId]);
 
+  const react = useCallback(async (messageId: number, selectedEmoji: string) => {
+    if (!inboxId || !conversationId || messageId < 1) return false;
+    const target = messages.find((message) => message.id === messageId);
+    if (!target || !target.sourceId) return false;
+    const sourceTransport = target.contentAttributes.whatsapp_transport;
+    const externalTransport = parseExternalMessageId(target.sourceId)?.provider;
+    const transport = sourceTransport === 'evolution' || sourceTransport === 'meta_cloud' ? sourceTransport : externalTransport;
+    const remoteJid = typeof target.contentAttributes.whatsapp_remote_jid === 'string'
+      ? target.contentAttributes.whatsapp_remote_jid
+      : fallbackRemoteJid(fallbackPhoneNumber);
+    if (!transport || !remoteJid) return false;
+    const operationId = `${messageId}:self:${transport}`;
+    if (reactionInFlight.current.has(operationId)) return false;
+    const beforeAttributes = target.contentAttributes;
+    const nextReactions = optimisticReactionList(beforeAttributes.whatsapp_reactions, transport, selectedEmoji);
+    const expectedAttributes = { ...beforeAttributes, whatsapp_reactions: nextReactions };
+    reactionInFlight.current.add(operationId);
+    setMessages(current => current.map((message) => message.id === messageId ? { ...message, contentAttributes: expectedAttributes } : message));
+    try {
+      await whatsappReactionService.send({
+        inboxId,
+        conversationId,
+        sourceId: target.sourceId,
+        remoteJid,
+        targetFromMe: typeof target.contentAttributes.whatsapp_from_me === 'boolean' ? target.contentAttributes.whatsapp_from_me : target.kind === 'outgoing',
+        participantJid: typeof target.contentAttributes.whatsapp_participant_jid === 'string' ? target.contentAttributes.whatsapp_participant_jid : null,
+        transport,
+        emoji: nextReactions.find((reaction) => reaction.sender_id === 'self' && reaction.transport === transport)?.emoji || '',
+      });
+      return true;
+    } catch {
+      // Do not clobber a newer ActionCable update that may have reached the
+      // browser while this request was failing.
+      setMessages(current => current.map((message) => message.id === messageId && reactionListEquals(message.contentAttributes.whatsapp_reactions, nextReactions)
+        ? { ...message, contentAttributes: beforeAttributes }
+        : message));
+      return false;
+    } finally {
+      reactionInFlight.current.delete(operationId);
+    }
+  }, [conversationId, fallbackPhoneNumber, inboxId, messages]);
+
+  const mutate = useCallback(async (operation: 'edit' | 'revoke', messageId: number, content?: string) => {
+    if (!inboxId || messageId < 1) return false;
+    const target = messages.find(message => message.id === messageId);
+    if (!target?.sourceId || target.contentAttributes.whatsapp_transport !== 'evolution') return false;
+    const remoteJid = typeof target.contentAttributes.whatsapp_remote_jid === 'string' ? target.contentAttributes.whatsapp_remote_jid : fallbackRemoteJid(fallbackPhoneNumber);
+    if (!remoteJid) return false;
+    try {
+      const updated = await whatsappMessageMutationService.send(operation, {
+        inboxId, sourceId: target.sourceId, remoteJid, targetFromMe: typeof target.contentAttributes.whatsapp_from_me === 'boolean' ? target.contentAttributes.whatsapp_from_me : target.kind === 'outgoing', participantJid: typeof target.contentAttributes.whatsapp_participant_jid === 'string' ? target.contentAttributes.whatsapp_participant_jid : null, transport: 'evolution', ...(content ? { content } : {}),
+      });
+      setMessages(current => current.map(message => message.id === messageId ? { ...message, content: updated.content, contentAttributes: updated.content_attributes } : message));
+      return true;
+    } catch { return false; }
+  }, [fallbackPhoneNumber, inboxId, messages]);
+
   const upsertRealtimeMessage = useCallback((message: ConversationMessage) => {
     if (message.conversationId !== conversationId) return;
     setMessages(current => mergeRealtimeMessage(current, message));
@@ -149,5 +232,5 @@ export const useConversationMessages = (accountId: number | null, conversationId
     }
   }, [accountId, conversationId]);
 
-  return { messages, status, error, hasOlderMessages, isLoadingOlder, retry: () => load(), loadOlder, send, retrySend, remove, upsertRealtimeMessage, refreshLatest };
+  return { messages, status, error, hasOlderMessages, isLoadingOlder, retry: () => load(), loadOlder, send, retrySend, remove, react, edit: (messageId: number, content: string) => mutate('edit', messageId, content), revoke: (messageId: number) => mutate('revoke', messageId), upsertRealtimeMessage, refreshLatest };
 };

@@ -5,11 +5,10 @@ describe('evolutionService', () => {
   beforeEach(() => { vi.resetModules(); vi.stubGlobal('fetch', vi.fn()); });
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
-  it('falha explicitamente quando a configuração de desenvolvimento não existe', async () => {
-    vi.stubEnv('VITE_EVOLUTION_BASE_URL', '');
-    vi.stubEnv('VITE_EVOLUTION_API_KEY', '');
+  it('falha explicitamente quando a URL pública do bridge não existe', async () => {
+    vi.stubEnv('VITE_BRIDGE_PUBLIC_URL', '');
     const { evolutionService } = await import('./client');
-    await expect(evolutionService.createInstance('teste')).rejects.toThrow('VITE_EVOLUTION_BASE_URL');
+    await expect(evolutionService.createInstance('teste')).rejects.toThrow('VITE_BRIDGE_PUBLIC_URL');
   });
 
   it('extrai a imagem base64 aninhada em qrcode', async () => {

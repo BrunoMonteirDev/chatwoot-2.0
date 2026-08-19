@@ -37,7 +37,7 @@ import {
   SlidersHorizontal,
   Star,
 } from 'lucide-react';
-import { Chat, Message, Attachment, ReplyTo, LinkPreview } from '../types';
+import { Chat, Message, Attachment, ReplyTo, LinkPreview, MessageReaction } from '../types';
 import { WhatsAppDoodleBg, WallpaperId } from './WhatsAppDoodleBg';
 import { EmojiPicker } from './EmojiPicker';
 import { AttachmentMenu } from './AttachmentMenu';
@@ -47,7 +47,7 @@ import { QuickResponsesPopup } from './QuickResponsesPopup';
 import { MentionsPopup, defaultGroupMembers, GroupMember } from './MentionsPopup';
 import { ContextMenu } from './ContextMenu';
 import { useContextMenu } from '../hooks/useContextMenu';
-import { getMessageContextMenuItems } from '../utils/contextMenuActions';
+import { getMessageContextMenuItems, QUICK_REACTION_EMOJIS } from '../utils/contextMenuActions';
 import { ConversationManagementMenu } from './ConversationManagementMenu';
 import { ContactDetailsPanel } from './ContactDetailsPanel';
 import type { ConversationManagementCatalogs } from '../integrations/chatwoot/conversationManagement';
@@ -56,6 +56,7 @@ import type { RealtimeConnectionStatus } from '../integrations/chatwoot/realtime
 import type { ContactNote, ContactProfile } from '../domain/currentUser';
 import type { ContactUpdate } from '../integrations/chatwoot/contacts';
 import { useCannedResponses } from '../features/cannedResponses/useCannedResponses';
+import { MetaTemplatePicker } from './MetaTemplatePicker';
 
 
 // Helper to format WhatsApp Markdown, URLs, Mentions, Bold (*), Italic (_), Strikethrough (~), Code (`)
@@ -208,6 +209,40 @@ const QuotedReplyBox: React.FC<{
       <div className="text-xs text-[#8696a0] truncate mt-0.5">
         {replyTo.text}
       </div>
+    </div>
+  );
+};
+
+const MessageReactions: React.FC<{
+  reactions: MessageReaction[];
+  isDarkMode: boolean;
+  onSelect: (emoji: string) => void;
+}> = ({ reactions, isDarkMode, onSelect }) => {
+  const grouped: Array<{ emoji: string; count: number; own: boolean }> = [];
+  reactions.forEach((reaction) => {
+    const group = grouped.find((item) => item.emoji === reaction.emoji);
+    if (group) {
+      group.count += 1;
+      group.own ||= reaction.senderId === 'self';
+    } else {
+      grouped.push({ emoji: reaction.emoji, count: 1, own: reaction.senderId === 'self' });
+    }
+  });
+  return (
+    <div className="-mt-1 flex flex-wrap gap-1 px-1">
+      {grouped.map((reaction) => (
+        <button
+          key={reaction.emoji}
+          type="button"
+          onClick={(event) => { event.stopPropagation(); onSelect(reaction.emoji); }}
+          title={reaction.own ? 'Remover sua reação' : 'Reagir com este emoji'}
+          className={`rounded-full border px-1.5 py-0.5 text-xs shadow-sm transition-colors ${reaction.own
+            ? 'border-[#00a884] bg-[#00a884]/15'
+            : isDarkMode ? 'border-[#37464f] bg-[#202c33] hover:bg-[#2a3942]' : 'border-[#d1d7db] bg-white hover:bg-[#f0f2f5]'}`}
+        >
+          <span>{reaction.emoji}</span>{reaction.count > 1 && <span className="ml-1 text-[10px] text-[#667781] dark:text-[#aebac1]">{reaction.count}</span>}
+        </button>
+      ))}
     </div>
   );
 };
@@ -473,7 +508,7 @@ interface Props {
   chat: Chat;
   allChats?: Chat[];
   onSelectChat?: (chat: Chat) => void;
-  onSendMessage: (chatId: string, text: string, attachments?: File[], isPrivate?: boolean) => void | Promise<boolean | void>;
+  onSendMessage: (chatId: string, text: string, attachments?: File[], isPrivate?: boolean, replyTo?: ReplyTo | null) => void | Promise<boolean | void>;
   onImageClick: (url: string, title?: string, subtitle?: string) => void;
   onSearchInChat: () => void;
   isDarkMode?: boolean;
@@ -489,6 +524,9 @@ interface Props {
   onLoadOlderMessages?: () => void;
   onRetryMessage?: (messageId: string) => void;
   onDeleteMessage?: (messageId: string) => Promise<boolean>;
+  onEditMessage?: (messageId: string, content: string) => Promise<boolean>;
+  onRevokeMessage?: (messageId: string) => Promise<boolean>;
+  onReactMessage?: (messageId: string, emoji: string) => Promise<boolean> | boolean;
   conversation?: ConversationSummary | null;
   managementCatalogs?: ConversationManagementCatalogs;
   managementCatalogStatus?: 'idle' | 'loading' | 'ready' | 'error';
@@ -537,6 +575,9 @@ export const ChatArea: React.FC<Props> = ({
   onLoadOlderMessages,
   onRetryMessage,
   onDeleteMessage,
+  onEditMessage,
+  onRevokeMessage,
+  onReactMessage,
   conversation,
   managementCatalogs,
   managementCatalogStatus = 'idle' as const,
@@ -572,6 +613,7 @@ export const ChatArea: React.FC<Props> = ({
   const [ticketStatus, setTicketStatus] = useState<'resolver' | 'resolvido' | 'adiado' | 'pendente'>('resolver');
   const [showResolverMenu, setShowResolverMenu] = useState(false);
   const [isExpandedInput, setIsExpandedInput] = useState(false);
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -608,6 +650,10 @@ export const ChatArea: React.FC<Props> = ({
   // Context Menu State
   const { menuState, openContextMenu, closeContextMenu } = useContextMenu();
   const [messagePendingDeletion, setMessagePendingDeletion] = useState<Message | null>(null);
+  const [messagePendingRevoke, setMessagePendingRevoke] = useState<Message | null>(null);
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+  const [editingText, setEditingText] = useState('');
+  const [reactionFailureId, setReactionFailureId] = useState<string | null>(null);
   const [, forceUpdate] = useState(0);
 
   // Actions are reflected directly in the UI; avoid persistent pop-up notices.
@@ -616,7 +662,7 @@ export const ChatArea: React.FC<Props> = ({
   const handleMessageContextMenu = (e: React.MouseEvent, msg: Message) => {
     const items = getMessageContextMenuItems(msg, {
       onReply: (m) => {
-        setReplyTo({ id: m.id, name: m.senderName || 'Mensagem', text: m.text });
+        setReplyTo({ id: m.id, senderName: m.sender === 'me' ? 'Você' : m.senderName || 'Contato', text: m.text || (m.attachments?.length ? 'Mídia' : 'Mensagem') });
         addToast('Respondendo à mensagem selecionada', 'info');
       },
       onCopyText: (m) => {
@@ -628,37 +674,23 @@ export const ChatArea: React.FC<Props> = ({
           addToast('Mensagem sem texto para copiar', 'error');
         }
       },
-      onStarMessage: (m) => {
-        m.isStarred = !m.isStarred;
-        forceUpdate((n) => n + 1);
-        addToast(m.isStarred ? 'Mensagem favoritada com estrela' : 'Estrela removida da mensagem');
-      },
-      onForwardMessage: (m) => {
-        const content = m.text || 'Mídia / Anexo';
-        navigator.clipboard.writeText(`[Encaminhado]: ${content}`);
-        setInputText(`[Encaminhado]: ${content}`);
-        addToast('Mensagem inserida no campo de envio para encaminhamento');
-      },
       onDeleteMessage: (m) => {
         setMessagePendingDeletion(m);
       },
-      onPrivateNoteToggle: (m) => {
-        m.isPrivate = !m.isPrivate;
-        forceUpdate((n) => n + 1);
-        addToast(
-          m.isPrivate
-            ? 'Mensagem convertida para Nota Privada'
-            : 'Nota Privada convertida para mensagem pública',
-          'info'
-        );
-      },
-      onPrintMessage: (m) => {
-        addToast('Gerando visualização de impressão...', 'info');
-        setTimeout(() => window.print(), 300);
-      },
+      onEditMessage: (m) => { setEditingMessage(m); setEditingText(m.text || ''); },
+      onRevokeMessage: (m) => setMessagePendingRevoke(m),
+      onReact: (m, emoji) => void handleReaction(m, emoji),
     });
 
     openContextMenu(e, items, 'Ações da Mensagem');
+  };
+
+  const handleReaction = async (message: Message, emoji: string) => {
+    const applied = await onReactMessage?.(message.id, emoji);
+    if (applied === false) {
+      setReactionFailureId(message.id);
+      window.setTimeout(() => setReactionFailureId((current) => current === message.id ? null : current), 3_500);
+    }
   };
 
   // Derived group members for mentions popup
@@ -901,7 +933,7 @@ export const ChatArea: React.FC<Props> = ({
 
   const sendRecordedAudio = (file: File) => {
     setIsSendingMessage(true);
-    void Promise.resolve(onSendMessage(chat.id, '', [file], messageMode === 'privada')).then((sent) => {
+    void Promise.resolve(onSendMessage(chat.id, '', [file], messageMode === 'privada', replyTo)).then((sent) => {
       if (sent === false) addToast('Não foi possível enviar o áudio.', 'error');
     }).catch(() => addToast('Não foi possível enviar o áudio.', 'error')).finally(() => setIsSendingMessage(false));
   };
@@ -968,7 +1000,7 @@ export const ChatArea: React.FC<Props> = ({
     const files = selectedFiles;
     const draftKey = `${chat.id}:${messageMode}:${content}:${files.map((file) => `${file.name}:${file.size}`).join('|')}`;
     if (sendingDraftsRef.current.has(draftKey)) return;
-    const submission = onSendMessage(chat.id, content, files, messageMode === 'privada');
+    const submission = onSendMessage(chat.id, content, files, messageMode === 'privada', replyTo);
     if (submission && typeof (submission as Promise<void>).then === 'function') {
       sendingDraftsRef.current.add(draftKey);
       setIsSendingMessage(true);
@@ -1472,19 +1504,20 @@ export const ChatArea: React.FC<Props> = ({
                       : isDarkMode
                       ? 'bg-[#202c33] border-transparent text-[#e9edef] rounded-tl-none'
                       : 'bg-white border-transparent text-[#111b21] rounded-tl-none'
-                  }`}
+                    }`}
                 >
+                  {!msg.isPrivate && onReactMessage && (
+                    <div className={`absolute -top-8 ${isMe ? 'right-0' : 'left-0'} hidden group-hover:flex items-center gap-0.5 rounded-full border px-1 py-0.5 shadow-lg z-20 ${isDarkMode ? 'border-[#37464f] bg-[#202c33]' : 'border-[#d1d7db] bg-white'}`}>
+                      {QUICK_REACTION_EMOJIS.map((emoji) => (
+                        <button key={emoji} type="button" onClick={(event) => { event.stopPropagation(); void handleReaction(msg, emoji); }} className="rounded-full px-0.5 text-sm hover:bg-black/10" title={`Reagir ${emoji}`}>{emoji}</button>
+                      ))}
+                    </div>
+                  )}
                   {/* Private Note Header Badge */}
                   {msg.isPrivate && (
                     <div className="flex items-center space-x-1.5 text-xs font-semibold pb-1 mb-1 border-b border-amber-500/20 text-amber-500 dark:text-amber-400">
                       <Lock className="w-3.5 h-3.5 shrink-0" />
                       <span>Mensagem Privada (Nota Interna)</span>
-                    </div>
-                  )}
-
-                  {isMe && !msg.isPrivate && msg.origin && (
-                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/65">
-                      {msg.origin === 'mobile' ? 'Enviado pelo aparelho' : 'Enviado pela plataforma'}
                     </div>
                   )}
 
@@ -1501,6 +1534,8 @@ export const ChatArea: React.FC<Props> = ({
 
                   {/* Quoted Reply Message */}
                   {msg.replyTo && <QuotedReplyBox replyTo={msg.replyTo} />}
+
+                  {editingMessage?.id === msg.id ? <div className="mb-2 space-y-2"><textarea value={editingText} onChange={event => setEditingText(event.target.value)} rows={3} className="w-full rounded border border-[#00a884] bg-black/15 p-2 text-sm outline-none" /><div className="flex justify-end gap-2"><button type="button" onClick={() => setEditingMessage(null)} className="text-xs text-[#aebac1]">Cancelar</button><button type="button" disabled={!editingText.trim()} onClick={() => { const target = editingMessage; if (!target || !onEditMessage) return; void onEditMessage(target.id, editingText.trim()).then(ok => { if (ok) setEditingMessage(null); }); }} className="rounded bg-[#00a884] px-2 py-1 text-xs font-bold text-[#0b141a] disabled:opacity-50">Salvar</button></div></div> : null}
 
                   {/* Link Preview Card */}
                   {msg.linkPreview && <LinkPreviewBox linkPreview={msg.linkPreview} />}
@@ -1603,6 +1638,16 @@ export const ChatArea: React.FC<Props> = ({
                       >
                         {msg.time}
                       </span>
+                      {msg.isEdited && !msg.isRevoked && <span className="text-[10px] text-[#8696a0]">editada</span>}
+                      {isMe && !msg.isPrivate && msg.origin && (
+                        <span
+                          title={msg.origin === 'mobile' ? 'Enviado pelo aparelho' : 'Enviado pela plataforma'}
+                          aria-label={msg.origin === 'mobile' ? 'Enviado pelo aparelho' : 'Enviado pela plataforma'}
+                          className="text-[10px] leading-none text-[#8696a0]"
+                        >
+                          {msg.origin === 'mobile' ? '◉' : '⌁'}
+                        </span>
+                      )}
                       {msg.isStarred && (
                         <Star className="w-3 h-3 text-amber-400 fill-amber-400 ml-0.5" />
                       )}
@@ -1628,6 +1673,12 @@ export const ChatArea: React.FC<Props> = ({
                     </div>
                   )}
                 </div>
+                {msg.reactions && msg.reactions.length > 0 && (
+                  <MessageReactions reactions={msg.reactions} isDarkMode={isDarkMode} onSelect={(emoji) => void handleReaction(msg, emoji)} />
+                )}
+                {reactionFailureId === msg.id && (
+                  <div className="mt-1 px-1 text-[11px] text-red-400">Não foi possível enviar a reação.</div>
+                )}
               </div>}
             </React.Fragment>
           );
@@ -1760,7 +1811,16 @@ export const ChatArea: React.FC<Props> = ({
             </div>
 
             {/* Top Right Actions (AI & Expand) */}
-            <div className="flex items-center space-x-1.5 text-[#8696a0]">
+            <div className="relative flex items-center space-x-1.5 text-[#8696a0]">
+              {conversation && <button
+                type="button"
+                onClick={() => setShowTemplatePicker((current) => !current)}
+                title="Enviar template Meta"
+                className="rounded-md px-1.5 py-1 text-xs font-semibold hover:bg-white/5 hover:text-[#00a884]"
+              >
+                Template
+              </button>}
+              {showTemplatePicker && conversation && <MetaTemplatePicker inboxId={conversation.inboxId} conversationId={conversation.id} onClose={() => setShowTemplatePicker(false)} />}
               <button
                 type="button"
                 onClick={() => setShowQuickResponsesPopup((prev) => !prev)}
@@ -2244,6 +2304,12 @@ export const ChatArea: React.FC<Props> = ({
         <div className={`w-full max-w-sm rounded-2xl border p-5 shadow-2xl ${isDarkMode ? 'border-[#2a3942] bg-[#182228] text-[#e9edef]' : 'border-[#d1d7db] bg-white text-[#111b21]'}`}>
           <div className="flex items-start gap-3"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-red-500/15 text-red-400"><Trash2 className="h-5 w-5" /></div><div><h3 id="delete-message-title" className="text-sm font-bold">Excluir mensagem?</h3><p className="mt-1 text-xs leading-5 text-[#8696a0]">Esta ação removerá a mensagem desta conversa.</p></div></div>
           <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setMessagePendingDeletion(null)} className="rounded-lg px-3 py-2 text-xs font-bold text-[#aebac1] hover:bg-white/5">Cancelar</button><button type="button" onClick={() => { const message = messagePendingDeletion; setMessagePendingDeletion(null); if (onDeleteMessage) void onDeleteMessage(message.id); else { const idx = chat.messages.findIndex(item => item.id === message.id); if (idx >= 0) { chat.messages.splice(idx, 1); forceUpdate(value => value + 1); } } }} className="rounded-lg bg-red-500 px-3 py-2 text-xs font-bold text-white hover:bg-red-600">Excluir</button></div>
+        </div>
+      </div>}
+      {messagePendingRevoke && <div className="fixed inset-0 z-[10001] grid place-items-center bg-black/65 p-4" role="dialog" aria-modal="true" aria-labelledby="revoke-message-title">
+        <div className={`w-full max-w-sm rounded-2xl border p-5 shadow-2xl ${isDarkMode ? 'border-[#2a3942] bg-[#182228] text-[#e9edef]' : 'border-[#d1d7db] bg-white text-[#111b21]'}`}>
+          <div className="flex items-start gap-3"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-red-500/15 text-red-400"><Trash2 className="h-5 w-5" /></div><div><h3 id="revoke-message-title" className="text-sm font-bold">Apagar para todos?</h3><p className="mt-1 text-xs leading-5 text-[#8696a0]">A mensagem será apagada no WhatsApp para todos os participantes.</p></div></div>
+          <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setMessagePendingRevoke(null)} className="rounded-lg px-3 py-2 text-xs font-bold text-[#aebac1] hover:bg-white/5">Cancelar</button><button type="button" onClick={() => { const message = messagePendingRevoke; setMessagePendingRevoke(null); if (onRevokeMessage) void onRevokeMessage(message.id); }} className="rounded-lg bg-red-500 px-3 py-2 text-xs font-bold text-white hover:bg-red-600">Apagar para todos</button></div>
         </div>
       </div>}
     </div>
