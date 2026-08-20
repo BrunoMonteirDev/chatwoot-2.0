@@ -4,7 +4,7 @@ export interface EvolutionInboxMetadata {
   evolution_provider: 'evolution';
   whatsapp_provider?: 'evolution';
   whatsapp_mode?: 'web' | 'hybrid';
-  whatsapp_transports?: Array<'evolution' | 'meta_cloud'>;
+  whatsapp_transports?: Array<'evolution' | 'waha' | 'meta_cloud'>;
   evolution_instance_name: string;
   evolution_instance_id?: string | null;
 }

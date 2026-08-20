@@ -28,6 +28,11 @@ export const inboxService = {
     return this.createEvolutionInbox(accountId, params);
   },
 
+  async updateName(accountId: number, inboxId: number, name: string): Promise<Inbox> {
+    const response = await chatwootApiClient.patch<ChatwootInboxDto>(`${root(accountId)}/inboxes/${inboxId}`, { name });
+    return normalizeInbox(response);
+  },
+
   async saveEvolutionMetadata(accountId: number, inboxId: number, metadata: EvolutionInboxMetadata, webhookUrl?: string): Promise<Inbox> {
     const response = await chatwootApiClient.patch<ChatwootInboxDto>(`${root(accountId)}/inboxes/${inboxId}`, {
       channel: { additional_attributes: metadata, ...(webhookUrl ? { webhook_url: webhookUrl } : {}) },
@@ -37,9 +42,9 @@ export const inboxService = {
 
   async saveWhatsAppTransport(accountId: number, inbox: Inbox, transport: WhatsAppTransport, patch: Record<string, unknown>, webhookUrl?: string): Promise<Inbox> {
     const current = inbox.additionalAttributes;
-    const declared = Array.isArray(current.whatsapp_transports) ? current.whatsapp_transports.filter((item): item is WhatsAppTransport => item === 'evolution' || item === 'meta_cloud') : [];
+    const declared = Array.isArray(current.whatsapp_transports) ? current.whatsapp_transports.filter((item): item is WhatsAppTransport => item === 'evolution' || item === 'waha' || item === 'meta_cloud') : [];
     const transports = [...new Set([...declared, ...(current.evolution_provider === 'evolution' ? ['evolution' as const] : []), ...(current.whatsapp_provider === 'meta_cloud' ? ['meta_cloud' as const] : []), transport])];
-    const mode = transports.length === 2 ? 'hybrid' : transports[0] === 'meta_cloud' ? 'official' : 'web';
+    const mode = transports.length > 1 ? 'hybrid' : transports[0] === 'meta_cloud' ? 'official' : 'web';
     const response = await chatwootApiClient.patch<ChatwootInboxDto>(`${root(accountId)}/inboxes/${inbox.id}`, {
       channel: { additional_attributes: { ...current, ...patch, whatsapp_mode: mode, whatsapp_transports: transports }, ...(webhookUrl ? { webhook_url: webhookUrl } : {}) },
     });

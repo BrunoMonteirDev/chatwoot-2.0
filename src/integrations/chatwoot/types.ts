@@ -83,6 +83,7 @@ export interface ChatwootConversationDto {
   updated_at?: number;
   last_activity_at: number;
   labels: string[];
+  participant_ids?: number[];
   messages: ChatwootMessagePreviewDto[];
   meta: { sender?: ChatwootContactSummaryDto; channel?: string | null; assignee?: ChatwootAgentSummaryDto; team?: ChatwootTeamSummaryDto };
 }

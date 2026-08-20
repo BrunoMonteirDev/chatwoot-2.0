@@ -43,6 +43,13 @@ describe('inboxService', () => {
     expect(vi.mocked(fetch).mock.calls[1][1]).toMatchObject({ method: 'PATCH', body: JSON.stringify({ inbox_id: 5, user_ids: [2] }) });
   });
 
+  it('altera o nome da caixa pela API da conta', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ id: 5, name: 'WhatsApp Vendas', avatar_url: null, channel_type: 'Channel::Api' }), { status: 200 }));
+    await expect(inboxService.updateName(12, 5, 'WhatsApp Vendas')).resolves.toMatchObject({ id: 5, name: 'WhatsApp Vendas' });
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/v1/accounts/12/inboxes/5');
+    expect(vi.mocked(fetch).mock.calls[0][1]).toMatchObject({ method: 'PATCH', body: JSON.stringify({ name: 'WhatsApp Vendas' }) });
+  });
+
   it('adiciona um transport sem apagar o outro ou expor credenciais', async () => {
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ id: 5, name: 'WhatsApp', avatar_url: null, channel_type: 'Channel::Api', additional_attributes: {} }), { status: 200 }));
     const inbox = { id: 5, name: 'WhatsApp', avatarUrl: null, channelType: 'Channel::Api', channelId: 1, webhookUrl: null, inboxIdentifier: 'token', additionalAttributes: { whatsapp_transports: ['meta_cloud'], meta_waba_id: 'waba', meta_phone_number_id: 'phone' } };

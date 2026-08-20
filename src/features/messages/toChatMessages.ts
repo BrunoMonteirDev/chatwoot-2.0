@@ -35,7 +35,7 @@ export const toChatMessages = (items: ConversationMessage[]): Message[] => items
   attachments: message.attachments.map(toAttachment),
   reactions: reactionsForMessage(message),
   sourceId: message.sourceId,
-  whatsappTransport: message.contentAttributes.whatsapp_transport === 'evolution' || message.contentAttributes.whatsapp_transport === 'meta_cloud'
+  whatsappTransport: message.contentAttributes.whatsapp_transport === 'evolution' || message.contentAttributes.whatsapp_transport === 'waha' || message.contentAttributes.whatsapp_transport === 'meta_cloud'
     ? message.contentAttributes.whatsapp_transport
     : null,
   whatsappRemoteJid: typeof message.contentAttributes.whatsapp_remote_jid === 'string' ? message.contentAttributes.whatsapp_remote_jid : null,
@@ -52,7 +52,7 @@ const reactionsForMessage = (message: ConversationMessage): MessageReaction[] =>
   return value.flatMap((item): MessageReaction[] => {
     if (!item || typeof item !== 'object') return [];
     const reaction = item as Record<string, unknown>;
-    if (typeof reaction.emoji !== 'string' || !reaction.emoji || typeof reaction.sender_id !== 'string' || (reaction.transport !== 'evolution' && reaction.transport !== 'meta_cloud')) return [];
+    if (typeof reaction.emoji !== 'string' || !reaction.emoji || typeof reaction.sender_id !== 'string' || (reaction.transport !== 'evolution' && reaction.transport !== 'waha' && reaction.transport !== 'meta_cloud')) return [];
     return [{
       emoji: reaction.emoji,
       senderId: reaction.sender_id,
@@ -71,10 +71,16 @@ const replyForMessage = (message: ConversationMessage, allMessages: Conversation
       ? allMessages.find(item => item.sourceId === externalId)
       : undefined;
   if (!original) return undefined;
+  const attachment = original.attachments[0];
+  const mediaLabel = attachment?.kind === 'image' ? 'Foto'
+    : attachment?.kind === 'video' ? 'Vídeo'
+      : attachment?.kind === 'audio' ? 'Áudio'
+        : attachment ? 'Documento' : 'Mensagem';
   return {
     id: String(original.id),
     externalId: original.sourceId,
     senderName: original.kind === 'outgoing' || original.kind === 'private_note' ? 'Você' : original.senderName || 'Contato',
-    text: original.content || (original.attachments.length ? 'Mídia' : 'Mensagem'),
+    text: original.content || mediaLabel,
+    ...(attachment?.kind === 'image' && attachment.url ? { mediaPreviewUrl: attachment.thumbnailUrl || attachment.url } : {}),
   };
 };

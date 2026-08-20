@@ -208,8 +208,10 @@ export const NavRail: React.FC<Props> = ({
   };
 
   const handleInboxClick = (key: string) => {
+    // `onSelectInbox` owns navigation and already switches to the chats tab.
+    // Calling `onTabChange('chats')` immediately afterwards used stale state
+    // and rewrote the just-selected numeric inbox back to "todas".
     onSelectInbox?.(key);
-    onTabChange('chats');
   };
 
   const renderInboxRows = (variant: 'flyout' | 'expanded') => {

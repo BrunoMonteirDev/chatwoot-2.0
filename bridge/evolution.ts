@@ -52,6 +52,15 @@ export interface SentEvolutionMessage {
   fromMe: boolean;
 }
 
+// Evolution v2.3 validates one Unicode code point, whereas WhatsApp's red
+// heart from the browser is normally `U+2764 U+FE0F`. Strip presentation and
+// skin-tone modifiers only for this transport so the same visual reaction is
+// accepted by the provider. An empty string remains the WhatsApp operation
+// for removing a reaction.
+export const normalizeEvolutionReactionEmoji = (emoji: string) => emoji
+  .normalize('NFC')
+  .replace(/[\uFE0E\uFE0F\u{1F3FB}-\u{1F3FF}]/gu, '');
+
 const sentMessageFromResponse = async (response: Response): Promise<SentEvolutionMessage | null> => {
   const payload: unknown = await response.json().catch(() => null);
   if (!payload || typeof payload !== 'object') return null;
@@ -97,21 +106,50 @@ const evolutionRequest = (path: string, init: RequestInit = {}) => fetch(`${conf
   headers: { apikey: config.evolutionApiKey, Accept: 'application/json', ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...init.headers },
 });
 
+class EvolutionManagementError extends Error {
+  constructor(readonly status: number, readonly details: string) {
+    super(`Evolution ${status}: ${details || 'operação de instância recusada.'}`);
+  }
+}
+
 const managementResponse = async (path: string, init: RequestInit = {}) => {
   const response = await evolutionRequest(path, init);
-  if (!response.ok) throw new Error(`Evolution ${response.status}: operação de instância recusada.`);
+  if (!response.ok) {
+    // The Evolution API returns a useful, non-sensitive validation message for
+    // instance management. Keep it short so neither headers nor large payloads
+    // can accidentally reach logs or the browser.
+    const payload: unknown = await response.json().catch(() => null);
+    const root = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+    const nested = root.response && typeof root.response === 'object' ? root.response as Record<string, unknown> : {};
+    const message = Array.isArray(nested.message) ? nested.message.find((entry): entry is string => typeof entry === 'string')
+      : typeof root.message === 'string' ? root.message : '';
+    throw new EvolutionManagementError(response.status, message.slice(0, 240));
+  }
   return response.json().catch(() => ({}));
 };
 
 export const evolutionBridge = {
-  createInstance: (instanceName: string) => managementResponse('/instance/create', { method: 'POST', body: JSON.stringify({ instanceName, integration: 'WHATSAPP-BAILEYS', qrcode: true }) }),
+  async createInstance(instanceName: string) {
+    try {
+      return await managementResponse('/instance/create', { method: 'POST', body: JSON.stringify({ instanceName, integration: 'WHATSAPP-BAILEYS', qrcode: true }) });
+    } catch (error) {
+      // A previous attempt may have created the instance and then failed while
+      // configuring its webhook. Retrying must adopt that instance instead of
+      // forcing the operator to change its name.
+      if (!(error instanceof EvolutionManagementError) || !/already in use/i.test(error.details)) throw error;
+      await managementResponse(`/instance/connectionState/${encodeURIComponent(instanceName)}`);
+      return { instanceName, reused: true };
+    }
+  },
   getQrCode: (instanceName: string) => managementResponse(`/instance/connect/${encodeURIComponent(instanceName)}`),
   getConnection: (instanceName: string) => managementResponse(`/instance/connectionState/${encodeURIComponent(instanceName)}`),
   disconnect: (instanceName: string) => managementResponse(`/instance/logout/${encodeURIComponent(instanceName)}`, { method: 'DELETE' }),
   async configureWebhook(instanceName: string) {
     if (!config.publicUrl) throw new Error('BRIDGE_PUBLIC_URL é obrigatório para configurar o webhook Evolution.');
     return managementResponse(`/webhook/set/${encodeURIComponent(instanceName)}`, {
-      method: 'POST', body: JSON.stringify({ webhook: { enabled: true, url: `${config.publicUrl}/webhooks/evolution`, byEvents: false, base64: true, events: ['MESSAGES_UPSERT', 'MESSAGES_EDITED', 'MESSAGES_DELETE', 'GROUPS_UPSERT', 'GROUPS_UPDATE', 'GROUP_PARTICIPANTS_UPDATE'], headers: { 'x-bridge-secret': config.webhookSecret } } }),
+      // Evolution API v2.3 uses the singular GROUP_UPDATE event name. Using
+      // GROUPS_UPDATE makes the API reject the whole webhook configuration.
+      method: 'POST', body: JSON.stringify({ webhook: { enabled: true, url: `${config.publicUrl}/webhooks/evolution`, byEvents: false, base64: true, events: ['MESSAGES_UPSERT', 'MESSAGES_EDITED', 'MESSAGES_UPDATE', 'MESSAGES_DELETE', 'GROUPS_UPSERT', 'GROUP_UPDATE', 'GROUP_PARTICIPANTS_UPDATE'], headers: { 'x-bridge-secret': config.webhookSecret } } }),
     });
   },
   async downloadMedia(instance: string, media: IncomingEvolutionMedia): Promise<DownloadedEvolutionMedia> {
@@ -160,11 +198,15 @@ export const evolutionBridge = {
   async sendReaction(instance: string, target: EvolutionReactionTarget) {
     if (!target.remoteJid || target.remoteJid === 'status@broadcast') throw new Error('A mensagem de destino não é compatível com reactions Evolution.');
     if (target.remoteJid.endsWith('@g.us') && !target.fromMe && !target.participant) throw new Error('Uma reaction para mensagem de grupo exige o participante original.');
+    const emoji = normalizeEvolutionReactionEmoji(target.emoji);
+    if (emoji && !/^[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F000}-\u{1F02F}\u{1F0A0}-\u{1F0FF}\u{1F100}-\u{1F64F}\u{1F680}-\u{1F6FF}]$/u.test(emoji)) {
+      throw new Error('A reação selecionada não é compatível com a Evolution.');
+    }
     const response = await evolutionRequest(`/message/sendReaction/${encodeURIComponent(instance)}`, {
       method: 'POST',
       // Evolution v2 identifies the message by its original Baileys key. An
       // empty reaction is the documented WhatsApp operation for removal.
-      body: JSON.stringify({ key: { remoteJid: target.remoteJid, fromMe: target.fromMe, id: target.messageId, ...(target.participant ? { participant: target.participant } : {}) }, reaction: target.emoji }),
+      body: JSON.stringify({ key: { remoteJid: target.remoteJid, fromMe: target.fromMe, id: target.messageId, ...(target.participant ? { participant: target.participant } : {}) }, reaction: emoji }),
     });
     if (!response.ok) throw new Error(`Evolution ${response.status}: ${await response.text()}`);
   },

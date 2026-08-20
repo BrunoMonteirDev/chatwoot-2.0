@@ -1,14 +1,20 @@
 import { config } from './config.js';
 import type { DownloadedEvolutionMedia } from './evolution.js';
-import { transportConfigurationForInbox, type WhatsAppTransport, type WhatsAppTransportConfiguration } from './providers.js';
+import { externalMessageId, transportConfigurationForInbox, type WhatsAppTransport, type WhatsAppTransportConfiguration } from './providers.js';
 import type { StagedMetaHistoryMessage } from './metaHistoryStore.js';
 import type { EvolutionGroupParticipant } from './evolutionEvent.js';
 
 export type ApiInbox = { id: number; channel_type: string; inbox_identifier?: string; additional_attributes?: Record<string, unknown>; secret?: string };
 type Contact = { id: number; source_id: string };
-type Conversation = { id: number; status: string };
+type Conversation = { id: number; status: string; inbox_id?: number; last_activity_at?: number };
 type ConversationTarget = { id: number; inbox_id: number; meta?: { sender?: { phone_number?: string | null } }; contact_inbox?: { source_id?: string | null } };
-type AccountContact = { id: number; phone_number?: string; contact_inboxes?: Array<{ inbox_id: number; source_id: string }> };
+type AccountContact = {
+  id: number;
+  phone_number?: string;
+  // Chatwoot's account API serializes the inbox as a nested object, while
+  // older responses used inbox_id. Accept both during the transition.
+  contact_inboxes?: Array<{ inbox_id?: number; source_id: string; inbox?: { id?: number } }>;
+};
 
 export interface WhatsAppReactionUpdate {
   senderId: string;
@@ -24,7 +30,7 @@ export interface WhatsAppMessageTransportMetadata {
   remoteJid: string;
   fromMe: boolean;
 }
-export interface WhatsAppMessageTarget { source_id: string; content_attributes: Record<string, unknown> }
+export interface WhatsAppMessageTarget { id: number; conversation_id: number; source_id: string; content_attributes: Record<string, unknown> }
 
 export interface EvolutionMessageContext {
   chatType?: 'private' | 'group';
@@ -40,11 +46,30 @@ export interface HistoricalMetaImportInput {
   mediaUnavailable?: boolean;
   media?: DownloadedEvolutionMedia;
 }
+export interface HistoricalWhatsAppImportInput {
+  sourceId: string;
+  threadId: string;
+  timestamp: number;
+  content: string;
+  transport: 'meta_cloud' | 'waha';
+  direction: 'incoming' | 'outgoing';
+  remoteJid: string;
+  quotedMessageId?: string;
+  historyStatus?: string;
+  status?: 'sent' | 'delivered' | 'read' | 'failed';
+  mediaType?: 'image' | 'audio' | 'video' | 'document';
+  mediaUnavailable?: boolean;
+  media?: DownloadedEvolutionMedia;
+  context?: EvolutionMessageContext;
+}
 
 const request = async <T>(path: string, init: RequestInit = {}, apiToken = false): Promise<T> => {
   const response = await fetch(`${config.chatwootBaseUrl}${path}`, { ...init, headers: { Accept: 'application/json', ...(init.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...(apiToken ? { api_access_token: config.chatwootApiAccessToken } : {}), ...init.headers } });
   const raw = await response.text();
-  const body: unknown = raw ? JSON.parse(raw) : undefined;
+  // Rails may render an HTML error page in development. Preserve the HTTP
+  // failure without turning a response parser error into a bridge crash.
+  let body: unknown;
+  try { body = raw ? JSON.parse(raw) : undefined; } catch { body = undefined; }
   if (!response.ok) throw new Error(`Chatwoot ${response.status}: ${typeof body === 'object' && body && 'message' in body ? String(body.message) : response.statusText}`);
   return body as T;
 };
@@ -59,17 +84,18 @@ const replyAttributes = (quotedMessageId?: string) => quotedMessageId ? {
 } : {};
 
 const transportReplyAttributes = (transport: WhatsAppTransport, quotedMessageId?: string) => quotedMessageId ? {
-  in_reply_to_external_id: `${transport === 'meta_cloud' ? 'meta' : 'evolution'}:${quotedMessageId}`,
-  ...(transport === 'meta_cloud' ? { meta_quoted_message_id: quotedMessageId } : { evolution_quoted_message_id: quotedMessageId }),
+  in_reply_to_external_id: externalMessageId(transport, quotedMessageId),
+  ...(transport === 'meta_cloud' ? { meta_quoted_message_id: quotedMessageId } : transport === 'waha' ? { waha_quoted_message_id: quotedMessageId } : { evolution_quoted_message_id: quotedMessageId }),
 } : {};
 
-const transportMessageAttributes = (transport: WhatsAppTransport, messageType: 'incoming' | 'outgoing', remoteJid?: string, quotedMessageId?: string, context: EvolutionMessageContext = {}) => ({
+const transportMessageAttributes = (transport: WhatsAppTransport, messageType: 'incoming' | 'outgoing', remoteJid?: string, quotedMessageId?: string, context: EvolutionMessageContext = {}, inReplyTo?: number) => ({
   whatsapp_transport: transport,
   ...(remoteJid ? { whatsapp_remote_jid: remoteJid } : {}),
   ...(context.chatType === 'group' ? { whatsapp_chat_type: 'group' } : {}),
   ...(context.participantJid ? { whatsapp_participant_jid: context.participantJid } : {}),
   ...(context.participantName ? { whatsapp_participant_name: context.participantName } : {}),
   ...(transport === 'evolution' && messageType === 'outgoing' ? { evolution_origin: 'mobile' } : {}),
+  ...(inReplyTo ? { in_reply_to: inReplyTo } : {}),
   ...transportReplyAttributes(transport, quotedMessageId),
 });
 
@@ -78,42 +104,48 @@ const businessAppMessageAttributes = (remoteJid?: string, quotedMessageId?: stri
   meta_origin: 'business_app',
 });
 
-const evolutionMessageAttributes = (messageType: 'incoming' | 'outgoing', remoteJid?: string, quotedMessageId?: string, context: EvolutionMessageContext = {}) => ({
+const evolutionMessageAttributes = (messageType: 'incoming' | 'outgoing', remoteJid?: string, quotedMessageId?: string, context: EvolutionMessageContext = {}, inReplyTo?: number) => ({
   whatsapp_transport: 'evolution',
   ...(remoteJid ? { whatsapp_remote_jid: remoteJid } : {}),
   ...(context.chatType === 'group' ? { whatsapp_chat_type: 'group' } : {}),
   ...(context.participantJid ? { whatsapp_participant_jid: context.participantJid } : {}),
   ...(context.participantName ? { whatsapp_participant_name: context.participantName } : {}),
   ...(messageType === 'outgoing' ? { evolution_origin: 'mobile' } : {}),
+  ...(inReplyTo ? { in_reply_to: inReplyTo } : {}),
   ...replyAttributes(quotedMessageId),
 });
 
-const mediaMessagePayload = (content: string, messageType: 'incoming' | 'outgoing', evolutionMessageId: string, media: DownloadedEvolutionMedia, quotedMessageId?: string, remoteJid?: string, context?: EvolutionMessageContext) => {
+const mediaMessagePayload = (content: string, messageType: 'incoming' | 'outgoing', evolutionMessageId: string, media: DownloadedEvolutionMedia, quotedMessageId?: string, remoteJid?: string, context?: EvolutionMessageContext, inReplyTo?: number) => {
   const form = new FormData();
   if (content) form.append('content', content);
   form.append('message_type', messageType);
   form.append('source_id', `evolution:${evolutionMessageId}`);
   form.append('echo_id', `evolution:${evolutionMessageId}`);
   form.append('attachments[]', new Blob([media.buffer], { type: media.contentType }), media.fileName);
-  const attributes = evolutionMessageAttributes(messageType, remoteJid, quotedMessageId, context);
+  const attributes = evolutionMessageAttributes(messageType, remoteJid, quotedMessageId, context, inReplyTo);
   if (Object.keys(attributes).length) form.append('content_attributes', JSON.stringify(attributes));
   return form;
 };
 
-const transportMediaMessagePayload = (content: string, messageType: 'incoming' | 'outgoing', transport: WhatsAppTransport, messageId: string, media: DownloadedEvolutionMedia, quotedMessageId?: string, remoteJid?: string) => {
+const transportMediaMessagePayload = (content: string, messageType: 'incoming' | 'outgoing', transport: WhatsAppTransport, messageId: string, media: DownloadedEvolutionMedia, quotedMessageId?: string, remoteJid?: string, inReplyTo?: number, context: EvolutionMessageContext = {}) => {
   const form = new FormData();
   if (content) form.append('content', content);
   form.append('message_type', messageType);
-  const externalId = `${transport === 'meta_cloud' ? 'meta' : 'evolution'}:${messageId}`;
+  const externalId = externalMessageId(transport, messageId);
   form.append('source_id', externalId);
   form.append('echo_id', externalId);
   form.append('attachments[]', new Blob([media.buffer], { type: media.contentType }), media.fileName);
-  form.append('content_attributes', JSON.stringify(transportMessageAttributes(transport, messageType, remoteJid, quotedMessageId)));
+  form.append('content_attributes', JSON.stringify(transportMessageAttributes(transport, messageType, remoteJid, quotedMessageId, context, inReplyTo)));
   return form;
 };
 
 export const chatwootBridge = {
   listApiInboxes: () => request<{ payload: ApiInbox[] }>(`/api/v1/accounts/${config.chatwootAccountId}/inboxes`, {}, true).then(response => response.payload.filter(item => item.channel_type === 'Channel::Api')),
+  async findApiInboxById(inboxId: number): Promise<{ id: number; identifier: string; additionalAttributes: Record<string, unknown> }> {
+    const inbox = (await this.listApiInboxes()).find(item => item.id === inboxId);
+    if (!inbox?.inbox_identifier) throw new Error(`A inbox ${inboxId} não pertence a esta conta ou não é uma API inbox.`);
+    return { id: inbox.id, identifier: inbox.inbox_identifier, additionalAttributes: inbox.additional_attributes || {} };
+  },
   async isApiInbox(inboxId: number) {
     return (await this.listApiInboxes()).some(inbox => inbox.id === inboxId);
   },
@@ -138,6 +170,11 @@ export const chatwootBridge = {
     if (!inbox || typeof instance !== 'string') throw new Error(`A inbox ${inboxId} não é uma inbox Evolution configurada.`);
     return { instance, id: inbox.id };
   },
+  async findWahaInbox(session: string): Promise<{ identifier: string; id: number }> {
+    const inbox = (await this.listApiInboxes()).find(item => item.additional_attributes?.waha_session_name === session && transportConfigurationForInbox(item.additional_attributes || {})?.transports.includes('waha'));
+    if (!inbox?.inbox_identifier) throw new Error(`Nenhuma inbox WAHA encontrada para a sessão ${session}.`);
+    return { identifier: inbox.inbox_identifier, id: inbox.id };
+  },
   async findWhatsAppInboxById(inboxId: number): Promise<{ id: number; configuration: WhatsAppTransportConfiguration }> {
     const inbox = (await this.listApiInboxes()).find(item => item.id === inboxId);
     const configuration = inbox && transportConfigurationForInbox(inbox.additional_attributes || {});
@@ -161,7 +198,7 @@ export const chatwootBridge = {
     const response = await request<{ payload: AccountContact[] }>(`/api/v1/accounts/${config.chatwootAccountId}/contacts/search?q=${encodeURIComponent(phoneNumber)}`, {}, true);
     const digits = phoneNumber.replace(/\D/g, '');
     const contact = response.payload.find(item => item.phone_number?.replace(/\D/g, '') === digits);
-    return contact?.contact_inboxes?.find(item => item.inbox_id === inboxId)?.source_id;
+    return contact?.contact_inboxes?.find(item => item.inbox_id === inboxId || item.inbox?.id === inboxId)?.source_id;
   },
   createOrFindContact: (identifier: string, input: { sourceId: string; name: string; phoneNumber?: string }) => request<Contact>(`/public/api/v1/inboxes/${encodeURIComponent(identifier)}/contacts`, { method: 'POST', body: JSON.stringify({ source_id: input.sourceId, name: input.name, ...(input.phoneNumber ? { phone_number: input.phoneNumber } : {}) }) }),
   saveEvolutionIdentity: (contactId: number, phoneNumber: string | undefined, lid: string | undefined) => request(`/api/v1/accounts/${config.chatwootAccountId}/contacts/${contactId}`, {
@@ -174,15 +211,37 @@ export const chatwootBridge = {
       },
     }),
   }, true),
-  saveEvolutionGroup: (contactId: number, groupJid: string, name: string, details: { avatarUrl?: string; participants?: EvolutionGroupParticipant[]; participantAction?: string } = {}) => request(`/api/v1/accounts/${config.chatwootAccountId}/contacts/${contactId}`, {
+  saveWahaIdentity: (contactId: number, phoneNumber: string | undefined, lid: string | undefined) => request(`/api/v1/accounts/${config.chatwootAccountId}/contacts/${contactId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      ...(phoneNumber ? { phone_number: phoneNumber } : {}),
+      additional_attributes: {
+        ...(phoneNumber ? { waha_phone: phoneNumber } : {}),
+        ...(lid ? { waha_lid: lid } : {}),
+      },
+    }),
+  }, true),
+  saveEvolutionGroup: (contactId: number, groupJid: string, name: string, details: { avatarUrl?: string; description?: string; participants?: EvolutionGroupParticipant[]; participantAction?: string } = {}) => request(`/api/v1/accounts/${config.chatwootAccountId}/contacts/${contactId}`, {
     method: 'PATCH', body: JSON.stringify({ name, additional_attributes: {
       whatsapp_chat_type: 'group', whatsapp_group_jid: groupJid,
       ...(details.avatarUrl ? { whatsapp_group_avatar_url: details.avatarUrl } : {}),
+      ...(details.description !== undefined ? { whatsapp_group_description: details.description } : {}),
       ...(details.participants ? { whatsapp_group_participants: details.participants.map(item => ({ jid: item.jid, ...(item.phoneNumber ? { phone: item.phoneNumber } : {}), ...(item.name ? { name: item.name } : {}), ...(item.avatarUrl ? { avatar_url: item.avatarUrl } : {}), ...(item.admin !== undefined ? { admin: item.admin } : {}) })) } : {}),
       ...(details.participantAction ? { whatsapp_group_last_participant_action: details.participantAction } : {}),
     } }),
   }, true),
-  async findOrCreateConversation(identifier: string, sourceId: string): Promise<Conversation> {
+  async findOrCreateConversation(identifier: string, sourceId: string, contactId?: number, inboxId?: number): Promise<Conversation> {
+    // A contact may already have been created manually in Chatwoot. Its
+    // ContactInbox source id is then a UUID rather than `whatsapp:<phone>`.
+    // Look up conversations by contact and inbox first, not only by the
+    // provider source id, otherwise Chatwoot creates a parallel thread.
+    if (contactId && inboxId) {
+      const response = await request<{ payload: Conversation[] }>(`/api/v1/accounts/${config.chatwootAccountId}/contacts/${contactId}/conversations`, {}, true);
+      const existing = response.payload
+        .filter(conversation => conversation.inbox_id === inboxId)
+        .sort((left, right) => (right.last_activity_at || 0) - (left.last_activity_at || 0))[0];
+      if (existing) return existing;
+    }
     const root = `/public/api/v1/inboxes/${encodeURIComponent(identifier)}/contacts/${encodeURIComponent(sourceId)}/conversations`;
     const conversations = await request<Conversation[]>(root);
     // One WhatsApp contact/inbox always uses its latest conversation. Reusing
@@ -206,29 +265,33 @@ export const chatwootBridge = {
       content_attributes: { whatsapp_transport: 'meta_cloud', whatsapp_message_kind: 'template', template_name: template.name, template_language: template.language },
     }),
   }, true),
-  createIncomingMessage: (_identifier: string, _sourceId: string, conversationId: number, content: string, evolutionMessageId: string, quotedMessageId?: string, remoteJid?: string, context?: EvolutionMessageContext) => request(`/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify({ content, message_type: 'incoming', source_id: `evolution:${evolutionMessageId}`, echo_id: `evolution:${evolutionMessageId}`, content_attributes: evolutionMessageAttributes('incoming', remoteJid, quotedMessageId, context) }), }, true),
-  createMobileOutgoingMessage: (conversationId: number, content: string, evolutionMessageId: string, quotedMessageId?: string, remoteJid?: string, context?: EvolutionMessageContext) => request(`/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`, {
+  createIncomingMessage: (_identifier: string, _sourceId: string, conversationId: number, content: string, evolutionMessageId: string, quotedMessageId?: string, remoteJid?: string, context?: EvolutionMessageContext, inReplyTo?: number) => request(`/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify({ content, message_type: 'incoming', source_id: `evolution:${evolutionMessageId}`, echo_id: `evolution:${evolutionMessageId}`, content_attributes: evolutionMessageAttributes('incoming', remoteJid, quotedMessageId, context, inReplyTo) }), }, true),
+  createMobileOutgoingMessage: (conversationId: number, content: string, evolutionMessageId: string, quotedMessageId?: string, remoteJid?: string, context?: EvolutionMessageContext, inReplyTo?: number) => request(`/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`, {
     method: 'POST',
     // source_id prevents this echo from being delivered back to Evolution.
     // content_attributes is returned by the Chatwoot API and lets the UI
     // clearly distinguish messages written in the linked phone from agent
     // messages written in the platform.
-    body: JSON.stringify({ content, message_type: 'outgoing', source_id: `evolution:${evolutionMessageId}`, echo_id: `evolution:${evolutionMessageId}`, content_attributes: evolutionMessageAttributes('outgoing', remoteJid, quotedMessageId, context) }),
+    body: JSON.stringify({ content, message_type: 'outgoing', source_id: `evolution:${evolutionMessageId}`, echo_id: `evolution:${evolutionMessageId}`, content_attributes: evolutionMessageAttributes('outgoing', remoteJid, quotedMessageId, context, inReplyTo) }),
   }, true),
-  createIncomingMediaMessage: (conversationId: number, content: string, evolutionMessageId: string, media: DownloadedEvolutionMedia, quotedMessageId?: string, remoteJid?: string, context?: EvolutionMessageContext) => request(`/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`, {
-    method: 'POST', body: mediaMessagePayload(content, 'incoming', evolutionMessageId, media, quotedMessageId, remoteJid, context),
+  createIncomingMediaMessage: (conversationId: number, content: string, evolutionMessageId: string, media: DownloadedEvolutionMedia, quotedMessageId?: string, remoteJid?: string, context?: EvolutionMessageContext, inReplyTo?: number) => request(`/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`, {
+    method: 'POST', body: mediaMessagePayload(content, 'incoming', evolutionMessageId, media, quotedMessageId, remoteJid, context, inReplyTo),
   }, true),
-  createMobileOutgoingMediaMessage: (conversationId: number, content: string, evolutionMessageId: string, media: DownloadedEvolutionMedia, quotedMessageId?: string, remoteJid?: string, context?: EvolutionMessageContext) => request(`/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`, {
-    method: 'POST', body: mediaMessagePayload(content, 'outgoing', evolutionMessageId, media, quotedMessageId, remoteJid, context),
+  createMobileOutgoingMediaMessage: (conversationId: number, content: string, evolutionMessageId: string, media: DownloadedEvolutionMedia, quotedMessageId?: string, remoteJid?: string, context?: EvolutionMessageContext, inReplyTo?: number) => request(`/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`, {
+    method: 'POST', body: mediaMessagePayload(content, 'outgoing', evolutionMessageId, media, quotedMessageId, remoteJid, context, inReplyTo),
   }, true),
-  createIncomingTransportMessage: (_identifier: string, _sourceId: string, conversationId: number, transport: WhatsAppTransport, content: string, messageId: string, quotedMessageId?: string, remoteJid?: string) => {
-    const externalId = `${transport === 'meta_cloud' ? 'meta' : 'evolution'}:${messageId}`;
+  createIncomingTransportMessage: (_identifier: string, _sourceId: string, conversationId: number, transport: WhatsAppTransport, content: string, messageId: string, quotedMessageId?: string, remoteJid?: string, inReplyTo?: number, context: EvolutionMessageContext = {}) => {
+    const externalId = externalMessageId(transport, messageId);
     return request(`/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`, {
-      method: 'POST', body: JSON.stringify({ content, message_type: 'incoming', source_id: externalId, echo_id: externalId, content_attributes: transportMessageAttributes(transport, 'incoming', remoteJid, quotedMessageId) }),
+      method: 'POST', body: JSON.stringify({ content, message_type: 'incoming', source_id: externalId, echo_id: externalId, content_attributes: transportMessageAttributes(transport, 'incoming', remoteJid, quotedMessageId, context, inReplyTo) }),
     }, true);
   },
-  createIncomingTransportMediaMessage: (conversationId: number, transport: WhatsAppTransport, content: string, messageId: string, media: DownloadedEvolutionMedia, quotedMessageId?: string, remoteJid?: string) => request(`/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`, {
-    method: 'POST', body: transportMediaMessagePayload(content, 'incoming', transport, messageId, media, quotedMessageId, remoteJid),
+  createMobileOutgoingTransportMessage: (conversationId: number, transport: WhatsAppTransport, content: string, messageId: string, quotedMessageId?: string, remoteJid?: string, inReplyTo?: number, context: EvolutionMessageContext = {}) => {
+    const externalId = externalMessageId(transport, messageId);
+    return request(`/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify({ content, message_type: 'outgoing', source_id: externalId, echo_id: externalId, content_attributes: transportMessageAttributes(transport, 'outgoing', remoteJid, quotedMessageId, context, inReplyTo) }) }, true);
+  },
+  createIncomingTransportMediaMessage: (conversationId: number, transport: WhatsAppTransport, content: string, messageId: string, media: DownloadedEvolutionMedia, quotedMessageId?: string, remoteJid?: string, inReplyTo?: number, context: EvolutionMessageContext = {}) => request(`/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`, {
+    method: 'POST', body: transportMediaMessagePayload(content, 'incoming', transport, messageId, media, quotedMessageId, remoteJid, inReplyTo, context),
   }, true),
   createBusinessAppEchoMessage: (conversationId: number, content: string, messageId: string, quotedMessageId?: string, remoteJid?: string) => request(`/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`, {
     method: 'POST', body: JSON.stringify({ content, message_type: 'outgoing', source_id: `meta:${messageId}`, echo_id: `meta:${messageId}`, content_attributes: businessAppMessageAttributes(remoteJid, quotedMessageId) }),
@@ -257,21 +320,35 @@ export const chatwootBridge = {
     method: 'POST', body: JSON.stringify({ source_id: sourceId }),
   }, true),
   messageTargetBySourceId: (sourceId: string) => request<WhatsAppMessageTarget>(`/api/v1/accounts/${config.chatwootAccountId}/whatsapp/messages/target?source_id=${encodeURIComponent(sourceId)}`, {}, true),
-  async importHistoricalMetaMessage(conversationId: number, input: HistoricalMetaImportInput) {
-    const { message, media } = input;
+  async importHistoricalWhatsAppMessage(conversationId: number, input: HistoricalWhatsAppImportInput) {
+    const { media } = input;
     const body = new FormData();
-    body.append('source_id', message.sourceId);
+    body.append('source_id', input.sourceId);
     body.append('direction', input.direction);
-    body.append('timestamp', String(message.timestamp || ''));
-    body.append('content', message.content);
-    body.append('thread_id', message.threadId);
+    body.append('timestamp', String(input.timestamp));
+    body.append('content', input.content);
+    body.append('thread_id', input.threadId);
     body.append('remote_jid', input.remoteJid);
-    if (message.quotedMessageId) body.append('quoted_message_id', message.quotedMessageId);
-    if (message.historyStatus) body.append('history_status', message.historyStatus);
+    body.append('transport', input.transport);
+    if (input.quotedMessageId) body.append('quoted_message_id', input.quotedMessageId);
+    if (input.historyStatus) body.append('history_status', input.historyStatus);
     if (input.status) body.append('status', input.status);
-    if (message.media) body.append('media_type', message.media.kind);
+    if (input.mediaType) body.append('media_type', input.mediaType);
+    if (input.context?.chatType === 'group') body.append('chat_type', 'group');
+    if (input.context?.participantJid) body.append('participant_jid', input.context.participantJid);
+    if (input.context?.participantName) body.append('participant_name', input.context.participantName);
     if (input.mediaUnavailable) body.append('historical_media_unavailable', 'true');
     if (media) body.append('attachment', new Blob([media.buffer], { type: media.contentType }), media.fileName);
     return request<{ id: number; created: boolean }>(`/api/v1/accounts/${config.chatwootAccountId}/whatsapp/conversations/${conversationId}/history_messages`, { method: 'POST', body }, true);
   },
+  importHistoricalMetaMessage(conversationId: number, input: HistoricalMetaImportInput) {
+    const { message } = input;
+    return this.importHistoricalWhatsAppMessage(conversationId, {
+      sourceId: message.sourceId, threadId: message.threadId, timestamp: message.timestamp || 0, content: message.content,
+      transport: 'meta_cloud', direction: input.direction, remoteJid: input.remoteJid, quotedMessageId: message.quotedMessageId,
+      historyStatus: message.historyStatus || undefined, status: input.status, mediaType: message.media?.kind,
+      mediaUnavailable: input.mediaUnavailable, media: input.media,
+    });
+  },
+  resolveHistoricalReplies: (conversationId: number) => request<void>(`/api/v1/accounts/${config.chatwootAccountId}/whatsapp/conversations/${conversationId}/history_messages/resolve_replies`, { method: 'POST' }, true),
 };

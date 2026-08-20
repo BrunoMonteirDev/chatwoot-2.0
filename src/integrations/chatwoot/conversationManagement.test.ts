@@ -33,4 +33,20 @@ describe('conversationManagementService', () => {
       ['/api/v1/accounts/2/conversations/31/labels', { labels: ['vip'] }],
     ]);
   });
+
+  it('consulta e atualiza responsáveis compartilhados pela API nativa de participantes', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 8, available_name: 'Ana' }]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 8, available_name: 'Ana' }, { id: 9, available_name: 'Bruno' }]), { status: 200 }));
+
+    await expect(conversationManagementService.listParticipants(2, 31)).resolves.toEqual([{ id: 8, name: 'Ana', avatarUrl: null }]);
+    await expect(conversationManagementService.setParticipants(2, 31, [8, 9])).resolves.toEqual([
+      { id: 8, name: 'Ana', avatarUrl: null }, { id: 9, name: 'Bruno', avatarUrl: null },
+    ]);
+
+    expect(vi.mocked(fetch).mock.calls.map(([url, init]) => [url, init?.method, init?.body && JSON.parse(init.body as string)])).toEqual([
+      ['/api/v1/accounts/2/conversations/31/participants', 'GET', undefined],
+      ['/api/v1/accounts/2/conversations/31/participants', 'PATCH', { user_ids: [8, 9] }],
+    ]);
+  });
 });

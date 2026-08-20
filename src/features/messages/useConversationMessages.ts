@@ -23,7 +23,7 @@ const storedReactions = (value: unknown): StoredReaction[] => Array.isArray(valu
   ? value.flatMap((item): StoredReaction[] => {
     if (!item || typeof item !== 'object') return [];
     const reaction = item as Record<string, unknown>;
-    if (typeof reaction.sender_id !== 'string' || typeof reaction.emoji !== 'string' || (reaction.transport !== 'evolution' && reaction.transport !== 'meta_cloud')) return [];
+    if (typeof reaction.sender_id !== 'string' || typeof reaction.emoji !== 'string' || (reaction.transport !== 'evolution' && reaction.transport !== 'waha' && reaction.transport !== 'meta_cloud')) return [];
     return [{ sender_id: reaction.sender_id, emoji: reaction.emoji, transport: reaction.transport, origin: reaction.origin === 'contact' || reaction.origin === 'mobile' || reaction.origin === 'platform' ? reaction.origin : 'contact' }];
   })
   : [];
@@ -161,7 +161,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
     if (!target || !target.sourceId) return false;
     const sourceTransport = target.contentAttributes.whatsapp_transport;
     const externalTransport = parseExternalMessageId(target.sourceId)?.provider;
-    const transport = sourceTransport === 'evolution' || sourceTransport === 'meta_cloud' ? sourceTransport : externalTransport;
+    const transport = sourceTransport === 'evolution' || sourceTransport === 'waha' || sourceTransport === 'meta_cloud' ? sourceTransport : externalTransport;
     const remoteJid = typeof target.contentAttributes.whatsapp_remote_jid === 'string'
       ? target.contentAttributes.whatsapp_remote_jid
       : fallbackRemoteJid(fallbackPhoneNumber);

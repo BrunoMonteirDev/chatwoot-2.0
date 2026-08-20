@@ -1,25 +1,41 @@
-export const WHATSAPP_TRANSPORTS = ['evolution', 'meta_cloud'] as const;
+export const WHATSAPP_TRANSPORTS = ['evolution', 'waha', 'meta_cloud'] as const;
 export type WhatsAppTransport = typeof WHATSAPP_TRANSPORTS[number];
 export type WhatsAppProvider = WhatsAppTransport;
 export const WHATSAPP_MODES = ['official', 'web', 'hybrid'] as const;
 export type WhatsAppMode = typeof WHATSAPP_MODES[number];
 
-export const externalMessageId = (provider: WhatsAppProvider, id: string) => `${provider === 'meta_cloud' ? 'meta' : 'evolution'}:${id}`;
+const EXTERNAL_ID_NAMESPACE: Record<WhatsAppProvider, 'evolution' | 'waha' | 'meta'> = {
+  evolution: 'evolution',
+  waha: 'waha',
+  meta_cloud: 'meta',
+};
+
+export const externalMessageId = (provider: WhatsAppProvider, id: string) => `${EXTERNAL_ID_NAMESPACE[provider]}:${id}`;
 
 export const parseExternalMessageId = (value: string | null | undefined): { provider: WhatsAppProvider; id: string } | null => {
   if (typeof value !== 'string') return null;
-  const match = /^(evolution|meta):(.+)$/.exec(value);
+  const match = /^(evolution|waha|meta):(.+)$/.exec(value);
   if (!match || !match[2]) return null;
-  return { provider: match[1] === 'meta' ? 'meta_cloud' : 'evolution', id: match[2] };
+  return { provider: match[1] === 'meta' ? 'meta_cloud' : match[1] as 'evolution' | 'waha', id: match[2] };
 };
 
-export interface WhatsAppTransportConfiguration { mode: WhatsAppMode; transports: WhatsAppTransport[]; evolutionInstanceName: string | null; }
+export interface WhatsAppTransportConfiguration {
+  mode: WhatsAppMode;
+  transports: WhatsAppTransport[];
+  evolutionInstanceName: string | null;
+  wahaSessionName: string | null;
+}
 
 export const transportConfigurationForInbox = (attributes: Record<string, unknown>): WhatsAppTransportConfiguration | null => {
-  const declared = Array.isArray(attributes.whatsapp_transports) ? attributes.whatsapp_transports.filter((item): item is WhatsAppTransport => item === 'evolution' || item === 'meta_cloud') : [];
+  const declared = Array.isArray(attributes.whatsapp_transports) ? attributes.whatsapp_transports.filter((item): item is WhatsAppTransport => item === 'evolution' || item === 'waha' || item === 'meta_cloud') : [];
   const transports: WhatsAppTransport[] = declared.length ? [...new Set(declared)] : attributes.whatsapp_provider === 'meta_cloud' ? ['meta_cloud'] : attributes.evolution_provider === 'evolution' ? ['evolution'] : [];
   if (!transports.length) return null;
-  return { mode: transports.length === 2 ? 'hybrid' : transports[0] === 'meta_cloud' ? 'official' : 'web', transports, evolutionInstanceName: typeof attributes.evolution_instance_name === 'string' ? attributes.evolution_instance_name : null };
+  return {
+    mode: transports.length > 1 ? 'hybrid' : transports[0] === 'meta_cloud' ? 'official' : 'web',
+    transports,
+    evolutionInstanceName: typeof attributes.evolution_instance_name === 'string' ? attributes.evolution_instance_name : null,
+    wahaSessionName: typeof attributes.waha_session_name === 'string' ? attributes.waha_session_name : null,
+  };
 };
 
 export const providerForInbox = (attributes: Record<string, unknown>): WhatsAppProvider | null => {
@@ -49,6 +65,9 @@ export const TRANSPORT_CAPABILITIES: Record<WhatsAppTransport, TransportCapabili
   // /chat/deleteMessageForEveryone for Baileys messages. The operation layer
   // additionally restricts both to fromMe messages with a real external key.
   evolution: { text: true, media: true, reply: true, reactions: true, edit: true, revoke: true, groups: true, templates: false },
+  // Stage 1 deliberately exposes only WAHA session lifecycle. Message
+  // operations become true only when their adapter and webhook contract land.
+  waha: { text: true, media: true, reply: true, reactions: true, edit: true, revoke: true, groups: true, templates: false },
   meta_cloud: { text: true, media: true, reply: true, reactions: true, edit: false, revoke: false, groups: false, templates: true },
 };
 
@@ -74,8 +93,8 @@ export const resolveTransportRoute = ({
   // Mutations of an existing message are bound to the target identity.
   const targetTransport = target && resolveMessageOperationTransport(target);
   const requested = targetTransport || explicitTransport || (chatType === 'group'
-    ? (configuration.transports.includes('evolution') ? 'evolution' : null)
-    : (configuration.transports.includes('meta_cloud') ? 'meta_cloud' : configuration.transports.includes('evolution') ? 'evolution' : null));
+    ? (configuration.transports.includes('waha') ? 'waha' : configuration.transports.includes('evolution') ? 'evolution' : null)
+    : (configuration.transports.includes('meta_cloud') ? 'meta_cloud' : configuration.transports.includes('waha') ? 'waha' : configuration.transports.includes('evolution') ? 'evolution' : null));
   if (!requested || !configuration.transports.includes(requested)) return { transport: null, reason: 'transport_unavailable' };
   const capability = chatType === 'group' && operation !== 'reaction' ? 'groups' : capabilityForOperation[operation];
   if (!TRANSPORT_CAPABILITIES[requested][capability]) return { transport: null, reason: 'unsupported_operation' };
@@ -95,6 +114,6 @@ export const resolveOutgoingTransport = ({ configuration, chatType = 'private' }
 // consulted here.
 export const resolveMessageOperationTransport = ({ sourceId, contentAttributes = {} }: { sourceId?: string | null; contentAttributes?: Record<string, unknown> }): WhatsAppTransport | null => {
   const declared = contentAttributes.whatsapp_transport;
-  if (declared === 'evolution' || declared === 'meta_cloud') return declared;
+  if (declared === 'evolution' || declared === 'waha' || declared === 'meta_cloud') return declared;
   return parseExternalMessageId(sourceId)?.provider || null;
 };

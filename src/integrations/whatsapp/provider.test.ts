@@ -14,6 +14,7 @@ describe('WhatsApp providers', () => {
     expect(whatsappConfigurationForInbox({ ...inbox, additionalAttributes: { whatsapp_provider: 'evolution', whatsapp_transports: ['evolution'], evolution_provider: 'evolution' } })).toMatchObject({ mode: 'web', transports: ['evolution'] });
     expect(whatsappConfigurationForInbox({ ...inbox, additionalAttributes: { whatsapp_provider: 'meta_cloud', meta_waba_id: 'waba', meta_phone_number_id: 'phone' } })).toMatchObject({ mode: 'official', transports: ['meta_cloud'] });
     expect(whatsappConfigurationForInbox({ ...inbox, additionalAttributes: { whatsapp_transports: ['meta_cloud', 'evolution'], meta_waba_id: 'waba', meta_phone_number_id: 'phone', evolution_instance_name: 'cw-x' } })).toMatchObject({ mode: 'hybrid', transports: ['meta_cloud', 'evolution'], evolutionInstanceName: 'cw-x' });
+    expect(whatsappConfigurationForInbox({ ...inbox, additionalAttributes: { whatsapp_transports: ['waha'], waha_session_name: 'empresa' } })).toMatchObject({ mode: 'web', transports: ['waha'], wahaSessionName: 'empresa' });
   });
 
   it('identifica Meta Cloud somente por metadados explícitos', () => {
@@ -24,9 +25,11 @@ describe('WhatsApp providers', () => {
 
   it('namespaceia e interpreta IDs externos sem misturar provedores', () => {
     expect(externalMessageId('evolution', 'BAE5')).toBe('evolution:BAE5');
+    expect(externalMessageId('waha', 'ABC')).toBe('waha:ABC');
     expect(externalMessageId('meta_cloud', 'wamid.1')).toBe('meta:wamid.1');
     expect(parseExternalMessageId('evolution:BAE5')).toEqual({ provider: 'evolution', id: 'BAE5' });
     expect(parseExternalMessageId('meta:wamid.1')).toEqual({ provider: 'meta_cloud', id: 'wamid.1' });
+    expect(parseExternalMessageId('waha:ABC')).toEqual({ provider: 'waha', id: 'ABC' });
     expect(parseExternalMessageId('BAE5')).toBeNull();
   });
 

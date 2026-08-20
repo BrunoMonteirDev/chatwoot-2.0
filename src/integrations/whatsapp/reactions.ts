@@ -1,7 +1,7 @@
 const bridgeUrl = (import.meta.env.VITE_BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
 import { authenticatedBridgeHeaders } from '../bridge/auth';
 
-export type WhatsAppReactionTransport = 'evolution' | 'meta_cloud';
+export type WhatsAppReactionTransport = 'evolution' | 'waha' | 'meta_cloud';
 
 export interface SendWhatsAppReactionInput {
   inboxId: number;

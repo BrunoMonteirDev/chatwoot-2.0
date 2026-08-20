@@ -48,6 +48,16 @@ export const conversationManagementService = {
     return { teamId: team?.id ?? null, teamName: team?.name ?? null };
   },
 
+  async listParticipants(accountId: number, conversationId: number): Promise<AssignableAgent[]> {
+    const response = await chatwootApiClient.get<ChatwootAgentDto[]>(`${conversationPath(accountId, conversationId)}/participants`);
+    return response.map(normalizeAssignableAgent);
+  },
+
+  async setParticipants(accountId: number, conversationId: number, userIds: number[]): Promise<AssignableAgent[]> {
+    const response = await chatwootApiClient.patch<ChatwootAgentDto[]>(`${conversationPath(accountId, conversationId)}/participants`, { user_ids: userIds });
+    return response.map(normalizeAssignableAgent);
+  },
+
   async setLabels(accountId: number, conversationId: number, labels: string[]): Promise<Pick<ConversationSummary, 'labels'>> {
     const response = await chatwootApiClient.post<ChatwootConversationLabelsResponse>(`${conversationPath(accountId, conversationId)}/labels`, { labels });
     return { labels: response.payload };

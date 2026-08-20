@@ -4,7 +4,7 @@ import { mergeRealtimeConversation } from './useConversations';
 
 const conversation = (overrides: Partial<ConversationSummary> = {}): ConversationSummary => ({
   id: 1, inboxId: 7, channelType: null, contactName: 'Maria', contactId: 17, contactAvatarUrl: null, lastMessage: 'Olá', lastMessageByCurrentUser: false, isGroup: false,
-  lastActivityAt: 100, updatedAt: 100, unreadCount: 0, status: 'open', priority: null, assigneeId: null, assigneeName: null, teamId: null, teamName: null, labels: [], ...overrides,
+  lastActivityAt: 100, updatedAt: 100, unreadCount: 0, status: 'open', priority: null, assigneeId: null, assigneeName: null, participantIds: [], teamId: null, teamName: null, labels: [], ...overrides,
 });
 
 describe('mergeRealtimeConversation', () => {

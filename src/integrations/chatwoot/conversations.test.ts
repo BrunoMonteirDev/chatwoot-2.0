@@ -40,6 +40,16 @@ describe('conversationService', () => {
     expect(JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string)).toEqual({ contact_id: 9, inbox_id: 7 });
   });
 
+  it('abre uma conversa diretamente pelo ID para links e recarregamentos', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
+      id: 44, inbox_id: 7, status: 'open', priority: null, unread_count: 0, last_activity_at: 100,
+      labels: [], messages: [], meta: { sender: { id: 9, name: 'Maria', thumbnail: null }, channel: 'Channel::Whatsapp' },
+    }), { status: 200 }));
+
+    await expect(conversationService.get(2, 44)).resolves.toMatchObject({ id: 44, contactId: 9, inboxId: 7 });
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/v1/accounts/2/conversations/44');
+  });
+
   it('lista o histórico de um contato pelo endpoint e envelope específicos', async () => {
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
       payload: [{

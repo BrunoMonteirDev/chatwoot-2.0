@@ -20,4 +20,10 @@ describe('toChatMessages reactions', () => {
       reactions: [{ senderId: 'self', emoji: '❤️', transport: 'evolution' }], replyTo: { id: '4' }, attachments: [{ type: 'image' }],
     });
   });
+
+  it('usa miniatura e rótulo de foto na citação de uma imagem', () => {
+    const original = baseMessage({ id: 4, content: '', contentAttributes: {}, attachments: [{ id: 1, kind: 'image', url: 'https://example.test/photo.jpg', thumbnailUrl: 'https://example.test/thumb.jpg', title: null, contentType: 'image/jpeg', size: 1 }] });
+    const reply = baseMessage({ contentAttributes: { in_reply_to: 4 } });
+    expect(toChatMessages([original, reply])[1].replyTo).toMatchObject({ id: '4', text: 'Foto', mediaPreviewUrl: 'https://example.test/thumb.jpg' });
+  });
 });

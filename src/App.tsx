@@ -29,6 +29,7 @@ import { WallpaperId } from './components/WhatsAppDoodleBg';
 import { FloatingMobileNav } from './components/FloatingMobileNav';
 import { DimensionModal } from './components/DimensionModal';
 import { ContextMenu } from './components/ContextMenu';
+import { ConfirmDialog } from './components/ConfirmDialog';
 import { useContextMenu } from './hooks/useContextMenu';
 import { getChatContextMenuItems } from './utils/contextMenuActions';
 import { ToastContainer, ToastMessage } from './components/Toast';
@@ -47,18 +48,24 @@ import { toContactListItem } from './features/contacts/toContactListItem';
 import { conversationService } from './integrations/chatwoot/conversations';
 import { messageService } from './integrations/chatwoot/messages';
 import type { ConversationMessage } from './domain/currentUser';
+import { appRouteFromUrl, urlForAppRoute, type AppRoute } from './routing/appRoute';
 
 const emptyUser: UserProfile = { name: '', phone: '', about: '', avatar: '' };
 const emptyAccount: MultiTenantAccount = { id: '', name: '', role: '' };
+const settingsTabs: SettingsTab[] = ['conta', 'agentes', 'times', 'caixas', 'etiquetas', 'atributos', 'kanban', 'kanbancrm', 'automacao', 'n8n', 'bots', 'macros', 'respostas', 'agendadas', 'aplicacoes', 'integracoes', 'auditoria', 'permissoes'];
+const isSettingsTab = (value: string | undefined): value is SettingsTab => Boolean(value && settingsTabs.includes(value as SettingsTab));
 
 export default function App() {
   const { user: authenticatedUser, currentAccount, selectAccount, logout } = useAuth();
+  const initialRoute = appRouteFromUrl(new URL(window.location.href));
   const superAdminUrl = import.meta.env.VITE_SUPER_ADMIN_URL || '/super_admin';
   const { inboxes, status: inboxesStatus, error: inboxesError, retry: retryInboxes } = useInboxes(currentAccount?.id ?? null);
   const contactDirectory = useContacts(currentAccount?.id ?? null);
   const [chats, setChats] = useState<Chat[]>([]);
-  const [activeChatId, setActiveChatId] = useState<string>('');
+  const [activeChatId, setActiveChatId] = useState<string>(() => initialRoute.conversationId || '');
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [conversationPendingDeletion, setConversationPendingDeletion] = useState<Chat | null>(null);
+  const [isDeletingConversation, setIsDeletingConversation] = useState(false);
   const { menuState, openContextMenu, closeContextMenu } = useContextMenu();
 
   // New Filter & Sort State for Chat List
@@ -78,8 +85,7 @@ export default function App() {
   const handleChatContextMenu = (e: React.MouseEvent, chatItem: Chat) => {
     const items = getChatContextMenuItems(chatItem, {
       onSelectChat: (selected) => {
-        setActiveChatId(selected.id);
-        setShowMobileChat(true);
+        openConversation(selected.id);
       },
       onToggleUnread: (selected) => {
         const isUnread = (selected.unreadCount ?? 0) > 0;
@@ -129,14 +135,11 @@ export default function App() {
         addToast(isArchived ? `Conversa arquivada` : `Conversa desarquivada`);
       },
       onOpenContactPanel: (selected) => {
-        setActiveChatId(selected.id);
-        setShowMobileChat(true);
+        openConversation(selected.id);
         addToast(`Exibindo atributos de: ${selected.name}`, 'info');
       },
       onDeleteChat: (selected) => {
-        if (confirm(`Deseja realmente excluir a conversa com "${selected.name}"?`)) {
-          void deleteConversation(selected);
-        }
+        setConversationPendingDeletion(selected);
       },
       onDuplicateChat: (selected) => {
         const dup: Chat = {
@@ -170,9 +173,10 @@ export default function App() {
 
     openContextMenu(e, items, `Ações: ${chatItem.name}`);
   };
-  const [activeNavTab, setActiveNavTab] = useState<NavTab>('chats');
-  const [showMobileChat, setShowMobileChat] = useState<boolean>(false);
-  const [selectedInbox, setSelectedInbox] = useState<string>('todas');
+  const [activeNavTab, setActiveNavTab] = useState<NavTab>(() => initialRoute.tab);
+  const [showMobileChat, setShowMobileChat] = useState<boolean>(() => Boolean(initialRoute.conversationId));
+  const [selectedInbox, setSelectedInbox] = useState<string>(() => initialRoute.inbox || 'todas');
+  const [routeAccountId, setRouteAccountId] = useState<string>(() => initialRoute.accountId || '');
   const { conversations, status: conversationsStatus, error: conversationsError, hasNextPage, isLoadingMore, retry: retryConversations, loadMore, applyOutgoingMessage, applyConversationUpdate, removeConversation, replaceConversation, upsertRealtimeConversation, addCreatedConversation, applyRealtimeMessage } = useConversations(currentAccount?.id ?? null, selectedInbox);
   const [activeFilter, setActiveFilter] = useState<FilterCategory>('minhas');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -185,18 +189,22 @@ export default function App() {
     if (!currentAccount || !Number.isInteger(conversationId)) {
       // It keeps prototype-only chats removable without pretending the API did it.
       setChats(current => current.filter(item => item.id !== chat.id));
+      setConversationPendingDeletion(null);
       return;
     }
+    setIsDeletingConversation(true);
     try {
       await conversationService.remove(currentAccount.id, conversationId);
       removeConversation(conversationId);
       if (activeChatId === chat.id) {
-        setActiveChatId('');
-        setShowMobileChat(false);
+        navigate({ tab: 'chats', ...(selectedInbox !== 'todas' ? { inbox: selectedInbox } : {}) }, true);
       }
       addToast(`Conversa com "${chat.name}" excluída`);
+      setConversationPendingDeletion(null);
     } catch (cause) {
       addToast(`Não foi possível excluir a conversa: ${errorMessageForUser(cause)}`, 'error');
+    } finally {
+      setIsDeletingConversation(false);
     }
   }
 
@@ -212,13 +220,10 @@ export default function App() {
     if (active) setSelectedAccount({ id: String(active.id), name: active.name, role: active.role });
   }, [authenticatedUser, currentAccount]);
 
-  useEffect(() => {
-    setSelectedInbox('todas');
-  }, [currentAccount?.id]);
-
   const handleAccountSelection = async (account: MultiTenantAccount) => {
     try {
       await selectAccount(Number(account.id));
+      navigate({ tab: 'chats', accountId: account.id });
     } catch (cause) {
       addToast(errorMessageForUser(cause), 'error');
     }
@@ -337,10 +342,66 @@ export default function App() {
     title?: string;
     subtitle?: string;
   } | null>(null);
-  const [selectedSettingsTab, setSelectedSettingsTab] = useState<SettingsTab>('conta');
+  const [selectedSettingsTab, setSelectedSettingsTab] = useState<SettingsTab>(() => isSettingsTab(initialRoute.settingsTab) ? initialRoute.settingsTab : 'conta');
   const [showContactsModal, setShowContactsModal] = useState<boolean>(false);
   const [showNewConversationModal, setShowNewConversationModal] = useState<boolean>(false);
   const [showNewGroupModal, setShowNewGroupModal] = useState<boolean>(false);
+
+  const applyRoute = useCallback((route: AppRoute) => {
+    setRouteAccountId(route.accountId || '');
+    setActiveNavTab(route.tab);
+    setActiveChatId(route.conversationId || '');
+    setSelectedInbox(route.inbox || 'todas');
+    if (isSettingsTab(route.settingsTab)) setSelectedSettingsTab(route.settingsTab);
+    setShowContactsModal(false);
+    setShowMobileChat(Boolean(route.conversationId));
+  }, []);
+
+  const navigate = useCallback((route: AppRoute, replace = false) => {
+    const normalizedRoute = { ...route, accountId: route.accountId || String(currentAccount?.id || routeAccountId || '') };
+    const target = urlForAppRoute(normalizedRoute);
+    const current = `${window.location.pathname}${window.location.search}`;
+    if (current !== target) window.history[replace ? 'replaceState' : 'pushState']({}, '', target);
+    applyRoute(normalizedRoute);
+  }, [applyRoute, currentAccount?.id, routeAccountId]);
+
+  const openConversation = useCallback((conversationId: string) => {
+    navigate({ tab: 'chats', conversationId, ...(selectedInbox !== 'todas' ? { inbox: selectedInbox } : {}) });
+  }, [navigate, selectedInbox]);
+
+  const navigateToTab = useCallback((tab: NavTab) => {
+    if (tab === 'chats') navigate({ tab: 'chats', ...(selectedInbox !== 'todas' ? { inbox: selectedInbox } : {}) });
+    else navigate({ tab });
+  }, [navigate, selectedInbox]);
+
+  const navigateToSettings = useCallback((tab: SettingsTab) => navigate({ tab: 'settings', settingsTab: tab }), [navigate]);
+
+  const selectInboxRoute = useCallback((inbox: string) => {
+    navigate({ tab: 'chats', ...(inbox !== 'todas' ? { inbox } : {}) });
+  }, [navigate]);
+
+  useEffect(() => {
+    const onPopState = () => applyRoute(appRouteFromUrl(new URL(window.location.href)));
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [applyRoute]);
+
+  useEffect(() => {
+    if (!authenticatedUser || !currentAccount) return;
+    const requestedAccountId = Number(routeAccountId);
+    if (Number.isInteger(requestedAccountId) && requestedAccountId > 0 && requestedAccountId !== currentAccount.id) {
+      if (authenticatedUser.accounts.some((account) => account.id === requestedAccountId)) {
+        void selectAccount(requestedAccountId).catch((cause) => addToast(errorMessageForUser(cause), 'error'));
+        return;
+      }
+      addToast('Você não possui acesso à conta indicada nesta URL.', 'error');
+    }
+    // Canonicalize legacy/local links only after authentication determines the
+    // account. Every operational route is then isolated by account ID.
+    if (routeAccountId !== String(currentAccount.id)) {
+      navigate({ tab: activeNavTab, ...(activeChatId ? { conversationId: activeChatId } : {}), ...(selectedInbox !== 'todas' ? { inbox: selectedInbox } : {}), ...(activeNavTab === 'settings' ? { settingsTab: selectedSettingsTab } : {}), accountId: String(currentAccount.id) }, true);
+    }
+  }, [activeChatId, activeNavTab, authenticatedUser, currentAccount, navigate, routeAccountId, selectAccount, selectedInbox, selectedSettingsTab]);
 
   // Selected Chat Object
   const listChats = useMemo(() => conversations.map((conversation) => toChatListItem(conversation, inboxes)), [conversations, inboxes]);
@@ -404,11 +465,19 @@ export default function App() {
     if (unreadRefreshTimer.current !== null) window.clearTimeout(unreadRefreshTimer.current);
   }, []);
 
-  // Seleciona uma conversa somente quando ainda não há seleção. Atualizações
-  // em tempo real não podem trocar o atendimento que o agente está vendo.
+  // A URL pode apontar para uma conversa fora da primeira página. Busque-a
+  // diretamente para que atualizar ou compartilhar o link preserve o contexto.
   useEffect(() => {
-    if (!activeChatId && conversations[0]) setActiveChatId(String(conversations[0].id));
-  }, [activeChatId, conversations]);
+    const conversationId = Number(activeChatId);
+    // Number('') is 0. Do not request the synthetic /conversations/0 route
+    // while the user is on the inbox list without a selected conversation.
+    if (!currentAccount || !Number.isInteger(conversationId) || conversationId < 1 || selectedConversation || conversationsStatus !== 'ready') return;
+    let cancelled = false;
+    void conversationService.get(currentAccount.id, conversationId)
+      .then((conversation) => { if (!cancelled) addCreatedConversation(conversation); })
+      .catch((cause) => { if (!cancelled) addToast(`Não foi possível abrir esta conversa: ${errorMessageForUser(cause)}`, 'error'); });
+    return () => { cancelled = true; };
+  }, [activeChatId, addCreatedConversation, conversationsStatus, currentAccount, selectedConversation]);
 
   useEffect(() => {
     if (!selectedConversationId || !selectedConversation || openedReadConversationRef.current === selectedConversationId) return;
@@ -459,10 +528,7 @@ export default function App() {
     const existing = await conversationService.findReusable({ accountId: currentAccount.id, contactId, inboxId });
     const conversation = existing || await conversationService.create({ accountId: currentAccount.id, contactId, inboxId });
     if (!existing) addCreatedConversation(conversation);
-    setActiveChatId(String(conversation.id));
-    setActiveNavTab('chats');
-    setShowContactsModal(false);
-    setShowMobileChat(true);
+    navigate({ tab: 'chats', conversationId: String(conversation.id), inbox: String(inboxId) });
 
     if (!initialContent && files.length === 0) return;
     const echoId = globalThis.crypto?.randomUUID?.() || `cw-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -527,9 +593,9 @@ export default function App() {
 
       // Filter Category Pills
       if (activeFilter === 'minhas') {
-        if (c.unassigned || c.id === 'c10' || c.id === 'c11') return false;
+        if (!authenticatedUser || !c.responsibleUserIds?.includes(authenticatedUser.id)) return false;
       } else if (activeFilter === 'nao_atribuidas') {
-        if (!c.unassigned && c.id !== 'c10' && c.id !== 'c11') return false;
+        if (!c.unassigned) return false;
       }
 
       // Quick Status Filter
@@ -612,7 +678,7 @@ export default function App() {
 
       return 0;
     });
-  }, [listChats, searchQuery, selectedInbox, activeFilter, selectedStatus, filterRules, selectedSort]);
+  }, [listChats, searchQuery, selectedInbox, activeFilter, selectedStatus, filterRules, selectedSort, authenticatedUser]);
 
   // Handle sending message
   const handleSendMessage = (chatId: string, text: string, attachments?: File[], isPrivate?: boolean, replyTo?: import('./types').ReplyTo | null) => {
@@ -793,12 +859,12 @@ export default function App() {
         <NavRail
           activeTab={activeNavTab}
           onTabChange={(tab) => {
-            setActiveNavTab(tab);
+            navigateToTab(tab);
           }}
           selectedInbox={selectedInbox}
-          onSelectInbox={setSelectedInbox}
+          onSelectInbox={selectInboxRoute}
           selectedSettingsTab={selectedSettingsTab}
-          onSelectSettingsTab={(tabKey) => setSelectedSettingsTab(tabKey as SettingsTab)}
+          onSelectSettingsTab={(tabKey) => navigateToSettings(tabKey as SettingsTab)}
           userAvatar={user.avatar}
           isDarkMode={isDarkMode}
           onToggleDarkMode={toggleDarkMode}
@@ -816,7 +882,7 @@ export default function App() {
           onNewChatClick={() => {
             setShowNewConversationModal(true);
             setIsSidebarCollapsed(false);
-            setActiveNavTab('chats');
+            navigateToTab('chats');
           }}
         />
 
@@ -824,14 +890,14 @@ export default function App() {
         {activeNavTab === 'status' && (
           <StatusView
             statuses={[]}
-            onClose={() => setActiveNavTab('chats')}
+            onClose={() => navigateToTab('chats')}
           />
         )}
 
         {activeNavTab === 'calls' && (
           <CallsView
             calls={[]}
-            onClose={() => setActiveNavTab('chats')}
+            onClose={() => navigateToTab('chats')}
           />
         )}
 
@@ -848,19 +914,16 @@ export default function App() {
             onStartConversation={startContactConversation}
             isCreatingContact={contactDirectory.isCreating}
             onOpenConversation={(conversationId) => {
-              setActiveChatId(String(conversationId));
-              setActiveNavTab('chats');
-              setShowMobileChat(true);
+              openConversation(String(conversationId));
             }}
             onCreateNewChat={(name, phone, channelName, initialMessageText, isPrivate, attachments) => {
               handleCreateNewChat(name, phone, channelName, initialMessageText, isPrivate, attachments);
-              setActiveNavTab('chats');
-              setShowMobileChat(true);
+              navigateToTab('chats');
             }}
             onUpdateContact={updateDirectoryContact}
             onDeleteContact={deleteDirectoryContact}
             isMutatingContact={contactDirectory.isMutating}
-            onClose={() => setActiveNavTab('chats')}
+            onClose={() => navigateToTab('chats')}
             isDarkMode={isDarkMode}
           />
         )}
@@ -869,13 +932,13 @@ export default function App() {
           <SettingsView
             user={user}
             onUpdateUser={(updated) => setUser(updated)}
-            onClose={() => setActiveNavTab('chats')}
+            onClose={() => navigateToTab('chats')}
             isDarkMode={isDarkMode}
             onToggleDarkMode={toggleDarkMode}
             wallpaperId={wallpaperId}
             onSelectWallpaper={(id) => setWallpaperId(id)}
             activeTab={selectedSettingsTab}
-            onTabChange={(tab) => setSelectedSettingsTab(tab)}
+            onTabChange={navigateToSettings}
             uiWidthScale={uiWidthScale}
             uiHeightScale={uiHeightScale}
             uiFontScale={uiFontScale}
@@ -890,7 +953,7 @@ export default function App() {
 
         {activeNavTab === 'media' && (
           <AppsView
-            onClose={() => setActiveNavTab('chats')}
+            onClose={() => navigateToTab('chats')}
             isDarkMode={isDarkMode}
           />
         )}
@@ -910,23 +973,20 @@ export default function App() {
               onStartConversation={startContactConversation}
               isCreatingContact={contactDirectory.isCreating}
               onOpenConversation={(conversationId) => {
-                setActiveChatId(String(conversationId));
+                openConversation(String(conversationId));
                 setShowContactsModal(false);
-                setActiveNavTab('chats');
-                setShowMobileChat(true);
               }}
               onCreateNewChat={(name, phone, channelName, initialMessageText, isPrivate, attachments) => {
                 handleCreateNewChat(name, phone, channelName, initialMessageText, isPrivate, attachments);
                 setShowContactsModal(false);
-                setActiveNavTab('chats');
-                setShowMobileChat(true);
+                navigateToTab('chats');
               }}
               onUpdateContact={updateDirectoryContact}
               onDeleteContact={deleteDirectoryContact}
               isMutatingContact={contactDirectory.isMutating}
               onClose={() => {
                 setShowContactsModal(false);
-                setActiveNavTab('chats');
+                navigateToTab('chats');
               }}
               isDarkMode={isDarkMode}
             />
@@ -975,11 +1035,11 @@ export default function App() {
                   activeFilter={activeFilter}
                   onFilterChange={setActiveFilter}
                   selectedInbox={selectedInbox}
-                  onResetInbox={() => setSelectedInbox('todas')}
+                  onResetInbox={() => selectInboxRoute('todas')}
                   onNewChatClick={() => setShowNewConversationModal(true)}
-                  onNewContactClick={() => setShowContactsModal(true)}
+                  onNewContactClick={() => navigateToTab('communities')}
                   onNewGroupClick={() => setShowNewGroupModal(true)}
-                  onMenuClick={() => setActiveNavTab('settings')}
+                  onMenuClick={() => navigateToSettings('conta')}
                   isDarkMode={isDarkMode}
                   unreadCountTotal={unreadCountTotal}
                   favoritesCountTotal={favoritesCountTotal}
@@ -1009,8 +1069,7 @@ export default function App() {
                         isSelected={c.id === activeChatId}
                         onContextMenu={handleChatContextMenu}
                         onSelect={(selected) => {
-                          setActiveChatId(selected.id);
-                          setShowMobileChat(true);
+                          openConversation(selected.id);
                         }}
                         isDarkMode={isDarkMode}
                       />
@@ -1038,8 +1097,7 @@ export default function App() {
                   chat={activeChatWithHistory}
                   allChats={listChats}
                   onSelectChat={(selected) => {
-                    setActiveChatId(selected.id);
-                    setShowMobileChat(true);
+                    openConversation(selected.id);
                   }}
                   onSendMessage={handleSendMessage}
                   onImageClick={(url, title, subtitle) =>
@@ -1110,7 +1168,7 @@ export default function App() {
                   wallpaperId={wallpaperId}
                   isSidebarCollapsed={isSidebarCollapsed}
                   onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
-                  onMobileBack={() => setShowMobileChat(false)}
+                  onMobileBack={() => navigateToTab('chats')}
                 /> : (
                   <div className={`h-full flex items-center justify-center text-center p-8 ${isDarkMode ? 'bg-[#0b141a] text-[#8696a0]' : 'bg-[#f0f2f5] text-[#667781]'}`}>
                     <div>
@@ -1130,8 +1188,7 @@ export default function App() {
         <FloatingMobileNav
           activeTab={activeNavTab}
           onTabChange={(tab) => {
-            setActiveNavTab(tab);
-            setShowMobileChat(false);
+            navigateToTab(tab);
           }}
           isDarkMode={isDarkMode}
           unreadCountTotal={unreadCountTotal}
@@ -1196,6 +1253,16 @@ export default function App() {
         title={menuState.title}
         isDarkMode={isDarkMode}
       />
+
+      {conversationPendingDeletion && (
+        <ConfirmDialog
+          title="Excluir conversa?"
+          description={`A conversa com “${conversationPendingDeletion.name}” será removida. Esta ação não pode ser desfeita.`}
+          isBusy={isDeletingConversation}
+          onCancel={() => { if (!isDeletingConversation) setConversationPendingDeletion(null); }}
+          onConfirm={() => void deleteConversation(conversationPendingDeletion)}
+        />
+      )}
 
       {/* Floating Toast Notifications */}
       <ToastContainer

@@ -1,0 +1,38 @@
+services:
+  waha:
+    # Pinned GOWS image. Do not use `latest` in production; upgrade only
+    # after contract testing against the bridge.
+    image: devlikeapro/waha:gows-2026.7.2
+    container_name: chatwoot-waha
+    restart: unless-stopped
+    environment:
+      WAHA_API_KEY: ${WAHA_API_KEY:?set WAHA_API_KEY in the server environment}
+      WHATSAPP_DEFAULT_ENGINE: ${WAHA_DEFAULT_ENGINE:-GOWS}
+      WHATSAPP_HOOK_URL: ${BRIDGE_PUBLIC_URL:?set BRIDGE_PUBLIC_URL}/webhooks/waha
+      WHATSAPP_HOOK_EVENTS: session.status,message,message.any,message.reaction,message.ack,message.ack.group,message.edited,message.revoked,group.v2.join,group.v2.leave,group.v2.participants,group.v2.update
+      WHATSAPP_HOOK_HMAC_KEY: ${WAHA_WEBHOOK_SECRET:?set WAHA_WEBHOOK_SECRET in the server environment}
+      # These control WhatsApp → GOWS synchronization at pairing time only.
+      # Bridge imports are manual and never mutate them.
+      WAHA_GOWS_DEVICE_REQUIRE_FULL_SYNC: ${WAHA_GOWS_DEVICE_REQUIRE_FULL_SYNC:-false}
+      WAHA_GOWS_DEVICE_HISTORY_SYNC_FULL_SYNC_DAYS_LIMIT: ${WAHA_GOWS_DEVICE_HISTORY_SYNC_FULL_SYNC_DAYS_LIMIT:-}
+      WAHA_GOWS_DEVICE_HISTORY_SYNC_RECENT_SYNC_DAYS_LIMIT: ${WAHA_GOWS_DEVICE_HISTORY_SYNC_RECENT_SYNC_DAYS_LIMIT:-}
+      WAHA_GOWS_DEVICE_HISTORY_SYNC_INITIAL_SYNC_MAX_MESSAGES_PER_CHAT: ${WAHA_GOWS_DEVICE_HISTORY_SYNC_INITIAL_SYNC_MAX_MESSAGES_PER_CHAT:-}
+      WAHA_GOWS_DEVICE_HISTORY_SYNC_FULL_SYNC_SIZE_MB_LIMIT: ${WAHA_GOWS_DEVICE_HISTORY_SYNC_FULL_SYNC_SIZE_MB_LIMIT:-}
+      WAHA_GOWS_DEVICE_HISTORY_SYNC_STORAGE_QUOTA_MB: ${WAHA_GOWS_DEVICE_HISTORY_SYNC_STORAGE_QUOTA_MB:-}
+    ports:
+      - "127.0.0.1:${WAHA_HOST_PORT:-3001}:3000"
+    # Docker Desktop provides this automatically; Linux needs the explicit
+    # host-gateway alias so a local WAHA container can deliver webhooks to the
+    # bridge running on the host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - waha_sessions:/app/.sessions
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/health',{headers:{'X-Api-Key':process.env.WAHA_API_KEY}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  waha_sessions:

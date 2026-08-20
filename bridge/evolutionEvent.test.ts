@@ -42,6 +42,13 @@ describe('parseIncomingEvolutionMessage', () => {
     })).toMatchObject({ messageId: 'reply-id', quotedMessageId: 'original-id' });
   });
 
+  it('aceita a referência de reply no wrapper messageContextInfo do Evolution v2', () => {
+    expect(parseIncomingEvolutionMessage({
+      event: 'messages.upsert', instance: 'cw-1',
+      data: { key: { remoteJid: '5511999999999@s.whatsapp.net', id: 'reply-wrapper', fromMe: true }, message: { conversation: 'Resposta pelo celular', messageContextInfo: { stanzaId: 'original-wrapper' } } },
+    })).toMatchObject({ messageId: 'reply-wrapper', quotedMessageId: 'original-wrapper' });
+  });
+
   it('aceita imagem com caption e preserva metadados para download', () => {
     expect(parseIncomingEvolutionMessage({
       event: 'messages.upsert', instance: 'cw-1',
@@ -71,7 +78,7 @@ describe('parseIncomingEvolutionMessage', () => {
       event: 'messages.upsert', instance: 'cw-1',
       data: { key: { remoteJid: '120363024158769234@g.us', participant: '5511999999999@s.whatsapp.net', id: 'group-1', fromMe: false }, subject: 'Equipe Comercial', pushName: 'Ana', message: { conversation: 'Bom dia' } },
     })).toMatchObject({
-      sourceId: 'whatsapp:group:120363024158769234@g.us', remoteJid: '120363024158769234@g.us', chatType: 'group', name: 'Equipe Comercial', participantJid: '5511999999999@s.whatsapp.net', participantName: 'Ana', content: 'Bom dia',
+      sourceId: 'whatsapp:group:120363024158769234%40g%2Eus', remoteJid: '120363024158769234@g.us', chatType: 'group', name: 'Equipe Comercial', participantJid: '5511999999999@s.whatsapp.net', participantName: 'Ana', content: 'Bom dia',
     });
   });
 });
@@ -109,7 +116,7 @@ describe('parseIncomingEvolutionReaction', () => {
     expect(parseIncomingEvolutionReaction({
       event: 'messages.upsert', instance: 'cw-1',
       data: { key: { remoteJid: '120363024158769234@g.us', participant: '5511999999999@s.whatsapp.net', id: 'reaction-group', fromMe: false }, pushName: 'Ana', message: { reactionMessage: { key: { remoteJid: '120363024158769234@g.us', id: 'group-message', fromMe: true }, text: '👍' } } },
-    })).toMatchObject({ chatType: 'group', sourceId: 'whatsapp:group:120363024158769234@g.us', senderId: 'participant:5511999999999@s.whatsapp.net' });
+    })).toMatchObject({ chatType: 'group', sourceId: 'whatsapp:group:120363024158769234%40g%2Eus', senderId: 'participant:5511999999999@s.whatsapp.net' });
   });
 });
 
@@ -121,6 +128,15 @@ describe('Evolution message mutations', () => {
         editedMessage: { message: { extendedTextMessage: { text: 'Texto corrigido' } } },
       },
     })).toMatchObject({ instance: 'cw-1', targetMessageId: 'BAE5-original', remoteJid: '5511999999999@s.whatsapp.net', fromMe: true, content: 'Texto corrigido' });
+  });
+
+  it('also accepts the messages.update event exposed by Evolution v2.3.7', () => {
+    expect(parseIncomingEvolutionEdit({
+      event: 'messages.update', instance: 'cw-1', data: {
+        key: { id: 'BAE5-original', remoteJid: '5511999999999@s.whatsapp.net', fromMe: true },
+        editedMessage: { message: { conversation: 'Texto corrigido' } },
+      },
+    })).toMatchObject({ targetMessageId: 'BAE5-original', content: 'Texto corrigido' });
   });
 
   it('parses the v2 messages.delete webhook as a revoke operation', () => {

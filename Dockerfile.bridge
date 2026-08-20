@@ -1,0 +1,7 @@
+FROM node:24-alpine
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY bridge ./bridge
+EXPOSE 3100
+CMD ["node", "--import", "tsx", "bridge/index.ts"]

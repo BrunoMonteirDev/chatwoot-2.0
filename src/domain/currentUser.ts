@@ -46,6 +46,7 @@ export interface ConversationSummary {
   priority: string | null;
   assigneeId: number | null;
   assigneeName: string | null;
+  participantIds: number[];
   teamId: number | null;
   teamName: string | null;
   labels: string[];

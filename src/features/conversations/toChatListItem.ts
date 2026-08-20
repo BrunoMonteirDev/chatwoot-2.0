@@ -12,6 +12,7 @@ export const toChatListItem = (conversation: ConversationSummary, inboxes: Inbox
     lastMessageByMe: conversation.lastMessageByCurrentUser, time: new Date(conversation.lastActivityAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     lastActivityAt: new Date(conversation.lastActivityAt * 1000).toISOString(), unreadCount: conversation.unreadCount,
     channelName: inbox?.name || conversation.channelType || 'Canal', assignedAgent: conversation.assigneeName || undefined,
+    responsibleUserIds: [...new Set([...(conversation.participantIds || []), ...(conversation.assigneeId ? [conversation.assigneeId] : [])])],
     teamName: conversation.teamName || undefined, tags: conversation.labels.map((label) => ({ label })),
     unassigned: !conversation.assigneeName, status: statusMap[conversation.status] || 'aberta',
     priority: conversation.priority ? priorityMap[conversation.priority] || 'media' : undefined, messages: [],

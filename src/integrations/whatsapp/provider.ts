@@ -1,6 +1,6 @@
 import type { Inbox } from '../../domain/currentUser';
 
-export const WHATSAPP_TRANSPORTS = ['evolution', 'meta_cloud'] as const;
+export const WHATSAPP_TRANSPORTS = ['evolution', 'waha', 'meta_cloud'] as const;
 export type WhatsAppTransport = typeof WHATSAPP_TRANSPORTS[number];
 // Kept as an alias for the previous public integration API.
 export type WhatsAppProvider = WhatsAppTransport;
@@ -23,10 +23,10 @@ export interface MetaCloudInboxMetadata {
   meta_history_status?: 'not_available' | 'waiting' | 'receiving' | 'ready' | 'importing' | 'synced' | 'failed';
 }
 
-export interface WhatsAppInboxConfiguration { mode: WhatsAppMode; transports: WhatsAppTransport[]; meta: MetaCloudInboxMetadata | null; evolutionInstanceName: string | null; }
+export interface WhatsAppInboxConfiguration { mode: WhatsAppMode; transports: WhatsAppTransport[]; meta: MetaCloudInboxMetadata | null; evolutionInstanceName: string | null; wahaSessionName: string | null; }
 
 const transportsFor = (attributes: Record<string, unknown>): WhatsAppTransport[] => {
-  const declared = Array.isArray(attributes.whatsapp_transports) ? attributes.whatsapp_transports.filter((item): item is WhatsAppTransport => item === 'evolution' || item === 'meta_cloud') : [];
+  const declared = Array.isArray(attributes.whatsapp_transports) ? attributes.whatsapp_transports.filter((item): item is WhatsAppTransport => item === 'evolution' || item === 'waha' || item === 'meta_cloud') : [];
   if (declared.length) return [...new Set(declared)];
   if (attributes.whatsapp_provider === 'meta_cloud') return ['meta_cloud'];
   // Existing Evolution inboxes predate the generic provider marker.
@@ -37,12 +37,13 @@ export const whatsappConfigurationForInbox = (inbox: Inbox): WhatsAppInboxConfig
   const attributes = inbox.additionalAttributes;
   const transports = transportsFor(attributes);
   if (!transports.length) return null;
-  const mode: WhatsAppMode = transports.length === 2 ? 'hybrid' : transports[0] === 'meta_cloud' ? 'official' : 'web';
+  const mode: WhatsAppMode = transports.length > 1 ? 'hybrid' : transports[0] === 'meta_cloud' ? 'official' : 'web';
   const hasMeta = transports.includes('meta_cloud') && typeof attributes.meta_waba_id === 'string' && typeof attributes.meta_phone_number_id === 'string';
   return {
     mode, transports,
     meta: hasMeta ? { whatsapp_mode: mode, whatsapp_transports: transports, meta_waba_id: attributes.meta_waba_id as string, meta_phone_number_id: attributes.meta_phone_number_id as string, meta_display_phone_number: typeof attributes.meta_display_phone_number === 'string' ? attributes.meta_display_phone_number : null, ...(attributes.meta_onboarding_mode === 'coexistence' || attributes.meta_onboarding_mode === 'standard' ? { meta_onboarding_mode: attributes.meta_onboarding_mode } : {}), ...(attributes.meta_business_app_status === 'active' || attributes.meta_business_app_status === 'offboarded' || attributes.meta_business_app_status === 'not_applicable' ? { meta_business_app_status: attributes.meta_business_app_status } : {}), ...(typeof attributes.meta_history_available === 'boolean' ? { meta_history_available: attributes.meta_history_available } : {}), ...(typeof attributes.meta_history_authorized === 'boolean' ? { meta_history_authorized: attributes.meta_history_authorized } : {}), ...(attributes.meta_history_status === 'not_available' || attributes.meta_history_status === 'waiting' || attributes.meta_history_status === 'receiving' || attributes.meta_history_status === 'ready' || attributes.meta_history_status === 'importing' || attributes.meta_history_status === 'synced' || attributes.meta_history_status === 'failed' ? { meta_history_status: attributes.meta_history_status } : {}) } : null,
     evolutionInstanceName: typeof attributes.evolution_instance_name === 'string' ? attributes.evolution_instance_name : null,
+    wahaSessionName: typeof attributes.waha_session_name === 'string' ? attributes.waha_session_name : null,
   };
 };
 
@@ -75,11 +76,12 @@ export const metaCloudMetadataForInbox = (inbox: Inbox): MetaCloudInboxMetadata 
   };
 };
 
-export const externalMessageId = (provider: WhatsAppProvider, id: string) => `${provider === 'meta_cloud' ? 'meta' : 'evolution'}:${id}`;
+const externalNamespace: Record<WhatsAppProvider, 'evolution' | 'waha' | 'meta'> = { evolution: 'evolution', waha: 'waha', meta_cloud: 'meta' };
+export const externalMessageId = (provider: WhatsAppProvider, id: string) => `${externalNamespace[provider]}:${id}`;
 
 export const parseExternalMessageId = (value: string | null | undefined): { provider: WhatsAppProvider; id: string } | null => {
   if (typeof value !== 'string') return null;
-  const match = /^(evolution|meta):(.+)$/.exec(value);
+  const match = /^(evolution|waha|meta):(.+)$/.exec(value);
   if (!match || !match[2]) return null;
-  return { provider: match[1] === 'meta' ? 'meta_cloud' : 'evolution', id: match[2] };
+  return { provider: match[1] === 'meta' ? 'meta_cloud' : match[1] as 'evolution' | 'waha', id: match[2] };
 };

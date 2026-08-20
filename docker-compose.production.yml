@@ -1,0 +1,109 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DATABASE:-chatwoot_production}
+      POSTGRES_USER: ${POSTGRES_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["sh", "-c", "redis-server --appendonly yes --requirepass $$REDIS_PASSWORD"]
+    environment:
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?set REDIS_PASSWORD}"
+    volumes: [redis_data:/data]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  rails:
+    build: { context: ../chatwoot, dockerfile: docker/Dockerfile }
+    restart: unless-stopped
+    env_file: ${PRODUCTION_ENV_FILE:-.env.production}
+    environment: { RAILS_ENV: production, NODE_ENV: production, INSTALLATION_ENV: docker }
+    command: ["bundle", "exec", "rails", "s", "-p", "3000", "-b", "0.0.0.0"]
+    volumes: [chatwoot_storage:/app/storage]
+    depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_healthy } }
+
+  sidekiq:
+    build: { context: ../chatwoot, dockerfile: docker/Dockerfile }
+    restart: unless-stopped
+    env_file: ${PRODUCTION_ENV_FILE:-.env.production}
+    environment: { RAILS_ENV: production, NODE_ENV: production, INSTALLATION_ENV: docker }
+    command: ["bundle", "exec", "sidekiq", "-C", "config/sidekiq.yml"]
+    volumes: [chatwoot_storage:/app/storage]
+    depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_healthy } }
+
+  bridge:
+    build: { context: ., dockerfile: Dockerfile.bridge }
+    restart: unless-stopped
+    env_file: ${PRODUCTION_ENV_FILE:-.env.production}
+    environment:
+      CHATWOOT_BASE_URL: http://rails:3000
+      WAHA_BASE_URL: http://waha:3000
+      BRIDGE_REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
+    volumes: [bridge_data:/app/bridge/data]
+    depends_on: { rails: { condition: service_started }, redis: { condition: service_healthy }, waha: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3100/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+
+  waha:
+    image: devlikeapro/waha:gows-2026.7.2
+    restart: unless-stopped
+    environment:
+      WAHA_API_KEY: ${WAHA_API_KEY:?set WAHA_API_KEY}
+      WHATSAPP_DEFAULT_ENGINE: ${WAHA_DEFAULT_ENGINE:-GOWS}
+      WHATSAPP_HOOK_URL: https://${BRIDGE_DOMAIN:?set BRIDGE_DOMAIN}/webhooks/waha
+      WHATSAPP_HOOK_EVENTS: session.status,message,message.any,message.reaction,message.ack,message.ack.group,message.edited,message.revoked,group.v2.join,group.v2.leave,group.v2.participants,group.v2.update
+      WHATSAPP_HOOK_HMAC_KEY: ${WAHA_WEBHOOK_SECRET:?set WAHA_WEBHOOK_SECRET}
+      WAHA_GOWS_DEVICE_REQUIRE_FULL_SYNC: ${WAHA_GOWS_DEVICE_REQUIRE_FULL_SYNC:-false}
+      WAHA_GOWS_DEVICE_HISTORY_SYNC_FULL_SYNC_DAYS_LIMIT: ${WAHA_GOWS_DEVICE_HISTORY_SYNC_FULL_SYNC_DAYS_LIMIT:-}
+      WAHA_GOWS_DEVICE_HISTORY_SYNC_RECENT_SYNC_DAYS_LIMIT: ${WAHA_GOWS_DEVICE_HISTORY_SYNC_RECENT_SYNC_DAYS_LIMIT:-}
+      WAHA_GOWS_DEVICE_HISTORY_SYNC_INITIAL_SYNC_MAX_MESSAGES_PER_CHAT: ${WAHA_GOWS_DEVICE_HISTORY_SYNC_INITIAL_SYNC_MAX_MESSAGES_PER_CHAT:-}
+      WAHA_GOWS_DEVICE_HISTORY_SYNC_FULL_SYNC_SIZE_MB_LIMIT: ${WAHA_GOWS_DEVICE_HISTORY_SYNC_FULL_SYNC_SIZE_MB_LIMIT:-}
+      WAHA_GOWS_DEVICE_HISTORY_SYNC_STORAGE_QUOTA_MB: ${WAHA_GOWS_DEVICE_HISTORY_SYNC_STORAGE_QUOTA_MB:-}
+    volumes: [waha_sessions:/app/.sessions]
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/health',{headers:{'X-Api-Key':process.env.WAHA_API_KEY}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_BRIDGE_PUBLIC_URL: "https://${BRIDGE_DOMAIN:?set BRIDGE_DOMAIN}"
+    restart: unless-stopped
+    depends_on: [rails]
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    env_file: ${PRODUCTION_ENV_FILE:-.env.production}
+    ports: ["80:80", "443:443"]
+    volumes: [./deploy/Caddyfile:/etc/caddy/Caddyfile:ro, caddy_data:/data, caddy_config:/config]
+    depends_on: [frontend, bridge]
+
+volumes:
+  postgres_data:
+  redis_data:
+  chatwoot_storage:
+  waha_sessions:
+  bridge_data:
+  caddy_data:
+  caddy_config:

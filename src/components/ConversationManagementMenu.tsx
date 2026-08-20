@@ -76,8 +76,6 @@ export const ConversationManagementMenu = ({
                 </button>) : <span className="text-xs text-[#8696a0]">Nenhuma label disponível.</span>}
               </div>
             </div>
-            <div className="border-t border-white/10 pt-2"><button type="button" disabled={busy || conversation.unreadCount === 0} onClick={onMarkRead} className="w-full rounded px-1.5 py-1 text-left text-xs hover:bg-white/10 disabled:opacity-50">Marcar como lida</button>
-              <button type="button" disabled={busy} onClick={onMarkUnread} className="w-full rounded px-1.5 py-1 text-left text-xs hover:bg-white/10 disabled:opacity-50">Marcar como não lida</button></div>
           </div>}
         </div>
       </>}

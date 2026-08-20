@@ -31,6 +31,7 @@ describe('parseOutgoingChatwootMessage', () => {
   it('não reenvia ao WhatsApp uma mensagem que veio do próprio celular', () => {
     expect(parseOutgoingChatwootMessage({ ...payload, source_id: 'evolution:BAE5' })).toBeNull();
     expect(parseOutgoingChatwootMessage({ ...payload, source_id: 'meta:wamid.1' })).toBeNull();
+    expect(parseOutgoingChatwootMessage({ ...payload, source_id: 'waha:ABC' })).toBeNull();
   });
 
   it('aceita mídia sem texto e preserva seus metadados', () => {
@@ -62,7 +63,7 @@ describe('parseOutgoingChatwootMessage', () => {
   it('reconhece grupo por sua identidade própria, sem fingir que é telefone', () => {
     expect(parseOutgoingChatwootMessage({
       ...payload,
-      conversation: { id: 31, inbox_id: 7, contact_inbox: { source_id: 'whatsapp:group:120363024158769234@g.us' } },
+      conversation: { id: 31, inbox_id: 7, contact_inbox: { source_id: 'whatsapp:group:120363024158769234%40g%2Eus' } },
     })).toMatchObject({ number: '120363024158769234@g.us', chatType: 'group' });
   });
 

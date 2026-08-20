@@ -3,6 +3,16 @@ export interface OutgoingChatwootMessage { messageId: number; conversationId: nu
 
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue => value && typeof value === 'object' ? value as RecordValue : {};
+const groupJidForSourceId = (sourceId: string) => {
+  const encoded = sourceId.match(/^whatsapp:group:(.+)$/)?.[1];
+  if (!encoded) return undefined;
+  try {
+    const groupJid = decodeURIComponent(encoded);
+    return groupJid.endsWith('@g.us') ? groupJid : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 export const parseOutgoingChatwootMessage = (payload: unknown): OutgoingChatwootMessage | null => {
   const root = record(payload);
@@ -31,9 +41,9 @@ export const parseOutgoingChatwootMessage = (payload: unknown): OutgoingChatwoot
   const contentAttributes = record(root.content_attributes);
   const quotedExternalId = typeof contentAttributes.in_reply_to_external_id === 'string' ? contentAttributes.in_reply_to_external_id : undefined;
   const quotedMessageId = quotedExternalId?.replace(/^evolution:/, '');
-  if (root.event !== 'message_created' || root.message_type !== 'outgoing' || root.private === true || typeof messageSourceId === 'string' && /^(evolution|meta):/.test(messageSourceId) || !Number.isInteger(messageId) || !Number.isInteger(conversationId) || !Number.isInteger(inboxId) || typeof sourceId !== 'string' || (typeof content !== 'string' && attachments.length === 0) || (typeof content === 'string' && !content.trim() && attachments.length === 0)) return null;
+  if (root.event !== 'message_created' || root.message_type !== 'outgoing' || root.private === true || typeof messageSourceId === 'string' && /^(evolution|waha|meta):/.test(messageSourceId) || !Number.isInteger(messageId) || !Number.isInteger(conversationId) || !Number.isInteger(inboxId) || typeof sourceId !== 'string' || (typeof content !== 'string' && attachments.length === 0) || (typeof content === 'string' && !content.trim() && attachments.length === 0)) return null;
   const sourceNumber = sourceId.match(/^whatsapp:(\d{8,15})$/)?.[1];
-  const groupJid = sourceId.match(/^whatsapp:group:(.+@g\.us)$/)?.[1];
+  const groupJid = groupJidForSourceId(sourceId);
   // Contacts created by the Chatwoot dashboard receive a generated API source
   // id. Their phone remains available in meta.sender, so use it as a safe
   // fallback for the Evolution destination.

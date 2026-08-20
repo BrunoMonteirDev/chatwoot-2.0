@@ -36,6 +36,7 @@ import {
   Sliders,
   SlidersHorizontal,
   Star,
+  X,
 } from 'lucide-react';
 import { Chat, Message, Attachment, ReplyTo, LinkPreview, MessageReaction } from '../types';
 import { WhatsAppDoodleBg, WallpaperId } from './WhatsAppDoodleBg';
@@ -47,11 +48,11 @@ import { QuickResponsesPopup } from './QuickResponsesPopup';
 import { MentionsPopup, defaultGroupMembers, GroupMember } from './MentionsPopup';
 import { ContextMenu } from './ContextMenu';
 import { useContextMenu } from '../hooks/useContextMenu';
-import { getMessageContextMenuItems, QUICK_REACTION_EMOJIS } from '../utils/contextMenuActions';
+import { getMessageContextMenuItems } from '../utils/contextMenuActions';
 import { ConversationManagementMenu } from './ConversationManagementMenu';
 import { ContactDetailsPanel } from './ContactDetailsPanel';
-import type { ConversationManagementCatalogs } from '../integrations/chatwoot/conversationManagement';
-import type { ConversationPriority, ConversationStatus, ConversationSummary } from '../domain/currentUser';
+import { conversationManagementService, type ConversationManagementCatalogs } from '../integrations/chatwoot/conversationManagement';
+import type { AssignableAgent, ConversationPriority, ConversationStatus, ConversationSummary } from '../domain/currentUser';
 import type { RealtimeConnectionStatus } from '../integrations/chatwoot/realtime';
 import type { ContactNote, ContactProfile } from '../domain/currentUser';
 import type { ContactUpdate } from '../integrations/chatwoot/contacts';
@@ -200,16 +201,31 @@ const TextMessageContent: React.FC<{
 // Quoted reply message box
 const QuotedReplyBox: React.FC<{
   replyTo: ReplyTo;
-}> = ({ replyTo }) => {
+  onOpenOriginal: (messageId: string) => void;
+}> = ({ replyTo, onOpenOriginal }) => {
+  const openOriginal = () => {
+    if (replyTo.id) onOpenOriginal(replyTo.id);
+  };
   return (
-    <div className="mb-2 p-2.5 rounded-r-lg rounded-tl-sm border-l-4 border-[#00a884] bg-black/20 dark:bg-black/30 border-r border-t border-b border-white/5 cursor-pointer hover:bg-black/30 transition-colors">
-      <div className="text-xs font-semibold text-[#00a884] truncate">
-        {replyTo.senderName}
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        openOriginal();
+      }}
+      className="mb-2 flex min-w-0 w-full overflow-hidden rounded-r-lg rounded-tl-sm border-l-4 border-[#00a884] bg-black/20 dark:bg-black/30 border-r border-t border-b border-white/5 text-left cursor-pointer hover:bg-black/30 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00a884]"
+      aria-label={`Ir para a mensagem de ${replyTo.senderName}`}
+    >
+      <div className="min-w-0 flex-1 p-2.5">
+        <div className="text-xs font-semibold text-[#00a884] truncate">
+          {replyTo.senderName}
+        </div>
+        <div className="text-xs text-[#8696a0] truncate mt-0.5">
+          {replyTo.text}
+        </div>
       </div>
-      <div className="text-xs text-[#8696a0] truncate mt-0.5">
-        {replyTo.text}
-      </div>
-    </div>
+      {replyTo.mediaPreviewUrl && <img src={replyTo.mediaPreviewUrl} alt="Prévia da mídia respondida" className="h-14 w-14 shrink-0 object-cover" />}
+    </button>
   );
 };
 
@@ -608,10 +624,30 @@ export const ChatArea: React.FC<Props> = ({
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isContactPanelOpen, setIsContactPanelOpen] = useState(false);
   const [contactPanelTab, setContactPanelTab] = useState<'contact' | 'attributes'>('contact');
+  const [conversationParticipants, setConversationParticipants] = useState<AssignableAgent[]>([]);
   const [inputText, setInputText] = useState('');
   const [messageMode, setMessageMode] = useState<'responder' | 'privada'>('responder');
   const [ticketStatus, setTicketStatus] = useState<'resolver' | 'resolvido' | 'adiado' | 'pendente'>('resolver');
   const [showResolverMenu, setShowResolverMenu] = useState(false);
+
+  useEffect(() => {
+    if (!isContactPanelOpen || contactPanelTab !== 'attributes' || !accountId || !conversation) {
+      setConversationParticipants([]);
+      return;
+    }
+    let active = true;
+    void conversationManagementService.listParticipants(accountId, conversation.id)
+      .then((participants) => { if (active) setConversationParticipants(participants); })
+      .catch(() => { if (active) setConversationParticipants([]); });
+    return () => { active = false; };
+  }, [accountId, contactPanelTab, conversation?.id, isContactPanelOpen]);
+
+  const updateConversationParticipants = async (userIds: number[]) => {
+    if (!accountId || !conversation) throw new Error('Conversa indisponível.');
+    const participants = await conversationManagementService.setParticipants(accountId, conversation.id, userIds);
+    setConversationParticipants(participants);
+    return participants;
+  };
   const [isExpandedInput, setIsExpandedInput] = useState(false);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -653,6 +689,8 @@ export const ChatArea: React.FC<Props> = ({
   const [messagePendingRevoke, setMessagePendingRevoke] = useState<Message | null>(null);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [editingText, setEditingText] = useState('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editFailure, setEditFailure] = useState<string | null>(null);
   const [reactionFailureId, setReactionFailureId] = useState<string | null>(null);
   const [, forceUpdate] = useState(0);
 
@@ -677,7 +715,7 @@ export const ChatArea: React.FC<Props> = ({
       onDeleteMessage: (m) => {
         setMessagePendingDeletion(m);
       },
-      onEditMessage: (m) => { setEditingMessage(m); setEditingText(m.text || ''); },
+      onEditMessage: (m) => { setEditingMessage(m); setEditingText(m.text || ''); setEditFailure(null); },
       onRevokeMessage: (m) => setMessagePendingRevoke(m),
       onReact: (m, emoji) => void handleReaction(m, emoji),
     });
@@ -735,8 +773,64 @@ export const ChatArea: React.FC<Props> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const closeEditModal = () => {
+    if (isSavingEdit) return;
+    setEditingMessage(null);
+    setEditingText('');
+    setEditFailure(null);
+  };
+
+  const submitMessageEdit = async () => {
+    const target = editingMessage;
+    const content = editingText.trim();
+    if (!target || !content || !onEditMessage || isSavingEdit) return;
+    if (content === (target.text || '').trim()) {
+      closeEditModal();
+      return;
+    }
+    setIsSavingEdit(true);
+    setEditFailure(null);
+    try {
+      const updated = await onEditMessage(target.id, content);
+      if (updated) {
+        setEditingMessage(null);
+        setEditingText('');
+      } else {
+        setEditFailure('Não foi possível editar a mensagem. Tente novamente.');
+      }
+    } catch {
+      setEditFailure('Não foi possível editar a mensagem. Tente novamente.');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!editingMessage) return;
+    const focusTimer = window.setTimeout(() => {
+      editTextareaRef.current?.focus();
+      editTextareaRef.current?.setSelectionRange(editingText.length, editingText.length);
+    }, 0);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeEditModal();
+      }
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        void submitMessageEdit();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [editingMessage, editingText, isSavingEdit]);
 
   const applyFormattingSymbol = (symbol: string) => {
     if (!textareaRef.current) return;
@@ -814,6 +908,14 @@ export const ChatArea: React.FC<Props> = ({
   const previousChatId = useRef(chat.id);
   const previousScrollHeight = useRef<number | null>(null);
 
+  const focusMessage = (messageId: string) => {
+    const element = document.getElementById(`msg-${messageId}`);
+    if (!element) return;
+    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    element.classList.add('bg-[#00a884]/20');
+    window.setTimeout(() => element.classList.remove('bg-[#00a884]/20'), 2000);
+  };
+
   const scrollToBottom = () => {
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollTo({
@@ -858,9 +960,13 @@ export const ChatArea: React.FC<Props> = ({
 
     if (!lastMessage) return;
 
-    if (lastMessage.sender === 'me') {
+    // Realtime, polling, reaction/edit updates and a page prepended above can
+    // all replace `chat.messages`. They must never pull the reader to the
+    // bottom merely because the latest existing message was sent by us.
+    const isPrependingOlderMessages = previousScrollHeight.current !== null;
+    if (isNewMessage && !isPrependingOlderMessages && lastMessage.sender === 'me') {
       scrollToBottom();
-    } else if (isNewMessage) {
+    } else if (isNewMessage && !isPrependingOlderMessages) {
       if (isUserScrolledUp) {
         setUnreadBelowCount((prev) => prev + 1);
       } else {
@@ -1506,13 +1612,6 @@ export const ChatArea: React.FC<Props> = ({
                       : 'bg-white border-transparent text-[#111b21] rounded-tl-none'
                     }`}
                 >
-                  {!msg.isPrivate && onReactMessage && (
-                    <div className={`absolute -top-8 ${isMe ? 'right-0' : 'left-0'} hidden group-hover:flex items-center gap-0.5 rounded-full border px-1 py-0.5 shadow-lg z-20 ${isDarkMode ? 'border-[#37464f] bg-[#202c33]' : 'border-[#d1d7db] bg-white'}`}>
-                      {QUICK_REACTION_EMOJIS.map((emoji) => (
-                        <button key={emoji} type="button" onClick={(event) => { event.stopPropagation(); void handleReaction(msg, emoji); }} className="rounded-full px-0.5 text-sm hover:bg-black/10" title={`Reagir ${emoji}`}>{emoji}</button>
-                      ))}
-                    </div>
-                  )}
                   {/* Private Note Header Badge */}
                   {msg.isPrivate && (
                     <div className="flex items-center space-x-1.5 text-xs font-semibold pb-1 mb-1 border-b border-amber-500/20 text-amber-500 dark:text-amber-400">
@@ -1533,9 +1632,7 @@ export const ChatArea: React.FC<Props> = ({
                   )}
 
                   {/* Quoted Reply Message */}
-                  {msg.replyTo && <QuotedReplyBox replyTo={msg.replyTo} />}
-
-                  {editingMessage?.id === msg.id ? <div className="mb-2 space-y-2"><textarea value={editingText} onChange={event => setEditingText(event.target.value)} rows={3} className="w-full rounded border border-[#00a884] bg-black/15 p-2 text-sm outline-none" /><div className="flex justify-end gap-2"><button type="button" onClick={() => setEditingMessage(null)} className="text-xs text-[#aebac1]">Cancelar</button><button type="button" disabled={!editingText.trim()} onClick={() => { const target = editingMessage; if (!target || !onEditMessage) return; void onEditMessage(target.id, editingText.trim()).then(ok => { if (ok) setEditingMessage(null); }); }} className="rounded bg-[#00a884] px-2 py-1 text-xs font-bold text-[#0b141a] disabled:opacity-50">Salvar</button></div></div> : null}
+                  {msg.replyTo && <QuotedReplyBox replyTo={msg.replyTo} onOpenOriginal={focusMessage} />}
 
                   {/* Link Preview Card */}
                   {msg.linkPreview && <LinkPreviewBox linkPreview={msg.linkPreview} />}
@@ -1661,6 +1758,8 @@ export const ChatArea: React.FC<Props> = ({
                             <Clock className={`w-3.5 h-3.5 ${isDarkMode ? 'text-[#8696a0]' : 'text-[#667781]'}`} />
                           ) : msg.status === 'read' ? (
                             <CheckCheck className="w-4 h-4 text-[#53bdeb]" />
+                          ) : msg.status === 'delivered' ? (
+                            <CheckCheck className={`w-4 h-4 ${isDarkMode ? 'text-[#8696a0]' : 'text-[#667781]'}`} />
                           ) : (
                             <Check
                               className={`w-4 h-4 ${
@@ -2252,12 +2351,7 @@ export const ChatArea: React.FC<Props> = ({
           isDarkMode={isDarkMode}
           onClose={() => setIsSearchOpen(false)}
           onSelectMessage={(msgId) => {
-            const el = document.getElementById(`msg-${msgId}`);
-            if (el) {
-              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              el.classList.add('bg-[#00a884]/20');
-              setTimeout(() => el.classList.remove('bg-[#00a884]/20'), 2000);
-            }
+            focusMessage(msgId);
           }}
         />
       )}
@@ -2273,6 +2367,17 @@ export const ChatArea: React.FC<Props> = ({
           isCreatingNote={isCreatingContactNote}
           initialTab={contactPanelTab}
           isDarkMode={isDarkMode}
+          conversation={conversation}
+          conversationLabels={managementCatalogs?.labels}
+          conversationAgents={managementCatalogs?.agents}
+          conversationTeams={managementCatalogs?.teams}
+          conversationParticipants={conversationParticipants}
+          managementPendingAction={managementPendingAction}
+          onSetConversationPriority={onSetConversationPriority}
+          onAssignConversationAgent={onAssignConversationAgent}
+          onAssignConversationTeam={onAssignConversationTeam}
+          onSetConversationLabels={onSetConversationLabels}
+          onSetConversationParticipants={updateConversationParticipants}
           onRetry={onRetryContact}
           onUpdate={onUpdateContact}
           onCreateNote={onCreateContactNote}
@@ -2299,6 +2404,48 @@ export const ChatArea: React.FC<Props> = ({
         title={menuState.title}
         isDarkMode={isDarkMode}
       />
+
+      {editingMessage && <div
+        className="fixed inset-0 z-[10001] grid place-items-center bg-black/70 p-4 backdrop-blur-[1px]"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-message-title"
+        onMouseDown={(event) => { if (event.target === event.currentTarget) closeEditModal(); }}
+      >
+        <div className={`w-full max-w-[540px] overflow-hidden rounded-2xl shadow-2xl ${isDarkMode ? 'bg-[#202c33] text-[#e9edef]' : 'bg-white text-[#111b21]'}`}>
+          <header className={`flex items-center gap-3 px-5 py-4 ${isDarkMode ? 'bg-[#202c33]' : 'bg-[#f0f2f5]'}`}>
+            <button type="button" onClick={closeEditModal} disabled={isSavingEdit} aria-label="Fechar edição" className={`grid h-8 w-8 place-items-center rounded-full transition-colors disabled:opacity-40 ${isDarkMode ? 'text-[#aebac1] hover:bg-white/10 hover:text-white' : 'text-[#54656f] hover:bg-black/10 hover:text-[#111b21]'}`}><X className="h-5 w-5" /></button>
+            <h3 id="edit-message-title" className="text-base font-semibold">Editar mensagem</h3>
+          </header>
+
+          <div className={`min-h-36 px-5 py-5 ${isDarkMode ? 'bg-[#111b21]' : 'bg-[#e9edef]'}`}>
+            <div className="flex justify-end">
+              <div className={`max-w-[82%] rounded-lg px-3 py-2 text-sm shadow-sm ${isDarkMode ? 'bg-[#005c4b] text-[#e9edef]' : 'bg-[#d9fdd3] text-[#111b21]'}`}>
+                <p className="whitespace-pre-wrap break-words">{editingMessage.text || 'Mensagem sem texto'}</p>
+                <span className={`mt-1 block text-right text-[10px] ${isDarkMode ? 'text-[#aebac1]' : 'text-[#667781]'}`}>{editingMessage.time}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className={`px-5 pb-5 pt-4 ${isDarkMode ? 'bg-[#202c33]' : 'bg-white'}`}>
+            <div className={`flex items-end gap-3 border-b-2 pb-2 ${editFailure ? 'border-red-500' : isDarkMode ? 'border-[#00a884]' : 'border-[#008069]'}`}>
+              <textarea
+                ref={editTextareaRef}
+                value={editingText}
+                onChange={(event) => { setEditingText(event.target.value); setEditFailure(null); }}
+                disabled={isSavingEdit}
+                rows={1}
+                aria-label="Novo conteúdo da mensagem"
+                className={`max-h-36 min-h-8 flex-1 resize-none bg-transparent py-1 text-sm outline-none disabled:opacity-60 ${isDarkMode ? 'placeholder:text-[#8696a0]' : 'placeholder:text-[#667781]'}`}
+              />
+              <button type="button" onClick={() => void submitMessageEdit()} disabled={!editingText.trim() || isSavingEdit} aria-label="Salvar edição" title="Salvar edição" className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#f0f2f5] text-[#111b21] transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-45">
+                <Check className="h-6 w-6" strokeWidth={3} />
+              </button>
+            </div>
+            {editFailure ? <p className="mt-2 text-xs text-red-400">{editFailure}</p> : <p className={`mt-2 text-[11px] ${isDarkMode ? 'text-[#8696a0]' : 'text-[#667781]'}`}>Enter para salvar · Shift + Enter para nova linha · Esc para cancelar</p>}
+          </div>
+        </div>
+      </div>}
 
       {messagePendingDeletion && <div className="fixed inset-0 z-[10001] grid place-items-center bg-black/65 p-4" role="dialog" aria-modal="true" aria-labelledby="delete-message-title">
         <div className={`w-full max-w-sm rounded-2xl border p-5 shadow-2xl ${isDarkMode ? 'border-[#2a3942] bg-[#182228] text-[#e9edef]' : 'border-[#d1d7db] bg-white text-[#111b21]'}`}>

@@ -52,6 +52,7 @@ export const normalizeConversation = (conversation: ChatwootConversationDto): Co
     priority: conversation.priority,
     assigneeId: conversation.meta?.assignee?.id ?? null,
     assigneeName: conversation.meta?.assignee?.available_name || conversation.meta?.assignee?.name || null,
+    participantIds: conversation.participant_ids || [],
     teamId: conversation.meta?.team?.id ?? null,
     teamName: conversation.meta?.team?.name || null,
     labels: conversation.labels || [],

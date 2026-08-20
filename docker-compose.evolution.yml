@@ -1,6 +1,6 @@
 services:
   evolution-api:
-    image: evoapicloud/evolution-api:v2.3.0
+    image: evoapicloud/evolution-api:v2.3.7
     container_name: chatwoot-evolution-api
     restart: unless-stopped
     env_file: .env.evolution

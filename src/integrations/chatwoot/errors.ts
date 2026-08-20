@@ -26,6 +26,16 @@ export class ChatwootNetworkError extends Error {
   }
 }
 
+// The WhatsApp bridge is a separate authenticated backend. It returns only
+// sanitized messages, so exposing its explicit operational error to the UI is
+// useful (and avoids turning every 4xx/5xx into an unhelpful generic alert).
+export class BridgeApiError extends Error {
+  constructor(readonly status: number, readonly body: unknown, message: string) {
+    super(message);
+    this.name = 'BridgeApiError';
+  }
+}
+
 const extractValidationErrors = (body: unknown): string[] => {
   if (!body || typeof body !== 'object') return [];
   const candidate = body as { errors?: unknown; error?: unknown; message?: unknown };
@@ -40,6 +50,11 @@ export const errorMessageForUser = (error: unknown): string => {
     if (error.status === 401) return 'E-mail ou senha inválidos, ou sua sessão expirou.';
     if (error.status === 403) return 'Você não tem permissão para realizar esta ação.';
     return error.validationErrors[0] || error.message;
+  }
+  if (error instanceof BridgeApiError) {
+    if (error.status === 401) return 'Sua sessão expirou. Entre novamente para administrar esta conexão.';
+    if (error.status === 403) return 'Esta conexão WAHA não está disponível para esta caixa de entrada.';
+    return error.message;
   }
   if (error instanceof ChatwootNetworkError) return error.message;
   return 'Ocorreu um erro inesperado. Tente novamente.';

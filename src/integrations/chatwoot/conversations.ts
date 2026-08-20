@@ -24,6 +24,13 @@ export const conversationService = {
     return normalizeConversation(response);
   },
 
+  async get(accountId: number, conversationId: number): Promise<ConversationSummary> {
+    const response = await chatwootApiClient.get<ChatwootConversationDto>(
+      `/api/v1/accounts/${accountId}/conversations/${conversationId}`
+    );
+    return normalizeConversation(response);
+  },
+
   async remove(accountId: number, conversationId: number): Promise<void> {
     await chatwootApiClient.delete<void>(`/api/v1/accounts/${accountId}/conversations/${conversationId}`);
   },

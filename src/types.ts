@@ -25,6 +25,7 @@ export interface ReplyTo {
   senderName: string;
   text: string;
   color?: string;
+  mediaPreviewUrl?: string;
 }
 
 export interface LinkPreview {
@@ -37,7 +38,7 @@ export interface LinkPreview {
 export interface MessageReaction {
   emoji: string;
   senderId: string;
-  transport: 'evolution' | 'meta_cloud';
+  transport: 'evolution' | 'waha' | 'meta_cloud';
   origin?: 'contact' | 'mobile' | 'platform';
 }
 
@@ -63,7 +64,7 @@ export interface Message {
   isStarred?: boolean;
   reactions?: MessageReaction[];
   sourceId?: string | null;
-  whatsappTransport?: 'evolution' | 'meta_cloud' | null;
+  whatsappTransport?: 'evolution' | 'waha' | 'meta_cloud' | null;
   whatsappRemoteJid?: string | null;
   whatsappFromMe?: boolean | null;
   isEdited?: boolean;
@@ -89,6 +90,7 @@ export interface Chat {
   lastMessageRelative?: string; // e.g. "now", "3m", "8m", "16m"
   channelName?: string; // e.g. "UniFatecie API Oficial"
   assignedAgent?: string; // e.g. "SUELI CARDOSO DA SILVA RESENDE"
+  responsibleUserIds?: number[];
   tags?: Tag[]; // e.g. [{ label: 'comercial_unifatecie', color: 'bg-amber-500' }]
   pinned?: boolean;
   isPinned?: boolean;

@@ -1,6 +1,6 @@
-import { Edit2, FileText, Loader2, Mail, Phone, RefreshCw, Save, Tag, User, X } from 'lucide-react';
+import { Check, Edit2, FileText, Loader2, Mail, Phone, RefreshCw, Save, Tag, User, X } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
-import type { ContactNote, ContactProfile } from '../domain/currentUser';
+import type { AccountLabel, AssignableAgent, ContactNote, ContactProfile, ConversationPriority, ConversationSummary, ConversationTeam } from '../domain/currentUser';
 import type { ContactUpdate } from '../integrations/chatwoot/contacts';
 
 interface Props {
@@ -12,6 +12,17 @@ interface Props {
   isCreatingNote: boolean;
   isDarkMode: boolean;
   initialTab?: 'contact' | 'attributes';
+  conversation?: ConversationSummary | null;
+  conversationLabels?: AccountLabel[];
+  conversationAgents?: AssignableAgent[];
+  conversationTeams?: ConversationTeam[];
+  conversationParticipants?: AssignableAgent[];
+  managementPendingAction?: string | null;
+  onSetConversationPriority?: (priority: ConversationPriority) => void;
+  onAssignConversationAgent?: (agentId: number | null) => void;
+  onAssignConversationTeam?: (teamId: number | null) => void;
+  onSetConversationLabels?: (labels: string[]) => void;
+  onSetConversationParticipants?: (userIds: number[]) => Promise<AssignableAgent[]>;
   onClose: () => void;
   onRetry: () => void;
   onUpdate: (update: ContactUpdate) => Promise<ContactProfile | null>;
@@ -20,7 +31,15 @@ interface Props {
 
 const stringify = (value: Record<string, unknown>) => JSON.stringify(value, null, 2);
 
-export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, isCreatingNote, isDarkMode, initialTab = 'contact', onClose, onRetry, onUpdate, onCreateNote }: Props) => {
+const priorityOptions: { value: ConversationPriority; label: string }[] = [
+  { value: null, label: 'Sem prioridade' },
+  { value: 'low', label: 'Baixa' },
+  { value: 'medium', label: 'Média' },
+  { value: 'high', label: 'Alta' },
+  { value: 'urgent', label: 'Urgente' },
+];
+
+export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, isCreatingNote, isDarkMode, initialTab = 'contact', conversation = null, conversationLabels = [], conversationAgents = [], conversationTeams = [], conversationParticipants = [], managementPendingAction = null, onSetConversationPriority, onAssignConversationAgent, onAssignConversationTeam, onSetConversationLabels, onSetConversationParticipants, onClose, onRetry, onUpdate, onCreateNote }: Props) => {
   const [tab, setTab] = useState<'contact' | 'attributes'>(initialTab);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ name: '', email: '', phoneNumber: '', identifier: '', companyName: '' });
@@ -39,6 +58,25 @@ export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, i
 
   const surface = isDarkMode ? 'bg-[#111b21] border-[#222d34] text-[#e9edef]' : 'bg-white border-[#d1d7db] text-[#111b21]';
   const input = `w-full rounded-lg border px-2.5 py-2 text-xs outline-none ${isDarkMode ? 'border-[#374248] bg-[#202c33] text-white' : 'border-[#d1d7db] bg-white text-[#111b21]'}`;
+  const selectedLabels = new Set(conversation?.labels ?? []);
+  const managementBusy = managementPendingAction !== null;
+  const toggleConversationLabel = (title: string) => {
+    if (!onSetConversationLabels) return;
+    const next = new Set(selectedLabels);
+    next.has(title) ? next.delete(title) : next.add(title);
+    onSetConversationLabels([...next]);
+  };
+  const participantIds = conversationParticipants.map((participant) => participant.id);
+  const toggleConversationParticipant = async (agentId: number) => {
+    if (!onSetConversationParticipants || managementBusy) return;
+    const next = new Set(participantIds);
+    next.has(agentId) ? next.delete(agentId) : next.add(agentId);
+    try {
+      await onSetConversationParticipants([...next]);
+    } catch {
+      setFeedback('Não foi possível atualizar os responsáveis da conversa.');
+    }
+  };
   const save = async () => {
     try {
       const additionalAttributes = JSON.parse(additionalText) as Record<string, unknown>;
@@ -75,12 +113,84 @@ export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, i
           </div>
           <div className="border-t border-white/10 pt-3"><div className="mb-2 flex items-center gap-1 text-xs font-bold"><FileText className="w-4 h-4 text-[#00a884]" />Notas</div><textarea value={noteText} onChange={event => setNoteText(event.target.value)} disabled={isCreatingNote} placeholder="Adicionar nota interna sobre o contato…" className={`${input} min-h-16 resize-y`} /><button type="button" disabled={!noteText.trim() || isCreatingNote} onClick={() => void addNote()} className="mt-2 rounded-lg bg-[#00a884] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">{isCreatingNote ? 'Salvando…' : 'Adicionar nota'}</button><div className="mt-3 space-y-2">{notes.length ? notes.map(note => <div key={note.id} className="rounded-lg bg-black/10 p-2.5 text-xs"><p className="whitespace-pre-wrap">{note.content}</p><span className="mt-1 block text-[10px] text-[#8696a0]">{note.authorName || 'Agente'} · {new Date(note.createdAt * 1000).toLocaleString()}</span></div>) : <p className="text-xs text-[#8696a0]">Nenhuma nota para este contato.</p>}</div></div>
         </>}
-        {tab === 'attributes' && <div className="space-y-4"><AttributeSection title="Atributos adicionais" value={additionalText} editing={editing} onChange={setAdditionalText} /><AttributeSection title="Atributos personalizados" value={customText} editing={editing} onChange={setCustomText} /></div>}
+        {tab === 'attributes' && <div className="space-y-4">
+          {conversation && <section className={`rounded-xl border p-3 ${isDarkMode ? 'border-[#222d34] bg-[#182229]/60' : 'border-gray-200 bg-gray-50'}`}>
+            <h4 className="mb-3 flex items-center gap-1.5 text-xs font-bold text-[#00a884]"><User className="h-3.5 w-3.5" />Gerenciar conversa</h4>
+            <label className="block text-[11px] text-[#8696a0]">Prioridade
+              <select
+                value={conversation.priority || ''}
+                disabled={managementBusy || !onSetConversationPriority}
+                onChange={(event) => onSetConversationPriority?.((event.target.value || null) as ConversationPriority)}
+                className={`${input} mt-1 disabled:cursor-not-allowed disabled:opacity-50`}
+              >
+                {priorityOptions.map((option) => <option key={option.value || 'none'} value={option.value || ''}>{option.label}</option>)}
+              </select>
+            </label>
+
+            <label className="mt-3 block text-[11px] text-[#8696a0]">Responsável principal
+              <select
+                value={conversation.assigneeId || ''}
+                disabled={managementBusy || !onAssignConversationAgent}
+                onChange={(event) => onAssignConversationAgent?.(event.target.value ? Number(event.target.value) : null)}
+                className={`${input} mt-1 disabled:cursor-not-allowed disabled:opacity-50`}
+              >
+                <option value="">Não atribuído</option>
+                {conversationAgents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+              </select>
+            </label>
+
+            <div className="mt-3 border-t border-white/10 pt-3">
+              <div className="mb-1.5 flex items-center gap-1 text-[11px] font-semibold text-[#8696a0]"><User className="h-3.5 w-3.5" />Responsáveis</div>
+              <p className="mb-1.5 text-[11px] leading-4 text-[#8696a0]">Os agentes selecionados também visualizam esta conversa em “Minhas”.</p>
+              <div className="max-h-36 space-y-1 overflow-y-auto">
+                {conversationAgents.length ? conversationAgents.map((agent) => <button
+                  key={agent.id}
+                  type="button"
+                  disabled={managementBusy || !onSetConversationParticipants}
+                  onClick={() => void toggleConversationParticipant(agent.id)}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <span className={`grid h-4 w-4 shrink-0 place-items-center rounded border ${participantIds.includes(agent.id) ? 'border-[#00a884] bg-[#00a884] text-white' : 'border-[#8696a0]/60'}`}>{participantIds.includes(agent.id) && <Check className="h-3 w-3" />}</span>
+                  <span className="min-w-0 flex-1 truncate">{agent.name}</span>
+                  {conversation.assigneeId === agent.id && <span className="text-[10px] text-[#00a884]">principal</span>}
+                </button>) : <p className="px-2 py-1 text-xs text-[#8696a0]">Nenhum agente disponível nesta caixa.</p>}
+              </div>
+            </div>
+
+            <label className="mt-3 block border-t border-white/10 pt-3 text-[11px] text-[#8696a0]">Time
+              <select
+                value={conversation.teamId || ''}
+                disabled={managementBusy || !onAssignConversationTeam}
+                onChange={(event) => onAssignConversationTeam?.(event.target.value ? Number(event.target.value) : null)}
+                className={`${input} mt-1 disabled:cursor-not-allowed disabled:opacity-50`}
+              >
+                <option value="">Sem time</option>
+                {conversationTeams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+              </select>
+            </label>
+
+            <div className="mt-3 border-t border-white/10 pt-3">
+              <div className="mb-1.5 flex items-center gap-1 text-[11px] font-semibold text-[#8696a0]"><Tag className="h-3.5 w-3.5" />Labels</div>
+              <div className="max-h-32 space-y-1 overflow-y-auto">
+                {conversationLabels.length ? conversationLabels.map((label) => <button
+                  key={label.id}
+                  type="button"
+                  disabled={managementBusy || !onSetConversationLabels}
+                  onClick={() => toggleConversationLabel(label.title)}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: label.color || '#8696a0' }} />
+                  <span className="min-w-0 flex-1 truncate">{label.title}</span>
+                  {selectedLabels.has(label.title) && <Check className="h-3.5 w-3.5 text-[#00a884]" />}
+                </button>) : <p className="px-2 py-1 text-xs text-[#8696a0]">Nenhuma label disponível.</p>}
+              </div>
+            </div>
+
+          </section>}
+        </div>}
       </>}
     </div>
   </div>;
 };
 
 const Field = ({ label, icon, editing, value, display, onChange, inputClass }: { label: string; icon: ReactNode; editing: boolean; value: string; display: string; onChange: (value: string) => void; inputClass: string }) => <div className="border-b border-white/10 pb-2"><span className="mb-1 flex items-center gap-2 text-[#8696a0]">{icon}{label}</span>{editing ? <input value={value} onChange={event => onChange(event.target.value)} className={inputClass} /> : <span className="block pl-6 text-[#e9edef] break-all">{display}</span>}</div>;
-
-const AttributeSection = ({ title, value, editing, onChange }: { title: string; value: string; editing: boolean; onChange: (value: string) => void }) => <section><h4 className="mb-2 text-xs font-bold text-[#00a884]">{title}</h4>{editing ? <textarea value={value} onChange={event => onChange(event.target.value)} className="w-full min-h-40 rounded-lg border border-[#374248] bg-[#202c33] p-2 font-mono text-[11px] text-white outline-none" /> : <pre className="max-h-64 overflow-auto rounded-lg bg-black/10 p-3 text-[11px] text-[#aebac1] whitespace-pre-wrap">{value}</pre>}</section>;

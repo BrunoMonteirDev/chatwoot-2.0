@@ -86,6 +86,11 @@ const number = (...values: unknown[]) => {
   return typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : null;
 };
 
+// Chatwoot's public conversation route treats a literal dot in a dynamic
+// segment as a format extension. Store the group JID in a reversible,
+// path-safe source id; the original JID remains in contact attributes.
+export const evolutionGroupSourceId = (groupJid: string) => `whatsapp:group:${encodeURIComponent(groupJid).replace(/\./g, '%2E')}`;
+
 const mediaFor = (data: RecordValue, image: RecordValue, audio: RecordValue, video: RecordValue, document: RecordValue): IncomingEvolutionMedia | undefined => {
   const candidate = [
     ['image', image], ['audio', audio], ['video', video], ['document', document],
@@ -126,7 +131,7 @@ const groupIdentityFor = (key: RecordValue, data: RecordValue, remoteJid: string
   const participantJid = text(key.participant, data.participant, key.participantPn, data.participantPn);
   return {
     fromMe,
-    sourceId: `whatsapp:group:${remoteJid}`,
+    sourceId: evolutionGroupSourceId(remoteJid),
     name: text(data.subject, data.groupSubject, data.groupName, data.notifyName) || remoteJid,
     chatType: 'group' as const,
     ...(participantJid ? { participantJid } : {}),
@@ -149,13 +154,20 @@ export const parseIncomingEvolutionMessage = (payload: unknown): IncomingEvoluti
   const document = record(message.documentMessage);
   const media = mediaFor(data, image, audio, video, document);
   const content = text(message.conversation, extended.text, image.caption);
-  const context = record(extended.contextInfo).stanzaId || record(image.contextInfo).stanzaId || record(audio.contextInfo).stanzaId || record(video.contextInfo).stanzaId || record(document.contextInfo).stanzaId;
+  // Evolution v2 can put the quoted-message context either in the concrete
+  // message payload or in a message-level context wrapper. Do not infer a
+  // quote from text/body: only a provider message ID is a valid target.
+  const contexts = [
+    record(extended.contextInfo), record(image.contextInfo), record(audio.contextInfo), record(video.contextInfo), record(document.contextInfo),
+    record(message.contextInfo), record(message.messageContextInfo), record(data.contextInfo), record(data.messageContextInfo),
+  ];
+  const context = text(...contexts.map(value => value.stanzaId), ...contexts.map(value => record(value.quotedMessage).key ? text(record(record(value.quotedMessage).key).id) : null));
   const id = text(key.id, data.id);
   const instance = text(root.instance, data.instance);
   if (!instance || !id || (!content && !media)) return null;
   const identity = remoteJid.endsWith('@g.us') ? groupIdentityFor(key, data, remoteJid) : identityFor(key, data, remoteJid);
   if (!identity) return null;
-  return { instance, messageId: id, remoteJid, ...identity, content: content || '', ...(media ? { media } : {}), ...(typeof context === 'string' && context ? { quotedMessageId: context } : {}) };
+  return { instance, messageId: id, remoteJid, ...identity, content: content || '', ...(media ? { media } : {}), ...(context ? { quotedMessageId: context } : {}) };
 };
 
 export const parseIncomingEvolutionReaction = (payload: unknown): IncomingEvolutionReaction | null => {
@@ -199,9 +211,10 @@ export const parseIncomingEvolutionReaction = (payload: unknown): IncomingEvolut
   };
 };
 
-const eventData = (payload: unknown, expected: string) => {
+const eventData = (payload: unknown, expected: string | string[]) => {
   const root = record(payload);
-  if (root.event !== expected) return null;
+  const expectedEvents = Array.isArray(expected) ? expected : [expected];
+  if (typeof root.event !== 'string' || !expectedEvents.includes(root.event)) return null;
   const data = record(Array.isArray(root.data) ? root.data[0] : root.data);
   const instance = text(root.instance, data.instance);
   return instance ? { data, instance } : null;
@@ -220,10 +233,11 @@ const editedText = (value: RecordValue) => {
   );
 };
 
-// Evolution API v2 emits the original key and edited message in the real
-// `messages.edited` webhook. Only text can be updated by its v2 endpoint.
+// Evolution v2 has emitted both `messages.edited` and `messages.update`
+// across releases/configurations. We only accept an update when it contains
+// the original key and edited text, so ordinary delivery updates stay ignored.
 export const parseIncomingEvolutionEdit = (payload: unknown): IncomingEvolutionEdit | null => {
-  const event = eventData(payload, 'messages.edited');
+  const event = eventData(payload, ['messages.edited', 'messages.update']);
   if (!event) return null;
   const key = record(event.data.key);
   const targetMessageId = text(key.id, event.data.messageId);
