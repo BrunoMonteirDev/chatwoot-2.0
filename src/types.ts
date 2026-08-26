@@ -6,7 +6,7 @@ export interface MultiTenantAccount {
   role: string;
 }
 
-export type FilterCategory = 'minhas' | 'nao_atribuidas' | 'todos';
+export type FilterCategory = 'minhas' | 'nao_atribuidas' | 'todos' | 'grupos';
 
 export interface Attachment {
   id: string;

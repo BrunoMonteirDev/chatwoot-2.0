@@ -1,9 +1,14 @@
-{$APP_DOMAIN} {
+http://{$APP_DOMAIN} {
   encode zstd gzip
-  reverse_proxy frontend:80
+  handle_path /bridge/* {
+    reverse_proxy bridge:3100
+  }
+  handle {
+    reverse_proxy frontend:80
+  }
 }
 
-{$BRIDGE_DOMAIN} {
+http://{$BRIDGE_DOMAIN} {
   encode zstd gzip
   reverse_proxy bridge:3100
 }

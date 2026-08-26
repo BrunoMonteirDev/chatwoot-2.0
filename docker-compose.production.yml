@@ -33,6 +33,12 @@ services:
     environment: { RAILS_ENV: production, NODE_ENV: production, INSTALLATION_ENV: docker }
     command: ["bundle", "exec", "rails", "s", "-p", "3000", "-b", "0.0.0.0"]
     volumes: [chatwoot_storage:/app/storage]
+    healthcheck:
+      test: ["CMD-SHELL", "ruby -r net/http -e \"response = Net::HTTP.get_response(URI('http://127.0.0.1:3000/')); exit(response.code.to_i < 500 ? 0 : 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_healthy } }
 
   sidekiq:
@@ -51,11 +57,12 @@ services:
     environment:
       CHATWOOT_BASE_URL: http://rails:3000
       WAHA_BASE_URL: http://waha:3000
+      BRIDGE_INTERNAL_URL: http://bridge:3100
       BRIDGE_REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
     volumes: [bridge_data:/app/bridge/data]
     depends_on: { rails: { condition: service_started }, redis: { condition: service_healthy }, waha: { condition: service_healthy } }
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3100/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3100/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 20s
       timeout: 5s
       retries: 10
@@ -66,7 +73,7 @@ services:
     environment:
       WAHA_API_KEY: ${WAHA_API_KEY:?set WAHA_API_KEY}
       WHATSAPP_DEFAULT_ENGINE: ${WAHA_DEFAULT_ENGINE:-GOWS}
-      WHATSAPP_HOOK_URL: https://${BRIDGE_DOMAIN:?set BRIDGE_DOMAIN}/webhooks/waha
+      WHATSAPP_HOOK_URL: http://bridge:3100/webhooks/waha
       WHATSAPP_HOOK_EVENTS: session.status,message,message.any,message.reaction,message.ack,message.ack.group,message.edited,message.revoked,group.v2.join,group.v2.leave,group.v2.participants,group.v2.update
       WHATSAPP_HOOK_HMAC_KEY: ${WAHA_WEBHOOK_SECRET:?set WAHA_WEBHOOK_SECRET}
       WAHA_GOWS_DEVICE_REQUIRE_FULL_SYNC: ${WAHA_GOWS_DEVICE_REQUIRE_FULL_SYNC:-false}
@@ -87,9 +94,15 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
       args:
-        VITE_BRIDGE_PUBLIC_URL: "https://${BRIDGE_DOMAIN:?set BRIDGE_DOMAIN}"
+        VITE_BRIDGE_PUBLIC_URL: "/bridge"
     restart: unless-stopped
-    depends_on: [rails]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    ports: ["3000:80"]
+    depends_on: { rails: { condition: service_healthy } }
 
   caddy:
     image: caddy:2.8-alpine
@@ -97,7 +110,23 @@ services:
     env_file: ${PRODUCTION_ENV_FILE:-.env.production}
     ports: ["80:80", "443:443"]
     volumes: [./deploy/Caddyfile:/etc/caddy/Caddyfile:ro, caddy_data:/data, caddy_config:/config]
-    depends_on: [frontend, bridge]
+    depends_on: { frontend: { condition: service_healthy }, bridge: { condition: service_healthy } }
+
+  startup-check:
+    image: curlimages/curl:8.10.1
+    restart: "no"
+    command:
+      - sh
+      - -ec
+      - |
+        curl --fail --silent --show-error http://frontend/ >/dev/null
+        curl --fail --silent --show-error http://frontend/bridge/ready >/dev/null
+        status=$$(curl --silent --output /dev/null --write-out '%{http_code}' http://rails:3000/)
+        test "$$status" -lt 500
+    depends_on:
+      rails: { condition: service_healthy }
+      frontend: { condition: service_healthy }
+      bridge: { condition: service_healthy }
 
 volumes:
   postgres_data:

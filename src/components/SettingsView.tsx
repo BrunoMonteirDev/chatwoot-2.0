@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   X,
   User,
@@ -9,7 +9,6 @@ import {
   Tag,
   Code,
   Repeat,
-  Sliders,
   MessageSquareQuote,
   Clock,
   LayoutGrid,
@@ -48,7 +47,11 @@ import {
   BarChart2,
 } from 'lucide-react';
 import { UserProfile } from '../types';
-import type { Inbox as ChatwootInbox } from '../domain/currentUser';
+import type { CurrentUser, CustomRole, Inbox as ChatwootInbox } from '../domain/currentUser';
+import type { AssignableAgent } from '../domain/currentUser';
+import type { ConversationTeam } from '../domain/currentUser';
+import { inboxService } from '../integrations/chatwoot/inboxes';
+import { errorMessageForUser } from '../integrations/chatwoot/errors';
 import {
   WALLPAPER_PRESETS,
   WallpaperId,
@@ -56,6 +59,7 @@ import {
 import { EvolutionInboxesPanel } from './EvolutionInboxesPanel';
 
 export type SettingsTab =
+  | 'perfil'
   | 'conta'
   | 'agentes'
   | 'times'
@@ -75,6 +79,13 @@ export type SettingsTab =
   | 'auditoria'
   | 'permissoes';
 
+const CUSTOM_ROLE_PERMISSIONS = [
+  ['conversation_manage', 'Gerenciar todas as conversas'],
+  ['conversation_unassigned_manage', 'Gerenciar conversas não atribuídas'],
+  ['conversation_participating_manage', 'Gerenciar conversas em que participa'],
+  ['contact_manage', 'Gerenciar contatos'],
+] as const;
+
 interface Props {
   user: UserProfile;
   onUpdateUser: (updated: UserProfile) => void;
@@ -85,15 +96,14 @@ interface Props {
   onSelectWallpaper: (id: WallpaperId) => void;
   activeTab?: SettingsTab;
   onTabChange?: (tab: SettingsTab) => void;
-  uiWidthScale?: number;
-  uiHeightScale?: number;
-  uiFontScale?: number;
-  onChangeDimensions?: (w: number, h: number, f: number) => void;
   accountId?: number | null;
   inboxes?: ChatwootInbox[];
   inboxesStatus?: 'idle' | 'loading' | 'ready' | 'error';
   inboxesError?: string | null;
   onRefreshInboxes?: () => Promise<void> | void;
+  profile?: CurrentUser | null;
+  onSaveProfile?: (profile: { name: string; displayName: string; email: string; phoneNumber: string; messageSignature: string; currentPassword?: string; password?: string; passwordConfirmation?: string }) => Promise<void>;
+  onResetAccessToken?: () => Promise<void>;
 }
 
 export const SettingsView: React.FC<Props> = ({
@@ -104,10 +114,6 @@ export const SettingsView: React.FC<Props> = ({
   onToggleDarkMode,
   wallpaperId,
   onSelectWallpaper,
-  uiWidthScale = 100,
-  uiHeightScale = 100,
-  uiFontScale = 100,
-  onChangeDimensions,
   activeTab: propActiveTab,
   onTabChange: propOnTabChange,
   accountId = null,
@@ -115,6 +121,9 @@ export const SettingsView: React.FC<Props> = ({
   inboxesStatus = 'idle',
   inboxesError = null,
   onRefreshInboxes = () => undefined,
+  profile = null,
+  onSaveProfile,
+  onResetAccessToken,
 }: Props) => {
   const [internalTab, setInternalTab] = useState<SettingsTab>('conta');
   const activeTab = propActiveTab || internalTab;
@@ -135,42 +144,149 @@ export const SettingsView: React.FC<Props> = ({
   const [accountName, setAccountName] = useState('ChatBotcom');
   const [supportEmail, setSupportEmail] = useState('atendimento@chatbotcom.com.br');
   const [timezone, setTimezone] = useState('America/Sao_Paulo');
+  const [profileName, setProfileName] = useState(profile?.name || user.name);
+  const [profileDisplayName, setProfileDisplayName] = useState(profile?.displayName || user.name);
+  const [profileEmail, setProfileEmail] = useState(profile?.email || '');
+  const [profilePhone, setProfilePhone] = useState(profile?.phoneNumber || '');
+  const [profileSignature, setProfileSignature] = useState(profile?.messageSignature || '');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [passwordConfirmation, setPasswordConfirmation] = useState('');
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [apiToken, setApiToken] = useState(profile?.apiAccessToken || '');
+
+  useEffect(() => {
+    setProfileName(profile?.name || user.name);
+    setProfileDisplayName(profile?.displayName || user.name);
+    setProfileEmail(profile?.email || '');
+    setProfilePhone(profile?.phoneNumber || '');
+    setProfileSignature(profile?.messageSignature || '');
+    setApiToken(profile?.apiAccessToken || '');
+  }, [profile, user]);
+
+  const saveProfile = async () => {
+    if (!onSaveProfile) return;
+    if (newPassword && newPassword !== passwordConfirmation) { showToast('A confirmação da senha não confere.'); return; }
+    setProfileSaving(true);
+    try {
+      await onSaveProfile({ name: profileName.trim(), displayName: profileDisplayName.trim(), email: profileEmail.trim(), phoneNumber: profilePhone.trim(), messageSignature: profileSignature, ...(newPassword ? { currentPassword, password: newPassword, passwordConfirmation } : {}) });
+      onUpdateUser({ ...user, name: profileDisplayName.trim() || profileName.trim(), phone: profilePhone.trim(), about: profileSignature, avatar: profile?.avatarUrl || user.avatar });
+      setCurrentPassword(''); setNewPassword(''); setPasswordConfirmation('');
+      showToast('Perfil atualizado com sucesso.');
+    } catch { showToast('Não foi possível atualizar o perfil. Verifique os dados e a senha atual.'); }
+    finally { setProfileSaving(false); }
+  };
+
+  const resetToken = async () => {
+    if (!onResetAccessToken || !window.confirm('Gerar um novo token invalida o token atual. Deseja continuar?')) return;
+    try { await onResetAccessToken(); showToast('Novo token de API gerado.'); } catch { showToast('Não foi possível gerar um novo token.'); }
+  };
 
   // --- STATE FOR AGENTES ---
-  const [agents, setAgents] = useState([
-    { id: '1', name: 'Bruno Medeiros', email: 'bruno.alves@kopla.com.br', role: 'Administrador', status: 'Online', capacity: 10 },
-    { id: '2', name: 'Maria Silva', email: 'maria.silva@kopla.com.br', role: 'Atendente', status: 'Online', capacity: 5 },
-    { id: '3', name: 'Carlos Santos', email: 'carlos.santos@kopla.com.br', role: 'Supervisor', status: 'Ocupado', capacity: 8 },
-    { id: '4', name: 'Ana Oliveira', email: 'ana.oliveira@kopla.com.br', role: 'Atendente', status: 'Offline', capacity: 5 },
-  ]);
-  const [showAgentModal, setShowAgentModal] = useState(false);
-  const [newAgentName, setNewAgentName] = useState('');
-  const [newAgentEmail, setNewAgentEmail] = useState('');
-  const [newAgentRole, setNewAgentRole] = useState('Atendente');
+  const [agents, setAgents] = useState<AssignableAgent[]>([]);
+  const [agentsStatus, setAgentsStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [agentQuery, setAgentQuery] = useState('');
+  const [agentModal, setAgentModal] = useState<'create' | 'edit' | null>(null);
+  const [agentSaving, setAgentSaving] = useState(false);
+  const [agentError, setAgentError] = useState<string | null>(null);
+  const [editingAgent, setEditingAgent] = useState<AssignableAgent | null>(null);
+  const [agentForm, setAgentForm] = useState({ name: '', email: '', role: 'agent' as 'agent' | 'administrator', availability: 'online' as 'online' | 'offline' | 'busy', customRoleId: '' });
+  const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
+  const [customRolesStatus, setCustomRolesStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle');
+  const [roleModal, setRoleModal] = useState<'create' | 'edit' | null>(null);
+  const [editingRole, setEditingRole] = useState<CustomRole | null>(null);
+  const [roleSaving, setRoleSaving] = useState(false);
+  const [roleError, setRoleError] = useState<string | null>(null);
+  const [roleForm, setRoleForm] = useState({ name: '', description: '', permissions: [] as string[] });
+  const [accountTeams, setAccountTeams] = useState<ConversationTeam[]>([]);
+  const [teamsStatus, setTeamsStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
 
-  const handleAddAgent = () => {
-    if (!newAgentName || !newAgentEmail) return;
-    setAgents([
-      ...agents,
-      {
-        id: String(Date.now()),
-        name: newAgentName,
-        email: newAgentEmail,
-        role: newAgentRole,
-        status: 'Online',
-        capacity: 5,
-      },
-    ]);
-    setNewAgentName('');
-    setNewAgentEmail('');
-    setShowAgentModal(false);
-    showToast('Agente adicionado com sucesso!');
+  useEffect(() => {
+    if (activeTab !== 'agentes' || !accountId) return;
+    let active = true;
+    setAgentsStatus('loading');
+    void inboxService.listAgents(accountId).then((result) => {
+      if (!active) return;
+      setAgents(result);
+      setAgentsStatus('ready');
+    }).catch(() => {
+      if (active) setAgentsStatus('error');
+    });
+    return () => { active = false; };
+  }, [accountId, activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== 'agentes' || !accountId) return;
+    let active = true;
+    setCustomRolesStatus('loading');
+    void inboxService.listCustomRoles(accountId).then((roles) => {
+      if (!active) return;
+      setCustomRoles(roles); setCustomRolesStatus('ready');
+    }).catch(() => { if (active) setCustomRolesStatus('unavailable'); });
+    return () => { active = false; };
+  }, [accountId, activeTab]);
+
+  const openCreateAgent = () => {
+    setEditingAgent(null); setAgentError(null);
+    setAgentForm({ name: '', email: '', role: 'agent', availability: 'online', customRoleId: '' });
+    setAgentModal('create');
+  };
+  const openEditAgent = (agent: AssignableAgent) => {
+    setEditingAgent(agent); setAgentError(null);
+    setAgentForm({ name: agent.name, email: agent.email || '', role: agent.role === 'administrator' ? 'administrator' : 'agent', availability: agent.availability === 'busy' ? 'busy' : agent.availability === 'offline' ? 'offline' : 'online', customRoleId: agent.customRoleId ? String(agent.customRoleId) : '' });
+    setAgentModal('edit');
+  };
+  const saveAgent = async () => {
+    if (!accountId || !agentForm.name.trim() || (agentModal === 'create' && !agentForm.email.trim())) return;
+    setAgentSaving(true); setAgentError(null);
+    const params = { name: agentForm.name.trim(), email: agentForm.email.trim(), role: agentForm.role, availability: agentForm.availability, customRoleId: agentForm.customRoleId ? Number(agentForm.customRoleId) : null };
+    try {
+      const saved = agentModal === 'create'
+        ? await inboxService.createAgent(accountId, params)
+        : await inboxService.updateAgent(accountId, editingAgent!.id, params);
+      setAgents(current => agentModal === 'create' ? [...current, saved] : current.map(agent => agent.id === saved.id ? saved : agent));
+      setAgentModal(null); showToast(agentModal === 'create' ? 'Agente adicionado com sucesso.' : 'Agente atualizado com sucesso.');
+    } catch (cause) { setAgentError(errorMessageForUser(cause)); }
+    finally { setAgentSaving(false); }
+  };
+  const deleteAgent = async (agent: AssignableAgent) => {
+    if (!accountId || !window.confirm(`Excluir o agente ${agent.name}? Ele perderá o acesso a esta conta.`)) return;
+    try { await inboxService.deleteAgent(accountId, agent.id); setAgents(current => current.filter(item => item.id !== agent.id)); showToast('Agente excluído da conta.'); }
+    catch (cause) { showToast(errorMessageForUser(cause)); }
+  };
+  const openCreateRole = () => { setEditingRole(null); setRoleError(null); setRoleForm({ name: '', description: '', permissions: [] }); setRoleModal('create'); };
+  const openEditRole = (role: CustomRole) => { setEditingRole(role); setRoleError(null); setRoleForm({ name: role.name, description: role.description || '', permissions: role.permissions.filter(permission => CUSTOM_ROLE_PERMISSIONS.some(([key]) => key === permission)) }); setRoleModal('edit'); };
+  const toggleRolePermission = (permission: string) => setRoleForm(current => ({ ...current, permissions: current.permissions.includes(permission) ? current.permissions.filter(item => item !== permission) : [...current.permissions, permission] }));
+  const saveRole = async () => {
+    if (!accountId || !roleForm.name.trim()) return;
+    setRoleSaving(true); setRoleError(null);
+    try {
+      const params = { name: roleForm.name.trim(), description: roleForm.description.trim(), permissions: roleForm.permissions };
+      const saved = roleModal === 'create' ? await inboxService.createCustomRole(accountId, params) : await inboxService.updateCustomRole(accountId, editingRole!.id, params);
+      setCustomRoles(current => roleModal === 'create' ? [...current, saved] : current.map(role => role.id === saved.id ? saved : role));
+      setRoleModal(null); showToast(roleModal === 'create' ? 'Função criada com sucesso.' : 'Função atualizada com sucesso.');
+    } catch (cause) { setRoleError(errorMessageForUser(cause)); }
+    finally { setRoleSaving(false); }
+  };
+  const deleteRole = async (role: CustomRole) => {
+    if (!accountId || !window.confirm(`Excluir a função ${role.name}? Agentes vinculados voltarão ao padrão.`)) return;
+    try { await inboxService.deleteCustomRole(accountId, role.id); setCustomRoles(current => current.filter(item => item.id !== role.id)); setAgents(current => current.map(agent => agent.customRoleId === role.id ? { ...agent, customRoleId: null } : agent)); showToast('Função excluída.'); }
+    catch (cause) { showToast(errorMessageForUser(cause)); }
   };
 
-  const handleDeleteAgent = (id: string) => {
-    setAgents(agents.filter((a) => a.id !== id));
-    showToast('Agente removido.');
-  };
+  useEffect(() => {
+    if (activeTab !== 'times' || !accountId) return;
+    let active = true;
+    setTeamsStatus('loading');
+    void inboxService.listTeams(accountId).then((result) => {
+      if (!active) return;
+      setAccountTeams(result);
+      setTeamsStatus('ready');
+    }).catch(() => {
+      if (active) setTeamsStatus('error');
+    });
+    return () => { active = false; };
+  }, [accountId, activeTab]);
 
   // --- STATE FOR TIMES ---
   const [teams, setTeams] = useState([
@@ -310,10 +426,9 @@ export const SettingsView: React.FC<Props> = ({
   ]);
 
   // --- STATE FOR APLICAÇÕES ---
-  const [webhooks, setWebhooks] = useState([
+  const [webhooks] = useState([
     { id: '1', name: 'Webhook CRM Interno', url: 'https://api.kopla.com.br/webhooks/chats', active: true },
-    { id: '2', name: 'Conector Typebot', url: 'https://typebot.io/api/v1/webhook', active: true },
-    { id: '3', name: 'Integração Google Sheets Sync', url: 'https://script.google.com/macros/s/exec', active: false },
+    { id: '2', name: 'Notificações operacionais', url: 'https://hooks.exemplo.com/atendimento', active: false },
   ]);
 
   // --- STATE FOR PERMISSÕES ---
@@ -384,6 +499,45 @@ export const SettingsView: React.FC<Props> = ({
         }`}
       >
         <div className="max-w-4xl mx-auto space-y-6">
+          {/* ==================== 0. PERFIL ==================== */}
+          {activeTab === 'perfil' && (
+            <div className={`p-6 rounded-2xl border shadow-xl space-y-6 ${isDarkMode ? 'bg-[#111b21] border-[#222d34]' : 'bg-white border-[#d1d7db]'}`}>
+              <div className="flex items-center justify-between border-b pb-4 border-white/10">
+                <div><h3 className="text-lg font-bold">Configurações do Perfil</h3><p className="text-xs text-[#8696a0]">Dados pessoais, notificações, segurança e acesso à API.</p></div>
+                <div className="grid h-11 w-11 place-items-center overflow-hidden rounded-full bg-[#2563eb] font-bold text-white">{profile?.avatarUrl ? <img src={profile.avatarUrl} alt="Perfil" className="h-full w-full object-cover" /> : (profileDisplayName || profileName || 'U').slice(0, 2).toUpperCase()}</div>
+              </div>
+
+              <section className="space-y-4">
+                <h4 className="flex items-center gap-2 text-sm font-bold"><User className="h-4 w-4 text-[#00a884]" />Informações pessoais</h4>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {[['Nome completo', profileName, setProfileName], ['Nome para exibição', profileDisplayName, setProfileDisplayName], ['E-mail', profileEmail, setProfileEmail], ['Telefone', profilePhone, setProfilePhone]].map(([label, value, setter]) => (
+                    <label key={label as string} className="space-y-1.5"><span className="text-xs font-semibold text-[#8696a0]">{label as string}</span><input value={value as string} type={label === 'E-mail' ? 'email' : 'text'} onChange={(event) => (setter as (value: string) => void)(event.target.value)} className={`w-full rounded-xl border px-3.5 py-2 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#202c33] text-white' : 'border-[#d1d7db] bg-[#f0f2f5]'}`} /></label>
+                  ))}
+                </div>
+                <label className="block space-y-1.5"><span className="text-xs font-semibold text-[#8696a0]">Assinatura de mensagens</span><textarea value={profileSignature} onChange={(event) => setProfileSignature(event.target.value)} placeholder="Assinatura opcional ao final das mensagens" rows={3} className={`w-full resize-none rounded-xl border px-3.5 py-2 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#202c33] text-white' : 'border-[#d1d7db] bg-[#f0f2f5]'}`} /></label>
+              </section>
+
+              <section className="space-y-3 border-t border-white/10 pt-5">
+                <h4 className="flex items-center gap-2 text-sm font-bold"><Bell className="h-4 w-4 text-[#00a884]" />Preferências</h4>
+                <div className={`flex items-center justify-between rounded-xl border px-4 py-3 text-sm ${isDarkMode ? 'border-[#2a3942] bg-[#182228]' : 'border-[#d1d7db] bg-[#f8f9fa]'}`}><span>Notificações no navegador</span><span className="text-xs text-[#8696a0]">Gerencie as permissões pelo navegador</span></div>
+                <button type="button" onClick={onToggleDarkMode} className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-sm ${isDarkMode ? 'border-[#2a3942] bg-[#182228]' : 'border-[#d1d7db] bg-[#f8f9fa]'}`}><span className="flex items-center gap-2"><Palette className="h-4 w-4 text-[#00a884]" />Tema</span><span>{isDarkMode ? 'Escuro' : 'Claro'}</span></button>
+              </section>
+
+              <section className="space-y-3 border-t border-white/10 pt-5">
+                <h4 className="flex items-center gap-2 text-sm font-bold"><Key className="h-4 w-4 text-[#00a884]" />Token de acesso à API</h4>
+                <p className="text-xs text-[#8696a0]">Use este token apenas em integrações seguras. Ao gerar outro, o token atual deixa de funcionar.</p>
+                <div className="flex gap-2"><input readOnly type="password" value={apiToken} placeholder="Token indisponível para esta conta" className={`min-w-0 flex-1 rounded-xl border px-3.5 py-2 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#202c33] text-white' : 'border-[#d1d7db] bg-[#f0f2f5]'}`} /><button type="button" disabled={!apiToken} onClick={() => void navigator.clipboard.writeText(apiToken).then(() => showToast('Token copiado.'))} className="rounded-xl border border-[#00a884] px-3 text-xs font-bold text-[#00a884] disabled:opacity-40">Copiar</button><button type="button" onClick={() => void resetToken()} className="rounded-xl bg-[#00a884] px-3 text-xs font-bold text-white">Gerar novo</button></div>
+              </section>
+
+              <section className="space-y-4 border-t border-white/10 pt-5">
+                <h4 className="flex items-center gap-2 text-sm font-bold"><Lock className="h-4 w-4 text-[#00a884]" />Senha</h4>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3"><input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} placeholder="Senha atual" className={`rounded-xl border px-3.5 py-2 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#202c33] text-white' : 'border-[#d1d7db] bg-[#f0f2f5]'}`} /><input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="Nova senha" className={`rounded-xl border px-3.5 py-2 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#202c33] text-white' : 'border-[#d1d7db] bg-[#f0f2f5]'}`} /><input type="password" value={passwordConfirmation} onChange={(event) => setPasswordConfirmation(event.target.value)} placeholder="Confirmar nova senha" className={`rounded-xl border px-3.5 py-2 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#202c33] text-white' : 'border-[#d1d7db] bg-[#f0f2f5]'}`} /></div>
+              </section>
+
+              <div className="flex justify-end border-t border-white/10 pt-5"><button type="button" disabled={profileSaving} onClick={() => void saveProfile()} className="rounded-xl bg-[#00a884] px-5 py-2.5 text-xs font-bold text-white disabled:opacity-50">{profileSaving ? 'Salvando…' : 'Salvar perfil'}</button></div>
+            </div>
+          )}
+
           {/* ==================== 1. CONTA ==================== */}
           {activeTab === 'conta' && (
             <div
@@ -394,7 +548,7 @@ export const SettingsView: React.FC<Props> = ({
               <div className="flex items-center justify-between border-b pb-4 border-white/10">
                 <div>
                   <h3 className="text-lg font-bold">Configurações da Conta</h3>
-                  <p className="text-xs text-[#8696a0]">Gerencie informações da conta, temas e dados do perfil.</p>
+                  <p className="text-xs text-[#8696a0]">Gerencie informações e preferências compartilhadas da conta.</p>
                 </div>
                 <div className="w-10 h-10 rounded-xl bg-[#00a884]/10 text-[#00a884] flex items-center justify-center font-bold">
                   <Building className="w-5 h-5" />
@@ -459,88 +613,6 @@ export const SettingsView: React.FC<Props> = ({
                   <Palette className="w-4 h-4 text-[#00a884]" />
                   <span>Aparência e Tema</span>
                 </h4>
-
-                {/* Dimensions Adjustment Block */}
-                {onChangeDimensions && (
-                  <div
-                    className={`p-4 rounded-xl border mt-4 space-y-4 ${
-                      isDarkMode ? 'bg-[#182228] border-[#2a3942]' : 'bg-[#f0f2f5] border-[#d1d7db]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <Sliders className="w-4 h-4 text-[#00a884]" />
-                        <span className="text-xs font-bold">Ajustes de Dimensões do Sistema (Largura, Altura & Escala)</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => onChangeDimensions(100, 100, 100)}
-                        className="text-[11px] font-bold text-[#00a884] hover:underline cursor-pointer"
-                      >
-                        Restaurar Padrão (100%)
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
-                      {/* Largura */}
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-[11px] font-semibold text-[#8696a0]">
-                          <span>Largura Geral</span>
-                          <span className="text-[#00a884] font-bold">{uiWidthScale}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="70"
-                          max="130"
-                          step="1"
-                          value={uiWidthScale}
-                          onChange={(e) =>
-                            onChangeDimensions(parseInt(e.target.value, 10), uiHeightScale, uiFontScale)
-                          }
-                          className="w-full accent-[#00a884] cursor-pointer"
-                        />
-                      </div>
-
-                      {/* Altura */}
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-[11px] font-semibold text-[#8696a0]">
-                          <span>Altura Geral</span>
-                          <span className="text-[#00a884] font-bold">{uiHeightScale}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="70"
-                          max="130"
-                          step="1"
-                          value={uiHeightScale}
-                          onChange={(e) =>
-                            onChangeDimensions(uiWidthScale, parseInt(e.target.value, 10), uiFontScale)
-                          }
-                          className="w-full accent-[#00a884] cursor-pointer"
-                        />
-                      </div>
-
-                      {/* Escala de Texto */}
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-[11px] font-semibold text-[#8696a0]">
-                          <span>Escala de Texto</span>
-                          <span className="text-[#00a884] font-bold">{uiFontScale}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="80"
-                          max="120"
-                          step="1"
-                          value={uiFontScale}
-                          onChange={(e) =>
-                            onChangeDimensions(uiWidthScale, uiHeightScale, parseInt(e.target.value, 10))
-                          }
-                          className="w-full accent-[#00a884] cursor-pointer"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
 
                 <div className="grid grid-cols-2 gap-3 max-w-sm">
                   <button
@@ -616,128 +688,56 @@ export const SettingsView: React.FC<Props> = ({
               <div className="flex items-center justify-between border-b pb-4 border-white/10">
                 <div>
                   <h3 className="text-lg font-bold">Gerenciamento de Agentes</h3>
-                  <p className="text-xs text-[#8696a0]">Cadastre atendentes, supervisores e administradores.</p>
+                  <p className="text-xs text-[#8696a0]">Agentes vinculados a esta conta no Chatwoot.</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowAgentModal(true)}
-                  className="px-3.5 py-2 bg-[#00a884] hover:bg-[#008069] text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Adicionar Agente</span>
-                </button>
+                <button type="button" onClick={openCreateAgent} disabled={!accountId} className="rounded-xl bg-[#00a884] px-3.5 py-2 text-xs font-bold text-white disabled:opacity-40 flex items-center gap-1.5"><Plus className="w-4 h-4" />Adicionar agente</button>
               </div>
 
-              {/* Agents Table / List */}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <label className={`flex w-full max-w-sm items-center gap-2 rounded-xl border px-3 py-2 ${isDarkMode ? 'border-[#2a3942] bg-[#182228]' : 'border-[#d1d7db] bg-gray-50'}`}>
+                  <Search className="h-4 w-4 text-[#8696a0]" /><input value={agentQuery} onChange={(event) => setAgentQuery(event.target.value)} placeholder="Pesquisar por nome ou e-mail" className="w-full bg-transparent text-xs outline-none" />
+                </label>
+                <span className="text-[11px] text-[#8696a0]">{customRolesStatus === 'ready' ? `${customRoles.length} funções personalizadas disponíveis` : customRolesStatus === 'unavailable' ? 'Funções personalizadas indisponíveis nesta conta' : ''}</span>
+              </div>
+
               <div className="divide-y divide-white/10">
-                {agents.map((ag) => (
+                {agentsStatus === 'loading' && <p className="py-6 text-center text-xs text-[#8696a0]">Carregando agentes…</p>}
+                {agentsStatus === 'error' && <p className="py-6 text-center text-xs text-red-400">Não foi possível carregar os agentes desta conta.</p>}
+                {agentsStatus === 'ready' && agents.length === 0 && <p className="py-6 text-center text-xs text-[#8696a0]">Nenhum agente está vinculado a esta conta.</p>}
+                {agents.filter((agent) => `${agent.name} ${agent.email || ''}`.toLocaleLowerCase().includes(agentQuery.trim().toLocaleLowerCase())).map((ag) => (
                   <div key={ag.id} className="py-3 flex items-center justify-between">
                     <div className="flex items-center space-x-3">
                       <div className="w-9 h-9 rounded-full bg-[#2563eb] text-white font-bold text-xs flex items-center justify-center shrink-0">
-                        {ag.name.charAt(0)}
+                        {ag.avatarUrl ? <img src={ag.avatarUrl} alt="" className="h-full w-full rounded-full object-cover" /> : ag.name.charAt(0)}
                       </div>
                       <div>
                         <div className="text-xs font-bold flex items-center space-x-2">
                           <span>{ag.name}</span>
                           <span
                             className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                              ag.role === 'Administrador'
+                              ag.role === 'administrator'
                                 ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
-                                : ag.role === 'Supervisor'
+                                : ag.role === 'supervisor'
                                 ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
                                 : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
                             }`}
                           >
-                            {ag.role}
+                            {ag.role === 'administrator' ? 'Administrador' : ag.role === 'supervisor' ? 'Supervisor' : ag.role === 'agent' ? 'Atendente' : ag.role || 'Agente'}
                           </span>
                         </div>
-                        <p className="text-[11px] text-[#8696a0]">{ag.email}</p>
+                        <p className="text-[11px] text-[#8696a0]">{ag.email || 'Sem e-mail disponível'}</p>
                       </div>
                     </div>
-
-                    <div className="flex items-center space-x-3">
-                      <span className="text-[11px] text-[#8696a0]">Capacidade: {ag.capacity} chats</span>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteAgent(ag.id)}
-                        className="p-1.5 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
-                        title="Remover agente"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                    <div className="flex items-center gap-3"><span className="text-[11px] text-[#8696a0]">{ag.availability === 'online' ? 'Disponível' : ag.availability === 'busy' ? 'Ocupado' : ag.availability === 'offline' ? 'Offline' : ag.availability || ''}</span><button type="button" onClick={() => openEditAgent(ag)} title="Editar agente" className="rounded-lg p-2 text-[#8696a0] hover:bg-white/10 hover:text-[#00a884]"><Edit3 className="h-4 w-4" /></button><button type="button" onClick={() => void deleteAgent(ag)} title="Excluir agente" className="rounded-lg p-2 text-[#8696a0] hover:bg-red-500/10 hover:text-red-400"><Trash2 className="h-4 w-4" /></button></div>
                   </div>
                 ))}
+                {agentsStatus === 'ready' && agents.length > 0 && !agents.some((agent) => `${agent.name} ${agent.email || ''}`.toLocaleLowerCase().includes(agentQuery.trim().toLocaleLowerCase())) && <p className="py-6 text-center text-xs text-[#8696a0]">Nenhum agente encontrado.</p>}
               </div>
 
-              {/* Add Agent Modal */}
-              {showAgentModal && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-                  <div
-                    className={`w-full max-w-md rounded-2xl p-5 border shadow-2xl space-y-4 ${
-                      isDarkMode ? 'bg-[#1f2c34] border-[#2a3942] text-white' : 'bg-white border-gray-200 text-[#111b21]'
-                    }`}
-                  >
-                    <h3 className="text-base font-bold">Novo Agente</h3>
-                    <div className="space-y-3 text-xs">
-                      <div>
-                        <label className="text-[#8696a0] block mb-1 font-semibold">Nome Completo</label>
-                        <input
-                          type="text"
-                          value={newAgentName}
-                          onChange={(e) => setNewAgentName(e.target.value)}
-                          placeholder="Ex: João Souza"
-                          className={`w-full px-3 py-2 rounded-xl border outline-none ${
-                            isDarkMode ? 'bg-[#202c33] border-[#2a3942]' : 'bg-[#f0f2f5] border-[#d1d7db]'
-                          }`}
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[#8696a0] block mb-1 font-semibold">Email corporativo</label>
-                        <input
-                          type="email"
-                          value={newAgentEmail}
-                          onChange={(e) => setNewAgentEmail(e.target.value)}
-                          placeholder="joao@empresa.com"
-                          className={`w-full px-3 py-2 rounded-xl border outline-none ${
-                            isDarkMode ? 'bg-[#202c33] border-[#2a3942]' : 'bg-[#f0f2f5] border-[#d1d7db]'
-                          }`}
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[#8696a0] block mb-1 font-semibold">Função / Perfil</label>
-                        <select
-                          value={newAgentRole}
-                          onChange={(e) => setNewAgentRole(e.target.value)}
-                          className={`w-full px-3 py-2 rounded-xl border outline-none ${
-                            isDarkMode ? 'bg-[#202c33] border-[#2a3942]' : 'bg-[#f0f2f5] border-[#d1d7db]'
-                          }`}
-                        >
-                          <option value="Atendente">Atendente</option>
-                          <option value="Supervisor">Supervisor</option>
-                          <option value="Administrador">Administrador</option>
-                        </select>
-                      </div>
-                    </div>
-                    <div className="flex justify-end space-x-2 pt-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowAgentModal(false)}
-                        className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-gray-500/20 text-gray-300 hover:bg-gray-500/30"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleAddAgent}
-                        className="px-4 py-1.5 rounded-xl text-xs font-bold bg-[#00a884] text-white hover:bg-[#008069]"
-                      >
-                        Salvar
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
+              <section className={`border-t pt-5 ${isDarkMode ? 'border-[#2a3942]' : 'border-[#d1d7db]'}`}><div className="flex items-center justify-between gap-3"><div><h4 className="text-sm font-bold">Funções e permissões</h4><p className="mt-1 text-xs text-[#8696a0]">Crie funções personalizadas e atribua-as aos atendentes.</p></div>{customRolesStatus === 'ready' && <button type="button" onClick={openCreateRole} className="rounded-xl border border-[#00a884]/50 px-3 py-2 text-xs font-bold text-[#00a884]">Adicionar função</button>}</div>{customRolesStatus === 'loading' && <p className="py-4 text-xs text-[#8696a0]">Carregando funções…</p>}{customRolesStatus === 'unavailable' && <p className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600">As funções personalizadas não estão habilitadas para esta conta.</p>}{customRolesStatus === 'ready' && <div className="mt-4 space-y-2">{customRoles.length === 0 && <p className="text-xs text-[#8696a0]">Nenhuma função personalizada criada.</p>}{customRoles.map(role => <div key={role.id} className={`flex items-center justify-between gap-3 rounded-xl border p-3 ${isDarkMode ? 'border-[#2a3942] bg-[#182228]' : 'border-[#d1d7db] bg-gray-50'}`}><div><p className="text-xs font-bold">{role.name}</p><p className="mt-1 text-[11px] text-[#8696a0]">{role.description || 'Sem descrição'} · {role.permissions.length} permissões</p></div><div className="flex gap-1"><button type="button" onClick={() => openEditRole(role)} className="rounded-lg p-2 text-[#8696a0] hover:bg-white/10 hover:text-[#00a884]"><Edit3 className="h-4 w-4" /></button><button type="button" onClick={() => void deleteRole(role)} className="rounded-lg p-2 text-[#8696a0] hover:bg-red-500/10 hover:text-red-400"><Trash2 className="h-4 w-4" /></button></div></div>)}</div>}</section>
+
+              {agentModal && <div className="fixed inset-0 z-[100] grid place-items-center bg-black/65 p-4" role="dialog" aria-modal="true"><div className={`w-full max-w-md rounded-2xl border p-5 shadow-2xl ${isDarkMode ? 'border-[#2a3942] bg-[#182228]' : 'border-[#d1d7db] bg-white'}`}><div className="flex items-center justify-between"><h3 className="text-base font-bold">{agentModal === 'create' ? 'Adicionar agente' : `Editar agente · ${editingAgent?.name}`}</h3><button type="button" onClick={() => setAgentModal(null)} className="text-[#8696a0]"><X className="h-4 w-4" /></button></div><p className="mt-1 text-xs text-[#8696a0]">Defina o acesso e a disponibilidade deste usuário na conta.</p>{agentError && <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">{agentError}</p>}<div className="mt-4 space-y-3"><label className="block text-xs font-semibold">Nome<input value={agentForm.name} onChange={(event) => setAgentForm(current => ({ ...current, name: event.target.value }))} className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`} /></label><label className="block text-xs font-semibold">E-mail<input type="email" disabled={agentModal === 'edit'} value={agentForm.email} onChange={(event) => setAgentForm(current => ({ ...current, email: event.target.value }))} className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none disabled:opacity-60 ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`} /></label><div className="grid grid-cols-2 gap-3"><label className="block text-xs font-semibold">Função<select value={agentForm.role} onChange={(event) => setAgentForm(current => ({ ...current, role: event.target.value as 'agent' | 'administrator', customRoleId: event.target.value === 'administrator' ? '' : current.customRoleId }))} className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`}><option value="agent">Atendente</option><option value="administrator">Administrador</option></select></label><label className="block text-xs font-semibold">Disponibilidade<select value={agentForm.availability} onChange={(event) => setAgentForm(current => ({ ...current, availability: event.target.value as 'online' | 'offline' | 'busy' }))} className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`}><option value="online">Disponível</option><option value="offline">Offline</option><option value="busy">Ocupado</option></select></label></div>{agentForm.role === 'agent' && customRolesStatus === 'ready' && <label className="block text-xs font-semibold">Permissões personalizadas<select value={agentForm.customRoleId} onChange={(event) => setAgentForm(current => ({ ...current, customRoleId: event.target.value }))} className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`}><option value="">Padrão de atendente</option>{customRoles.map(role => <option key={role.id} value={role.id}>{role.name}</option>)}</select></label>}</div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setAgentModal(null)} className="rounded-xl px-3 py-2 text-xs font-bold text-[#8696a0]">Cancelar</button><button type="button" disabled={agentSaving || !agentForm.name.trim() || (agentModal === 'create' && !agentForm.email.trim())} onClick={() => void saveAgent()} className="rounded-xl bg-[#00a884] px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{agentSaving ? 'Salvando…' : agentModal === 'create' ? 'Adicionar agente' : 'Salvar alterações'}</button></div></div></div>}
+              {roleModal && <div className="fixed inset-0 z-[101] grid place-items-center bg-black/65 p-4" role="dialog" aria-modal="true"><div className={`w-full max-w-lg rounded-2xl border p-5 shadow-2xl ${isDarkMode ? 'border-[#2a3942] bg-[#182228]' : 'border-[#d1d7db] bg-white'}`}><div className="flex items-center justify-between"><h3 className="text-base font-bold">{roleModal === 'create' ? 'Nova função personalizada' : 'Editar função personalizada'}</h3><button type="button" onClick={() => setRoleModal(null)} className="text-[#8696a0]"><X className="h-4 w-4" /></button></div>{roleError && <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">{roleError}</p>}<div className="mt-4 space-y-3"><label className="block text-xs font-semibold">Nome<input value={roleForm.name} onChange={(event) => setRoleForm(current => ({ ...current, name: event.target.value }))} className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`} /></label><label className="block text-xs font-semibold">Descrição<textarea value={roleForm.description} onChange={(event) => setRoleForm(current => ({ ...current, description: event.target.value }))} className={`mt-1.5 min-h-20 w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`} /></label><fieldset><legend className="text-xs font-semibold">Permissões</legend><div className="mt-2 grid gap-2 sm:grid-cols-2">{CUSTOM_ROLE_PERMISSIONS.map(([key, label]) => <label key={key} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={roleForm.permissions.includes(key)} onChange={() => toggleRolePermission(key)} />{label}</label>)}</div></fieldset></div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setRoleModal(null)} className="rounded-xl px-3 py-2 text-xs font-bold text-[#8696a0]">Cancelar</button><button type="button" disabled={roleSaving || !roleForm.name.trim()} onClick={() => void saveRole()} className="rounded-xl bg-[#00a884] px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{roleSaving ? 'Salvando…' : 'Salvar função'}</button></div></div></div>}
             </div>
           )}
 
@@ -751,20 +751,15 @@ export const SettingsView: React.FC<Props> = ({
               <div className="flex items-center justify-between border-b pb-4 border-white/10">
                 <div>
                   <h3 className="text-lg font-bold">Times & Equipes</h3>
-                  <p className="text-xs text-[#8696a0]">Agrupe agentes em setores para distribuição automática de conversas.</p>
+                  <p className="text-xs text-[#8696a0]">Times reais desta conta no Chatwoot.</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowTeamModal(true)}
-                  className="px-3.5 py-2 bg-[#00a884] hover:bg-[#008069] text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Criar Time</span>
-                </button>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {teams.map((tm) => (
+                {teamsStatus === 'loading' && <p className="col-span-full py-6 text-center text-xs text-[#8696a0]">Carregando times…</p>}
+                {teamsStatus === 'error' && <p className="col-span-full py-6 text-center text-xs text-red-400">Não foi possível carregar os times desta conta.</p>}
+                {teamsStatus === 'ready' && accountTeams.length === 0 && <p className="col-span-full py-6 text-center text-xs text-[#8696a0]">Nenhum time está cadastrado nesta conta.</p>}
+                {accountTeams.map((tm) => (
                   <div
                     key={tm.id}
                     className={`p-4 rounded-xl border space-y-2 ${
@@ -773,16 +768,8 @@ export const SettingsView: React.FC<Props> = ({
                   >
                     <div className="flex items-center justify-between">
                       <h4 className="font-bold text-sm">{tm.name}</h4>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-bold">
-                        {tm.members} membros
-                      </span>
                     </div>
-                    <p className="text-xs text-[#8696a0]">{tm.description}</p>
-                    <div className="pt-2 flex items-center justify-between text-[11px] border-t border-white/5">
-                      <span className="text-[#00a884] font-semibold">
-                        {tm.autoAssign ? '✓ Distribuição automática ativa' : '• Atribuição manual'}
-                      </span>
-                    </div>
+                    <p className="text-xs text-[#8696a0]">Disponível para atribuição de conversas.</p>
                   </div>
                 ))}
               </div>
@@ -1488,7 +1475,7 @@ export const SettingsView: React.FC<Props> = ({
           )}
 
           {/* ==================== 11. APLICAÇÕES ==================== */}
-          {activeTab === 'aplicacoes' && (
+          {activeTab === 'integracoes' && (
             <div
               className={`p-6 rounded-2xl border shadow-xl space-y-6 ${
                 isDarkMode ? 'bg-[#111b21] border-[#222d34]' : 'bg-white border-[#d1d7db]'
@@ -1496,8 +1483,8 @@ export const SettingsView: React.FC<Props> = ({
             >
               <div className="flex items-center justify-between border-b pb-4 border-white/10">
                 <div>
-                  <h3 className="text-lg font-bold">Aplicações & Webhooks</h3>
-                  <p className="text-xs text-[#8696a0]">Conectores de sistemas e URLs de callback HTTP/REST.</p>
+                  <h3 className="text-lg font-bold">Integrações e aplicativos</h3>
+                  <p className="text-xs text-[#8696a0]">Webhooks, Painel de Apps e Aplicações Autônomas. Outros conectores não fazem parte deste produto.</p>
                 </div>
                 <button
                   type="button"
@@ -1505,7 +1492,7 @@ export const SettingsView: React.FC<Props> = ({
                   className="px-3.5 py-2 bg-[#00a884] hover:bg-[#008069] text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>Novo Webhook</span>
+                  <span>Novo webhook</span>
                 </button>
               </div>
 
@@ -1531,11 +1518,22 @@ export const SettingsView: React.FC<Props> = ({
                   </div>
                 ))}
               </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-[#182228] border-[#2a3942]' : 'bg-[#f0f2f5] border-[#d1d7db]'}`}>
+                  <div className="flex items-center justify-between gap-3"><div><h4 className="font-bold text-sm">Painel de Apps</h4><p className="text-xs text-[#8696a0] mt-1">Instale e organize os apps permitidos para o atendimento.</p></div><LayoutGrid className="w-5 h-5 text-[#00a884]" /></div>
+                  <button type="button" onClick={() => showToast('Painel de Apps aberto')} className="mt-3 text-xs font-bold text-[#00a884] hover:underline cursor-pointer">Gerenciar painel</button>
+                </div>
+                <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-[#182228] border-[#2a3942]' : 'bg-[#f0f2f5] border-[#d1d7db]'}`}>
+                  <div className="flex items-center justify-between gap-3"><div><h4 className="font-bold text-sm">Aplicações Autônomas</h4><p className="text-xs text-[#8696a0] mt-1">Aplicativos externos exibidos com contexto da conversa.</p></div><ExternalLink className="w-5 h-5 text-[#00a884]" /></div>
+                  <button type="button" onClick={() => showToast('Aplicações Autônomas abertas')} className="mt-3 text-xs font-bold text-[#00a884] hover:underline cursor-pointer">Gerenciar aplicações</button>
+                </div>
+              </div>
             </div>
           )}
 
           {/* ==================== 12. INTEGRAÇÕES ==================== */}
-          {activeTab === 'integracoes' && (
+          {activeTab === 'aplicacoes' && (
             <div
               className={`p-6 rounded-2xl border shadow-xl space-y-6 ${
                 isDarkMode ? 'bg-[#111b21] border-[#222d34]' : 'bg-white border-[#d1d7db]'

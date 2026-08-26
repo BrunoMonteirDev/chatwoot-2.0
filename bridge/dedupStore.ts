@@ -6,6 +6,9 @@ export class PersistentDedupStore {
   private readonly ids = new Set<string>();
   private readonly inFlight = new Set<string>();
   private loaded = false;
+  // History imports commit messages concurrently. Serialize only the small
+  // file persistence step so two commits never rename the same `.tmp` file.
+  private persistQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly file: string, private readonly limit = 50_000, private readonly ttlSeconds = 7 * 24 * 60 * 60) {}
 
@@ -27,10 +30,13 @@ export class PersistentDedupStore {
     }
     this.inFlight.delete(id); this.ids.add(id);
     while (this.ids.size > this.limit) this.ids.delete(this.ids.values().next().value!);
-    await mkdir(dirname(this.file), { recursive: true });
-    const temporary = `${this.file}.tmp`;
-    await writeFile(temporary, JSON.stringify([...this.ids]), 'utf8');
-    await rename(temporary, this.file);
+    this.persistQueue = this.persistQueue.then(async () => {
+      await mkdir(dirname(this.file), { recursive: true });
+      const temporary = `${this.file}.tmp`;
+      await writeFile(temporary, JSON.stringify([...this.ids]), 'utf8');
+      await rename(temporary, this.file);
+    });
+    await this.persistQueue;
   }
 
   release(id: string) {

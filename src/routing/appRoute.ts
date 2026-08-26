@@ -14,6 +14,7 @@ const tabForPath: Record<string, NavTab> = {
   '/contacts': 'communities',
   '/communities': 'communities',
   '/apps': 'media',
+  '/notes': 'tools',
 };
 
 const normalizedInbox = (value: string | null) => value && (/^\d+$/.test(value) || value === 'todas') ? value : undefined;
@@ -59,5 +60,6 @@ export const urlForAppRoute = (route: AppRoute) => {
   else if (route.tab === 'calls') pathname = `${base}/calls`;
   else if (route.tab === 'communities') pathname = `${base}/contacts`;
   else if (route.tab === 'media') pathname = `${base}/apps`;
+  else if (route.tab === 'tools') pathname = `${base}/notes`;
   return pathname || '/';
 };

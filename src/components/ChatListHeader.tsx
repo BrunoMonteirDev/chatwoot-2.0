@@ -11,7 +11,10 @@ import {
   SlidersHorizontal,
   ArrowUpDown,
   Filter,
+  ChevronDown,
+  Check,
 } from 'lucide-react';
+import type { Inbox } from '../domain/currentUser';
 import {
   FilterCategory,
   ChatStatusFilter,
@@ -29,7 +32,8 @@ interface Props {
   activeFilter: FilterCategory;
   onFilterChange: (filter: FilterCategory) => void;
   selectedInbox?: string;
-  onResetInbox?: () => void;
+  inboxes?: Inbox[];
+  onSelectInbox?: (inboxId: string) => void;
   onNewChatClick: () => void;
   onNewContactClick?: () => void;
   onNewGroupClick?: () => void;
@@ -53,7 +57,8 @@ export const ChatListHeader: React.FC<Props> = ({
   activeFilter,
   onFilterChange,
   selectedInbox = 'todas',
-  onResetInbox,
+  inboxes = [],
+  onSelectInbox,
   onNewChatClick,
   onNewContactClick,
   onNewGroupClick,
@@ -71,10 +76,12 @@ export const ChatListHeader: React.FC<Props> = ({
 }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isSortOpen, setIsSortOpen] = useState(false);
+  const [isInboxMenuOpen, setIsInboxMenuOpen] = useState(false);
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
 
   const menuRef = useRef<HTMLDivElement>(null);
   const sortRef = useRef<HTMLDivElement>(null);
+  const inboxMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -83,6 +90,9 @@ export const ChatListHeader: React.FC<Props> = ({
       }
       if (sortRef.current && !sortRef.current.contains(event.target as Node)) {
         setIsSortOpen(false);
+      }
+      if (inboxMenuRef.current && !inboxMenuRef.current.contains(event.target as Node)) {
+        setIsInboxMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -100,7 +110,7 @@ export const ChatListHeader: React.FC<Props> = ({
       case 'nao_atendidas':
         return 'Não atendidas';
       default:
-        return key;
+        return /^\d+$/.test(key) ? 'Conversas' : key;
     }
   };
 
@@ -112,6 +122,9 @@ export const ChatListHeader: React.FC<Props> = ({
   const activeRulesCount = filterRules.length;
   const isStatusCustom = selectedStatus !== 'todas';
   const isSortCustom = selectedSort !== 'last_activity_desc';
+  const selectedInboxLabel = selectedInbox === 'todas'
+    ? 'Todas'
+    : inboxes.find((inbox) => String(inbox.id) === selectedInbox)?.name || 'Todas';
 
   return (
     <div
@@ -180,6 +193,40 @@ export const ChatListHeader: React.FC<Props> = ({
                 isDarkMode={isDarkMode}
               />
             </div>
+
+            {/* Dropdown próprio: evita o painel nativo do navegador e mantém
+                as caixas autorizadas pelo endpoint autenticado. */}
+            <div className="relative" ref={inboxMenuRef}>
+              <button
+                type="button"
+                onClick={() => setIsInboxMenuOpen((open) => !open)}
+                aria-expanded={isInboxMenuOpen}
+                aria-label="Filtrar por caixa de entrada"
+                className={`flex h-8 max-w-[104px] items-center gap-1 rounded-lg px-2 text-xs font-semibold transition-colors cursor-pointer ${
+                  selectedInbox !== 'todas'
+                    ? isDarkMode ? 'bg-[#00a884]/15 text-[#00a884]' : 'bg-[#d9fdd3] text-[#008f72]'
+                    : isDarkMode ? 'text-[#aebac1] hover:bg-[#1e1f1f]' : 'text-[#54656f] hover:bg-[#f0f2f5]'
+                }`}
+              >
+                <span className="truncate">{selectedInboxLabel}</span>
+                <ChevronDown className={`h-3.5 w-3.5 flex-none transition-transform ${isInboxMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {isInboxMenuOpen && (
+                <div className={`absolute right-0 top-full z-[60] mt-2 w-60 overflow-hidden rounded-2xl border py-1.5 shadow-2xl animate-fade-in ${
+                  isDarkMode ? 'border-[#2a3942] bg-[#202c33] text-[#e9edef]' : 'border-gray-200 bg-white text-[#111b21]'
+                }`}>
+                  <p className="px-3 pb-1.5 pt-1 text-[10px] font-bold uppercase tracking-wider text-[#8696a0]">Caixas de entrada</p>
+                  {[{ id: 'todas', name: 'Todas as caixas' }, ...inboxes.map((inbox) => ({ id: String(inbox.id), name: inbox.name }))].map((inbox) => {
+                    const isSelected = selectedInbox === inbox.id;
+                    return <button key={inbox.id} type="button" onClick={() => { onSelectInbox?.(inbox.id); setIsInboxMenuOpen(false); }} className={`flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors ${isSelected ? 'bg-[#00a884]/12 text-[#00a884]' : isDarkMode ? 'hover:bg-[#2a3942]' : 'hover:bg-gray-100'}`}>
+                      <span className={`flex h-5 w-5 flex-none items-center justify-center rounded-full border ${isSelected ? 'border-[#00a884] bg-[#00a884] text-white' : 'border-[#8696a0]'}`}>{isSelected && <Check className="h-3.5 w-3.5 stroke-[3]" />}</span>
+                      <span className="truncate font-medium">{inbox.name}</span>
+                    </button>;
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -199,7 +246,7 @@ export const ChatListHeader: React.FC<Props> = ({
           )}
 
           {/* Plus Button with Dropdown Menu */}
-          <div className="relative" ref={menuRef}>
+          <div className="relative hidden md:block" ref={menuRef}>
             <button
               onClick={() => setIsMenuOpen((prev) => !prev)}
               title="Nova opção"
@@ -411,8 +458,22 @@ export const ChatListHeader: React.FC<Props> = ({
         >
           Todos
         </button>
+
+        <button
+          onClick={() => onFilterChange('grupos')}
+          className={`px-3 py-1.5 rounded-xl transition-all whitespace-nowrap font-semibold cursor-pointer ${
+            activeFilter === 'grupos'
+              ? isDarkMode
+                ? 'bg-[#242525] text-[#00a884] border border-[#00a884]/30 shadow-xs'
+                : 'bg-[#e9edef] text-[#111b21] shadow-xs'
+              : isDarkMode
+              ? 'bg-[#1e1f1f] text-[#8696a0] hover:bg-[#242525] hover:text-[#e9edef]'
+              : 'bg-[#f0f2f5] text-[#54656f] hover:bg-[#e9edef] hover:text-[#111b21]'
+          }`}
+        >
+          Grupos
+        </button>
       </div>
     </div>
   );
 };
-

@@ -27,7 +27,8 @@ import { NewConversationModal } from './components/NewConversationModal';
 import { NewGroupModal } from './components/NewGroupModal';
 import { WallpaperId } from './components/WhatsAppDoodleBg';
 import { FloatingMobileNav } from './components/FloatingMobileNav';
-import { DimensionModal } from './components/DimensionModal';
+import { QuickNotesView } from './components/QuickNotesView';
+import { MobileProfileSettings } from './components/MobileProfileSettings';
 import { ContextMenu } from './components/ContextMenu';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { useContextMenu } from './hooks/useContextMenu';
@@ -47,16 +48,19 @@ import { useContacts } from './features/contacts/useContacts';
 import { toContactListItem } from './features/contacts/toContactListItem';
 import { conversationService } from './integrations/chatwoot/conversations';
 import { messageService } from './integrations/chatwoot/messages';
+import { authService } from './integrations/chatwoot/auth';
 import type { ConversationMessage } from './domain/currentUser';
 import { appRouteFromUrl, urlForAppRoute, type AppRoute } from './routing/appRoute';
 
 const emptyUser: UserProfile = { name: '', phone: '', about: '', avatar: '' };
 const emptyAccount: MultiTenantAccount = { id: '', name: '', role: '' };
-const settingsTabs: SettingsTab[] = ['conta', 'agentes', 'times', 'caixas', 'etiquetas', 'atributos', 'kanban', 'kanbancrm', 'automacao', 'n8n', 'bots', 'macros', 'respostas', 'agendadas', 'aplicacoes', 'integracoes', 'auditoria', 'permissoes'];
+// This is also the route allow-list. Retired modules cannot be reopened by
+// manually entering an old settings URL.
+const settingsTabs: SettingsTab[] = ['perfil', 'conta', 'agentes', 'times', 'caixas', 'etiquetas', 'atributos', 'automacao', 'macros', 'respostas', 'agendadas', 'integracoes', 'auditoria', 'permissoes'];
 const isSettingsTab = (value: string | undefined): value is SettingsTab => Boolean(value && settingsTabs.includes(value as SettingsTab));
 
 export default function App() {
-  const { user: authenticatedUser, currentAccount, selectAccount, logout } = useAuth();
+  const { user: authenticatedUser, currentAccount, selectAccount, logout, retryBootstrap } = useAuth();
   const initialRoute = appRouteFromUrl(new URL(window.location.href));
   const superAdminUrl = import.meta.env.VITE_SUPER_ADMIN_URL || '/super_admin';
   const { inboxes, status: inboxesStatus, error: inboxesError, retry: retryInboxes } = useInboxes(currentAccount?.id ?? null);
@@ -298,42 +302,6 @@ export default function App() {
       setWallpaperId(next ? 'dark-doodle' : 'light-beige-doodle');
       return next;
     });
-  };
-
-  // System Width & Height Scale State
-  const [uiWidthScale, setUiWidthScale] = useState<number>(() => {
-    const saved = localStorage.getItem('wa_ui_width_scale');
-    return saved ? parseInt(saved, 10) : 100;
-  });
-
-  const [uiHeightScale, setUiHeightScale] = useState<number>(() => {
-    const saved = localStorage.getItem('wa_ui_height_scale');
-    return saved ? parseInt(saved, 10) : 100;
-  });
-
-  const [uiFontScale, setUiFontScale] = useState<number>(() => {
-    const saved = localStorage.getItem('wa_ui_font_scale');
-    return saved ? parseInt(saved, 10) : 100;
-  });
-
-  const [showDimensionModal, setShowDimensionModal] = useState<boolean>(false);
-
-  useEffect(() => {
-    localStorage.setItem('wa_ui_width_scale', String(uiWidthScale));
-  }, [uiWidthScale]);
-
-  useEffect(() => {
-    localStorage.setItem('wa_ui_height_scale', String(uiHeightScale));
-  }, [uiHeightScale]);
-
-  useEffect(() => {
-    localStorage.setItem('wa_ui_font_scale', String(uiFontScale));
-  }, [uiFontScale]);
-
-  const handleChangeDimensions = (w: number, h: number, f: number) => {
-    setUiWidthScale(w);
-    setUiHeightScale(h);
-    setUiFontScale(f);
   };
 
   // Modal States
@@ -596,6 +564,8 @@ export default function App() {
         if (!authenticatedUser || !c.responsibleUserIds?.includes(authenticatedUser.id)) return false;
       } else if (activeFilter === 'nao_atribuidas') {
         if (!c.unassigned) return false;
+      } else if (activeFilter === 'grupos') {
+        if (!c.isGroup) return false;
       }
 
       // Quick Status Filter
@@ -849,9 +819,6 @@ export default function App() {
       className={`w-screen h-screen flex flex-col font-sans antialiased overflow-hidden select-none transition-colors ${
         isDarkMode ? 'bg-[#0e0c0c]' : 'bg-[#f0f2f5]'
       }`}
-      style={{
-        zoom: `${(uiWidthScale / 100) * (uiFontScale / 100)}`,
-      }}
     >
       {/* Main WhatsApp Applet Layout */}
       <div className="flex-1 flex overflow-x-auto overflow-y-hidden relative">
@@ -866,6 +833,8 @@ export default function App() {
           selectedSettingsTab={selectedSettingsTab}
           onSelectSettingsTab={(tabKey) => navigateToSettings(tabKey as SettingsTab)}
           userAvatar={user.avatar}
+          userName={authenticatedUser?.displayName || authenticatedUser?.name || ''}
+          userEmail={authenticatedUser?.email || ''}
           isDarkMode={isDarkMode}
           onToggleDarkMode={toggleDarkMode}
           selectedAccount={selectedAccount}
@@ -876,7 +845,6 @@ export default function App() {
           inboxesError={inboxesError}
           onRetryInboxes={() => void retryInboxes()}
           onLogout={() => void logout()}
-          onOpenDimensionsModal={() => setShowDimensionModal(true)}
           isSuperAdmin={authenticatedUser?.isSuperAdmin}
           onOpenSuperAdmin={() => window.location.assign(superAdminUrl)}
           onNewChatClick={() => {
@@ -929,7 +897,9 @@ export default function App() {
         )}
 
         {activeNavTab === 'settings' && (
-          <SettingsView
+          <>
+          <MobileProfileSettings user={user} onUpdateUser={setUser} onClose={() => navigateToTab('chats')} isDarkMode={isDarkMode} onToggleDarkMode={toggleDarkMode} />
+          <div className="hidden min-h-0 flex-1 md:flex"><SettingsView
             user={user}
             onUpdateUser={(updated) => setUser(updated)}
             onClose={() => navigateToTab('chats')}
@@ -939,17 +909,22 @@ export default function App() {
             onSelectWallpaper={(id) => setWallpaperId(id)}
             activeTab={selectedSettingsTab}
             onTabChange={navigateToSettings}
-            uiWidthScale={uiWidthScale}
-            uiHeightScale={uiHeightScale}
-            uiFontScale={uiFontScale}
-            onChangeDimensions={handleChangeDimensions}
             accountId={currentAccount?.id ?? null}
             inboxes={inboxes}
             inboxesStatus={inboxesStatus}
             inboxesError={inboxesError}
             onRefreshInboxes={retryInboxes}
-          />
+            profile={authenticatedUser}
+            onSaveProfile={async (profile) => {
+              await authService.updateProfile({ name: profile.name, display_name: profile.displayName, email: profile.email, phone_number: profile.phoneNumber, message_signature: profile.messageSignature, ...(profile.password ? { current_password: profile.currentPassword, password: profile.password, password_confirmation: profile.passwordConfirmation } : {}) });
+              await retryBootstrap();
+            }}
+            onResetAccessToken={async () => { await authService.resetAccessToken(); await retryBootstrap(); }}
+          /></div>
+          </>
         )}
+
+        {activeNavTab === 'tools' && <QuickNotesView isDarkMode={isDarkMode} />}
 
         {activeNavTab === 'media' && (
           <AppsView
@@ -1000,7 +975,8 @@ export default function App() {
           activeNavTab !== 'calls' &&
           activeNavTab !== 'communities' &&
           activeNavTab !== 'settings' &&
-          activeNavTab !== 'media' && (
+          activeNavTab !== 'media' &&
+          activeNavTab !== 'tools' && (
             <div className="flex-1 flex flex-row h-full overflow-x-auto overflow-y-hidden min-w-0">
               {/* Left Chat List Column (Collapsible & Resizable on Desktop) */}
               <div
@@ -1035,7 +1011,8 @@ export default function App() {
                   activeFilter={activeFilter}
                   onFilterChange={setActiveFilter}
                   selectedInbox={selectedInbox}
-                  onResetInbox={() => selectInboxRoute('todas')}
+                  inboxes={inboxes}
+                  onSelectInbox={selectInboxRoute}
                   onNewChatClick={() => setShowNewConversationModal(true)}
                   onNewContactClick={() => navigateToTab('communities')}
                   onNewGroupClick={() => setShowNewGroupModal(true)}
@@ -1118,6 +1095,7 @@ export default function App() {
                   onEditMessage={(messageId, content) => messageHistory.edit(Number(messageId), content)}
                   onRevokeMessage={(messageId) => messageHistory.revoke(Number(messageId))}
                   conversation={selectedConversation}
+                  inboxes={inboxes}
                   managementCatalogs={conversationManagement.catalogs}
                   managementCatalogStatus={conversationManagement.catalogStatus}
                   managementCatalogError={conversationManagement.catalogError}
@@ -1192,6 +1170,9 @@ export default function App() {
           }}
           isDarkMode={isDarkMode}
           unreadCountTotal={unreadCountTotal}
+          onNewConversation={() => setShowNewConversationModal(true)}
+          onNewContact={() => navigateToTab('communities')}
+          onNewGroup={() => setShowNewGroupModal(true)}
         />
       )}
 
@@ -1202,18 +1183,6 @@ export default function App() {
           title={previewImage.title}
           subtitle={previewImage.subtitle}
           onClose={() => setPreviewImage(null)}
-        />
-      )}
-
-      {/* System Dimension & Scale Adjustment Modal */}
-      {showDimensionModal && (
-        <DimensionModal
-          widthScale={uiWidthScale}
-          heightScale={uiHeightScale}
-          fontScale={uiFontScale}
-          onChangeDimensions={handleChangeDimensions}
-          onClose={() => setShowDimensionModal(false)}
-          isDarkMode={isDarkMode}
         />
       )}
 

@@ -49,6 +49,9 @@ export const errorMessageForUser = (error: unknown): string => {
   if (error instanceof ChatwootApiError) {
     if (error.status === 401) return 'E-mail ou senha inválidos, ou sua sessão expirou.';
     if (error.status === 403) return 'Você não tem permissão para realizar esta ação.';
+    if (error.status === 402 || /(?:account )?limit exceeded|limite (?:de )?(?:agentes|caixas)/i.test(error.validationErrors[0] || error.message)) {
+      return 'O limite desta conta foi atingido. Fale com o suporte para ampliar o limite.';
+    }
     return error.validationErrors[0] || error.message;
   }
   if (error instanceof BridgeApiError) {

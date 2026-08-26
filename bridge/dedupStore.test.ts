@@ -17,4 +17,18 @@ describe('PersistentDedupStore', () => {
     await store.commit('cw-1:media-42');
     expect(await store.hasOrLock('cw-1:media-42')).toBe(true);
   });
+
+  it('persiste commits concorrentes sem disputar o mesmo arquivo temporário', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'waha-dedup-'));
+    directories.push(directory);
+    const file = join(directory, 'history.json');
+    const store = new PersistentDedupStore(file);
+    await Promise.all(Array.from({ length: 20 }, async (_, index) => {
+      const id = `waha:${index}`;
+      expect(await store.hasOrLock(id)).toBe(false);
+      await store.commit(id);
+    }));
+    const restored = new PersistentDedupStore(file);
+    await expect(restored.hasOrLock('waha:19')).resolves.toBe(true);
+  });
 });

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kopla-pwa-v1';
+const CACHE_NAME = 'kopla-pwa-v3';
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icons/kopla-icon-192.svg', '/icons/kopla-icon-512.svg'];
 
 self.addEventListener('install', (event) => {
@@ -18,20 +18,15 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
-  if (request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/') || url.pathname === '/cable') return;
+  // Attachments are ActiveStorage redirects. Leave them entirely to the
+  // browser/network stack so media streams, downloads and signed redirects
+  // are never affected by the PWA cache layer.
+  if (request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/') || url.pathname.startsWith('/rails/') || url.pathname === '/cable') return;
 
   if (request.mode === 'navigate') {
     event.respondWith(fetch(request).catch(() => caches.match('/index.html')));
     return;
   }
 
-  event.respondWith(
-    caches.match(request).then((cached) => cached || fetch(request).then((response) => {
-      if (response.ok) {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-      }
-      return response;
-    })),
-  );
+  event.respondWith(caches.match(request).then((cached) => cached || fetch(request)));
 });

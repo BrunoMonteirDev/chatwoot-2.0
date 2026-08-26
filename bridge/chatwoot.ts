@@ -6,7 +6,7 @@ import type { EvolutionGroupParticipant } from './evolutionEvent.js';
 
 export type ApiInbox = { id: number; channel_type: string; inbox_identifier?: string; additional_attributes?: Record<string, unknown>; secret?: string };
 type Contact = { id: number; source_id: string };
-type Conversation = { id: number; status: string; inbox_id?: number; last_activity_at?: number };
+type Conversation = { id: number; internal_id?: number; status: string; inbox_id?: number; last_activity_at?: number };
 type ConversationTarget = { id: number; inbox_id: number; meta?: { sender?: { phone_number?: string | null } }; contact_inbox?: { source_id?: string | null } };
 type AccountContact = {
   id: number;
@@ -30,7 +30,7 @@ export interface WhatsAppMessageTransportMetadata {
   remoteJid: string;
   fromMe: boolean;
 }
-export interface WhatsAppMessageTarget { id: number; conversation_id: number; source_id: string; content_attributes: Record<string, unknown> }
+export interface WhatsAppMessageTarget { id: number; conversation_id: number; source_id: string; content_attributes: Record<string, unknown>; attachments_count?: number }
 
 export interface EvolutionMessageContext {
   chatType?: 'private' | 'group';
@@ -74,6 +74,11 @@ const request = async <T>(path: string, init: RequestInit = {}, apiToken = false
   return body as T;
 };
 
+// Rails treats a dot in a dynamic URL segment as a format separator. WAHA
+// group JIDs end in `@g.us`; encode the dot as well so a group ContactInbox
+// source id reaches the public Chatwoot conversation route intact.
+const encodeContactSourceForPath = (sourceId: string) => encodeURIComponent(sourceId).replace(/\./g, '%2E');
+
 const replyAttributes = (quotedMessageId?: string) => quotedMessageId ? {
   // Chatwoot resolves this to its internal `in_reply_to` when the original
   // message exists. Keep the raw WhatsApp ID too: the builder deliberately
@@ -94,6 +99,11 @@ const transportMessageAttributes = (transport: WhatsAppTransport, messageType: '
   ...(context.chatType === 'group' ? { whatsapp_chat_type: 'group' } : {}),
   ...(context.participantJid ? { whatsapp_participant_jid: context.participantJid } : {}),
   ...(context.participantName ? { whatsapp_participant_name: context.participantName } : {}),
+  // An outgoing message received from a linked WhatsApp session was written
+  // on the phone, rather than by an agent in Chatwoot. Keep this provider
+  // neutral so WAHA and Evolution have identical behaviour in the UI.
+  ...(messageType === 'outgoing' ? { whatsapp_origin: 'mobile' } : {}),
+  // Retain the legacy attribute for existing Evolution consumers.
   ...(transport === 'evolution' && messageType === 'outgoing' ? { evolution_origin: 'mobile' } : {}),
   ...(inReplyTo ? { in_reply_to: inReplyTo } : {}),
   ...transportReplyAttributes(transport, quotedMessageId),
@@ -156,6 +166,9 @@ export const chatwootBridge = {
       method: 'PATCH', body: JSON.stringify({ channel: { additional_attributes: { ...(inbox.additional_attributes || {}), ...patch } } }),
     }, true);
   },
+  async deleteInbox(inboxId: number) {
+    await request(`/api/v1/accounts/${config.chatwootAccountId}/inboxes/${inboxId}`, { method: 'DELETE' }, true);
+  },
   async findInbox(instance: string): Promise<{ identifier: string; id: number }> {
     const inbox = (await this.listApiInboxes()).find(item => item.additional_attributes?.evolution_provider === 'evolution' && item.additional_attributes?.evolution_instance_name === instance);
     if (!inbox?.inbox_identifier) throw new Error(`Nenhuma inbox Evolution encontrada para a instância ${instance}.`);
@@ -200,7 +213,13 @@ export const chatwootBridge = {
     const contact = response.payload.find(item => item.phone_number?.replace(/\D/g, '') === digits);
     return contact?.contact_inboxes?.find(item => item.inbox_id === inboxId || item.inbox?.id === inboxId)?.source_id;
   },
-  createOrFindContact: (identifier: string, input: { sourceId: string; name: string; phoneNumber?: string }) => request<Contact>(`/public/api/v1/inboxes/${encodeURIComponent(identifier)}/contacts`, { method: 'POST', body: JSON.stringify({ source_id: input.sourceId, name: input.name, ...(input.phoneNumber ? { phone_number: input.phoneNumber } : {}) }) }),
+  createOrFindContact: (identifier: string, input: { sourceId: string; name: string; phoneNumber?: string; avatarUrl?: string }) => request<Contact>(`/public/api/v1/inboxes/${encodeURIComponent(identifier)}/contacts`, { method: 'POST', body: JSON.stringify({ source_id: input.sourceId, name: input.name, ...(input.phoneNumber ? { phone_number: input.phoneNumber } : {}), ...(input.avatarUrl ? { avatar_url: input.avatarUrl } : {}) }) }),
+  updatePublicContact: (identifier: string, sourceId: string, input: { name?: string; avatarUrl?: string }) => {
+    if (!input.name && !input.avatarUrl) return Promise.resolve(undefined);
+    return request(`/public/api/v1/inboxes/${encodeURIComponent(identifier)}/contacts/${encodeContactSourceForPath(sourceId)}`, {
+      method: 'PATCH', body: JSON.stringify({ ...(input.name ? { name: input.name } : {}), ...(input.avatarUrl ? { avatar_url: input.avatarUrl } : {}) }),
+    });
+  },
   saveEvolutionIdentity: (contactId: number, phoneNumber: string | undefined, lid: string | undefined) => request(`/api/v1/accounts/${config.chatwootAccountId}/contacts/${contactId}`, {
     method: 'PATCH',
     body: JSON.stringify({
@@ -230,24 +249,30 @@ export const chatwootBridge = {
       ...(details.participantAction ? { whatsapp_group_last_participant_action: details.participantAction } : {}),
     } }),
   }, true),
-  async findOrCreateConversation(identifier: string, sourceId: string, contactId?: number, inboxId?: number): Promise<Conversation> {
+  async findOrCreateConversation(identifier: string, sourceId: string, contactId: number, inboxId: number): Promise<Conversation> {
     // A contact may already have been created manually in Chatwoot. Its
     // ContactInbox source id is then a UUID rather than `whatsapp:<phone>`.
     // Look up conversations by contact and inbox first, not only by the
     // provider source id, otherwise Chatwoot creates a parallel thread.
-    if (contactId && inboxId) {
+    const listInternalConversations = async () => {
       const response = await request<{ payload: Conversation[] }>(`/api/v1/accounts/${config.chatwootAccountId}/contacts/${contactId}/conversations`, {}, true);
-      const existing = response.payload
+      return response.payload
         .filter(conversation => conversation.inbox_id === inboxId)
-        .sort((left, right) => (right.last_activity_at || 0) - (left.last_activity_at || 0))[0];
-      if (existing) return existing;
-    }
-    const root = `/public/api/v1/inboxes/${encodeURIComponent(identifier)}/contacts/${encodeURIComponent(sourceId)}/conversations`;
-    const conversations = await request<Conversation[]>(root);
-    // One WhatsApp contact/inbox always uses its latest conversation. Reusing
-    // resolved conversations prevents new threads for every incoming message.
-    const latest = [...conversations].sort((left, right) => right.id - left.id)[0];
-    return latest || request<Conversation>(root, { method: 'POST', body: JSON.stringify({}) });
+        .sort((left, right) => (right.last_activity_at || 0) - (left.last_activity_at || 0));
+    };
+    const existing = (await listInternalConversations())[0];
+    if (existing) return existing;
+
+    // The public endpoint addresses a ContactInbox by source_id and is the
+    // supported way to create a conversation. Its response exposes display_id
+    // as `id`, however, while the authenticated API uses the database id.
+    // Never pass the public response to administrative endpoints: create, then
+    // read the canonical conversation from the authenticated account API.
+    const root = `/public/api/v1/inboxes/${encodeURIComponent(identifier)}/contacts/${encodeContactSourceForPath(sourceId)}/conversations`;
+    await request(root, { method: 'POST', body: JSON.stringify({}) });
+    const created = (await listInternalConversations())[0];
+    if (!created) throw new Error('O Chatwoot não retornou a conversa recém-criada.');
+    return created;
   },
   async conversationRecipient(conversationId: number, inboxId: number) {
     const conversation = await request<ConversationTarget>(`/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}`, {}, true);
@@ -292,6 +317,9 @@ export const chatwootBridge = {
   },
   createIncomingTransportMediaMessage: (conversationId: number, transport: WhatsAppTransport, content: string, messageId: string, media: DownloadedEvolutionMedia, quotedMessageId?: string, remoteJid?: string, inReplyTo?: number, context: EvolutionMessageContext = {}) => request(`/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`, {
     method: 'POST', body: transportMediaMessagePayload(content, 'incoming', transport, messageId, media, quotedMessageId, remoteJid, inReplyTo, context),
+  }, true),
+  createMobileOutgoingTransportMediaMessage: (conversationId: number, transport: WhatsAppTransport, content: string, messageId: string, media: DownloadedEvolutionMedia, quotedMessageId?: string, remoteJid?: string, inReplyTo?: number, context: EvolutionMessageContext = {}) => request(`/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`, {
+    method: 'POST', body: transportMediaMessagePayload(content, 'outgoing', transport, messageId, media, quotedMessageId, remoteJid, inReplyTo, context),
   }, true),
   createBusinessAppEchoMessage: (conversationId: number, content: string, messageId: string, quotedMessageId?: string, remoteJid?: string) => request(`/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`, {
     method: 'POST', body: JSON.stringify({ content, message_type: 'outgoing', source_id: `meta:${messageId}`, echo_id: `meta:${messageId}`, content_attributes: businessAppMessageAttributes(remoteJid, quotedMessageId) }),

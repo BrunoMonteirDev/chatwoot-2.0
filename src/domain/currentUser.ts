@@ -14,6 +14,10 @@ export interface CurrentUser {
   avatarUrl: string | null;
   role: string | null;
   isSuperAdmin: boolean;
+  apiAccessToken: string;
+  phoneNumber: string | null;
+  messageSignature: string | null;
+  uiSettings: Record<string, unknown>;
   pubsubToken: string;
   accounts: CurrentAccount[];
   activeAccountId: number | null;
@@ -84,6 +88,17 @@ export interface AssignableAgent {
   id: number;
   name: string;
   avatarUrl: string | null;
+  email?: string | null;
+  role?: string | null;
+  availability?: string | null;
+  customRoleId?: number | null;
+}
+
+export interface CustomRole {
+  id: number;
+  name: string;
+  description: string | null;
+  permissions: string[];
 }
 
 export interface ConversationTeam {

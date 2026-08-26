@@ -41,11 +41,12 @@ app.use(bridgeCors);
 app.get('/health', (_request, response) => response.json({ ok: true, redis: bridgeRedis.enabled ? 'configured' : 'local-development', metrics: bridgeMetrics.snapshot() }));
 app.get('/ready', async (_request, response) => {
   try {
-    const [chatwoot, redis] = await Promise.all([
+    const [chatwoot, redis, waha] = await Promise.all([
       fetch(`${config.chatwootBaseUrl}/api/v1/accounts/${config.chatwootAccountId}/inboxes`, { headers: { api_access_token: config.chatwootApiAccessToken } }),
       bridgeRedis.ping(),
+      wahaTransport.health(),
     ]);
-    if (!chatwoot.ok || !redis) throw new Error('dependency unavailable');
+    if (!chatwoot.ok || !redis || !waha) throw new Error('dependency unavailable');
     return response.json({ ok: true });
   } catch {
     return response.status(503).json({ ok: false });
@@ -269,6 +270,16 @@ const configureWahaInbox = async (inboxId: number, sessionName: string, status?:
   const transports = [...new Set([...(configuration?.transports || []), 'waha'])];
   await chatwootBridge.updateInboxAdditionalAttributes(inboxId, { waha_session_name: sessionName, waha_provider: 'waha', ...(status ? { waha_connection_status: status } : {}), whatsapp_transports: transports, whatsapp_mode: transports.length > 1 ? 'hybrid' : 'web' });
 };
+const clearWahaInbox = async (inboxId: number) => {
+  const inbox = await chatwootBridge.findApiInboxById(inboxId);
+  const configuration = transportConfigurationForInbox(inbox.additionalAttributes);
+  const transports = (configuration?.transports || []).filter((transport) => transport !== 'waha');
+  await chatwootBridge.updateInboxAdditionalAttributes(inboxId, {
+    waha_session_name: '', waha_connection_status: 'disconnected',
+    whatsapp_transports: transports,
+    whatsapp_mode: transports.length > 1 ? 'hybrid' : transports[0] === 'meta_cloud' ? 'official' : transports[0] === 'evolution' ? 'web' : '',
+  });
+};
 // Controlled one-time adoption for inboxes configured before ownership storage
 // existed. The bridge verifies the account-scoped Chatwoot inbox itself; it
 // never adopts an arbitrary browser-provided session name.
@@ -293,6 +304,7 @@ const wahaErrorResponse = (response: express.Response, error: unknown) => {
   if (error instanceof WahaApiError && error.kind === 'not_configured') return response.status(503).json({ error: 'WAHA is not configured on this bridge.' });
   if (error instanceof WahaApiError && error.kind === 'timeout') return response.status(504).json({ error: 'WAHA request timed out.' });
   if (error instanceof WahaApiError && error.kind === 'api' && error.status === 404) return response.status(404).json({ error: 'WAHA session was not found.' });
+  if (error instanceof WahaApiError && error.kind === 'api' && error.status === 422 && /already exists|já existe/i.test(error.message)) return response.status(409).json({ error: 'Já existe uma sessão WAHA com esse nome. Escolha outro nome para esta caixa.' });
   if (error instanceof WahaApiError && error.kind === 'api') return response.status(502).json({ error: 'WAHA rejected the session operation.' });
   return response.status(502).json({ error: 'Could not communicate with WAHA.' });
 };
@@ -308,31 +320,74 @@ const retryHistoryOperation = async <T>(operation: () => Promise<T>, attempts = 
   throw lastError;
 };
 
-const importWahaHistoricalMessage = async (job: WahaHistoryJob, raw: unknown, conversations: Set<number>) => {
-  const message = parseWahaHistoryMessage(job.sessionName, raw);
+type WahaHistoryProfiles = {
+  names: Map<string, string>;
+  avatarUrls: Map<string, Promise<string | undefined>>;
+  syncedContacts: Set<number>;
+};
+
+const historyProfileFor = async (session: string, message: IncomingWahaMessage, profiles: WahaHistoryProfiles): Promise<IncomingWahaMessage> => {
+  let phoneNumber = message.phoneNumber;
+  if (!phoneNumber && message.lid) {
+    try {
+      const phone = await wahaTransport.resolveLid(session, message.lid);
+      if (phone) phoneNumber = `+${phone}`;
+    } catch { /* A LID is still a valid stable identity when WAHA cannot resolve it. */ }
+  }
+  const phone = phoneNumber?.replace(/\D/g, '');
+  const candidates = [message.chatId, phone && `${phone}@c.us`, phone && `${phone}@s.whatsapp.net`].filter((value): value is string => Boolean(value));
+  const contactName = candidates.map(candidate => profiles.names.get(candidate)).find((value): value is string => Boolean(value)) || message.contactName;
+  const avatarKey = candidates.find(candidate => profiles.names.has(candidate)) || message.chatId;
+  let avatarUrl: string | undefined;
+  try {
+    let pending = profiles.avatarUrls.get(avatarKey);
+    if (!pending) {
+      pending = wahaTransport.getChatAvatarUrl(session, avatarKey).catch(() => undefined);
+      profiles.avatarUrls.set(avatarKey, pending);
+    }
+    avatarUrl = await pending;
+  } catch { /* Profile pictures are optional and must never block history. */ }
+  return {
+    ...message,
+    ...(phoneNumber ? { phoneNumber, sourceId: `whatsapp:${phone}` } : {}),
+    ...(contactName ? { name: contactName, contactName } : {}),
+    ...(avatarUrl ? { avatarUrl } : {}),
+  };
+};
+
+const importWahaHistoricalMessage = async (job: WahaHistoryJob, raw: unknown, conversations: Set<number>, profiles: WahaHistoryProfiles) => {
+  const parsed = parseWahaHistoryMessage(job.sessionName, raw);
+  const message = parsed && await historyProfileFor(job.sessionName, parsed, profiles);
   await wahaHistory.addMetrics(job.accountId, job.inboxId, { processed: 1 });
   if (!message || (!message.content && !message.media)) {
     await wahaHistory.addMetrics(job.accountId, job.inboxId, { skipped: 1 });
     return;
   }
   const key = externalMessageId('waha', message.externalId);
-  if (await dedup.hasOrLock(key)) {
+  // Resolve/update the contact before the duplicate fast-path. A retry must
+  // enrich names and avatars on conversations imported by an older bridge,
+  // while still never creating a second message.
+  const inbox = await wahaInboxForWebhook(job.sessionName);
+  const { contact, conversation } = await conversationForWahaIdentity(inbox, message, profiles.syncedContacts);
+  const historyConversationId = conversation.internal_id || conversation.id;
+  conversations.add(historyConversationId);
+  if (message.chatType === 'group') await chatwootBridge.saveEvolutionGroup(contact.id, message.remoteJid, message.name, { participants: message.participantJid ? [{ jid: message.participantJid, name: message.participantName }] : undefined });
+  let existingMessage: Awaited<ReturnType<typeof chatwootBridge.messageTargetBySourceId>> | undefined;
+  try { existingMessage = await chatwootBridge.messageTargetBySourceId(key); } catch { /* The historical message does not exist yet. */ }
+  // The first import may have inserted the text shell while WAHA was still
+  // fetching its file. Use a separate lock for this one safe media backfill.
+  const needsMediaBackfill = Boolean(message.media && existingMessage && !existingMessage.attachments_count);
+  const dedupKey = needsMediaBackfill ? `${key}:history-media` : key;
+  if (await dedup.hasOrLock(dedupKey)) {
     await wahaHistory.addMetrics(job.accountId, job.inboxId, { duplicates: 1 });
     return;
   }
   try {
-    // Avoid fetching history media again when the same WAHA message already
-    // entered through realtime or a previous import.
-    try {
-      await chatwootBridge.messageTargetBySourceId(key);
-      await dedup.commit(key);
+    if (existingMessage && !needsMediaBackfill) {
+      await dedup.commit(dedupKey);
       await wahaHistory.addMetrics(job.accountId, job.inboxId, { duplicates: 1 });
       return;
-    } catch { /* It is not stored yet; Rails keeps the final atomic guard. */ }
-    const inbox = await wahaInboxForWebhook(job.sessionName);
-    const { contact, conversation } = await conversationForWahaIdentity(inbox, message);
-    conversations.add(conversation.id);
-    if (message.chatType === 'group') await chatwootBridge.saveEvolutionGroup(contact.id, message.remoteJid, message.name, { participants: message.participantJid ? [{ jid: message.participantJid, name: message.participantName }] : undefined });
+    }
     let media: Awaited<ReturnType<typeof wahaTransport.downloadMedia>> | undefined;
     let mediaUnavailable = false;
     if (message.media) {
@@ -349,18 +404,22 @@ const importWahaHistoricalMessage = async (job: WahaHistoryJob, raw: unknown, co
         console.warn('[waha] historical media unavailable', { trackId: job.trackId, inboxId: job.inboxId, messageId: message.externalId.slice(-12), error: error instanceof Error ? error.message : 'unknown' });
       }
     }
-    const result = await retryHistoryOperation(() => chatwootBridge.importHistoricalWhatsAppMessage(conversation.id, {
+    const result = await retryHistoryOperation(() => chatwootBridge.importHistoricalWhatsAppMessage(historyConversationId, {
       sourceId: key, threadId: message.chatId, timestamp: Math.floor(new Date(message.timestamp).getTime() / 1000),
       content: message.content, transport: 'waha', direction: message.fromMe ? 'outgoing' : 'incoming', remoteJid: message.remoteJid,
       quotedMessageId: message.quotedMessageId, status: wahaStatusForAck(message.ack), mediaType: message.media?.kind,
       mediaUnavailable, media, context: { chatType: message.chatType, participantJid: message.participantJid, participantName: message.participantName },
     }));
-    await dedup.commit(key);
+    if (needsMediaBackfill && !media) {
+      // Keep this retryable: WAHA may make a historical attachment available
+      // later, while the message itself remains safely deduplicated.
+      dedup.release(dedupKey);
+    } else await dedup.commit(dedupKey);
     await wahaHistory.addMetrics(job.accountId, job.inboxId, result.created
       ? { imported: 1, ...(media ? { mediaImported: 1 } : {}) }
-      : { duplicates: 1 });
+      : { duplicates: 1, ...(media ? { mediaImported: 1 } : {}) });
   } catch (error) {
-    dedup.release(key);
+    dedup.release(dedupKey);
     await wahaHistory.addMetrics(job.accountId, job.inboxId, { failed: 1 });
     console.error('[waha] historical message import failed', { trackId: job.trackId, inboxId: job.inboxId, messageId: message.externalId.slice(-12), error: error instanceof Error ? error.message : 'unknown' });
   }
@@ -370,8 +429,17 @@ const importWahaHistory = async (job: WahaHistoryJob) => {
   await wahaHistory.update(job.accountId, job.inboxId, { status: 'running', startedAt: new Date().toISOString(), lastError: undefined });
   const conversations = new Set<number>();
   const timestampGte = wahaHistoryStartTimestamp(job.requestedRange);
+  const profiles: WahaHistoryProfiles = { names: new Map(), avatarUrls: new Map(), syncedContacts: new Set() };
   let offset = 0;
   try {
+    // History messages do not consistently contain push names (and GOWS uses
+    // `from` for both directions). Read the session chat index once so the
+    // import can retain the actual WhatsApp contact/group name.
+    for (let chatOffset = 0; ; chatOffset += 500) {
+      const chats = await retryHistoryOperation(() => wahaTransport.listChats(job.sessionName, { limit: 500, offset: chatOffset }));
+      for (const chat of chats) if (chat.name) profiles.names.set(chat.id, chat.name);
+      if (chats.length < 500) break;
+    }
     for (;;) {
       const current = await wahaHistory.get(job.accountId, job.inboxId, job.id);
       if (!current || current.status === 'cancelled') return;
@@ -384,7 +452,7 @@ const importWahaHistory = async (job: WahaHistoryJob) => {
         const rightTime = typeof (right as Record<string, unknown>)?.timestamp === 'number' ? (right as Record<string, number>).timestamp : 0;
         return leftTime - rightTime;
       });
-      await parallelForEach(page, config.wahaHistoryMessageConcurrency, item => importWahaHistoricalMessage(job, item, conversations));
+      await parallelForEach(page, config.wahaHistoryMessageConcurrency, item => importWahaHistoricalMessage(job, item, conversations, profiles));
       // WAHA documents offset pagination in units of the requested LIMIT,
       // including a final short page.
       offset += config.wahaHistoryPageSize;
@@ -440,6 +508,19 @@ app.post('/providers/waha/sessions', async (request, response) => {
   const generatedName = typeof sessionName === 'string' && validWahaSessionName(sessionName) ? sessionName : `waha_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
   if ((sessionName !== undefined && !validWahaSessionName(sessionName)) || (engine !== undefined && (typeof engine !== 'string' || !/^[A-Z0-9_-]{2,40}$/.test(engine)))) return response.status(400).json({ error: 'Invalid WAHA session request.' });
   try {
+    await adoptLegacyWahaOwnership(context.accountId, context.inboxId);
+    // Ownership is durable, while WAHA sessions can be removed manually during
+    // recovery. Reconcile stale ownership records before deciding that an inbox
+    // still has a connection.
+    const ownedSessions = await wahaSessions.list(context.accountId, context.inboxId);
+    for (const ownership of ownedSessions) {
+      try { await wahaTransport.getSession(ownership.sessionName); }
+      catch (error) {
+        if (error instanceof WahaApiError && error.status === 404) await wahaSessions.remove(context.accountId, context.inboxId, ownership.sessionName);
+        else throw error;
+      }
+    }
+    if ((await wahaSessions.list(context.accountId, context.inboxId)).length) return response.status(409).json({ error: 'Esta caixa já possui uma conexão WAHA. Exclua a conexão atual antes de criar outra.' });
     await wahaSessions.reserve({ ...context, sessionName: generatedName, ...(typeof engine === 'string' ? { engine } : {}) });
     let created;
     try { created = await wahaTransport.createSession({ name: generatedName, ...(typeof engine === 'string' ? { engine } : {}) }); }
@@ -479,6 +560,42 @@ app.post('/providers/waha/sessions/:sessionName/logout', async (request, respons
   catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
 });
 
+app.delete('/providers/waha/sessions/:sessionName', async (request, response) => {
+  if (!(await requireBridgeAdministrator(request, response))) return;
+  if (!validWahaSessionName(request.params.sessionName)) return response.status(400).json({ error: 'Invalid WAHA session name.' });
+  const context = await wahaContext(request, response, request.body as Record<string, unknown>); if (!context) return;
+  try {
+    await wahaSessions.assertOwned(context.accountId, context.inboxId, request.params.sessionName);
+    await wahaTransport.deleteSession(request.params.sessionName);
+    await wahaSessions.remove(context.accountId, context.inboxId, request.params.sessionName);
+    await clearWahaInbox(context.inboxId);
+    return response.status(204).end();
+  } catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
+});
+
+// Deleting an inbox through the WhatsApp UI must also remove its WAHA device
+// session. This prevents an orphaned phone from staying connected after the
+// Chatwoot inbox no longer exists.
+app.delete('/providers/waha/inboxes/:inboxId', async (request, response) => {
+  if (!(await requireBridgeAdministrator(request, response))) return;
+  const inboxId = Number(request.params.inboxId);
+  const context = await wahaContext(request, response, request.body as Record<string, unknown>); if (!context || context.inboxId !== inboxId) return;
+  try {
+    const inbox = await chatwootBridge.findApiInboxById(inboxId);
+    const sessionName = inbox.additionalAttributes.waha_session_name;
+    if (validWahaSessionName(sessionName)) {
+      const ownership = await wahaSessions.get(sessionName);
+      if (ownership && ownership.accountId === context.accountId && ownership.inboxId === context.inboxId) {
+        try { await wahaTransport.deleteSession(sessionName); }
+        catch (error) { if (!(error instanceof WahaApiError && error.status === 404)) throw error; }
+        await wahaSessions.remove(context.accountId, context.inboxId, sessionName);
+      }
+    }
+    await chatwootBridge.deleteInbox(inboxId);
+    return response.status(204).end();
+  } catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
+});
+
 app.get('/providers/waha/sessions/:sessionName/qr', async (request, response) => {
   if (!(await requireBridgeAdministrator(request, response))) return;
   if (!validWahaSessionName(request.params.sessionName)) return response.status(400).json({ error: 'Invalid WAHA session name.' }); const context = await wahaContext(request, response, request.query as Record<string, unknown>); if (!context) return;
@@ -516,16 +633,23 @@ app.post('/providers/waha/sessions/:sessionName/associate', async (request, resp
   } catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
 });
 
-app.get('/providers/waha/inboxes/:inboxId/history/import/:jobId?', async (request, response) => {
+const getWahaHistoryImport = async (request: express.Request, response: express.Response) => {
   if (!(await requireBridgeAdministrator(request, response))) return;
   const inboxId = Number(request.params.inboxId);
   const context = await wahaContext(request, response, request.query as Record<string, unknown>); if (!context || context.inboxId !== inboxId) return;
   try {
     const job = await wahaHistory.get(context.accountId, context.inboxId, request.params.jobId);
+    // No previous import is a normal initial state, not an application error.
+    if (!job && !request.params.jobId) return response.json({ job: null, running: false });
     if (!job) return response.status(404).json({ error: 'Importação de histórico não encontrada.' });
     return response.json({ job, running: wahaHistoryImports.has(context.inboxId) });
   } catch (error) { return response.status(502).json({ error: error instanceof Error ? error.message : 'Não foi possível consultar a importação WAHA.' }); }
-});
+};
+
+// Keep these routes separate: Express 5 no longer accepts the old optional
+// path parameter syntax reliably, which made the initial history lookup 404.
+app.get('/providers/waha/inboxes/:inboxId/history/import', getWahaHistoryImport);
+app.get('/providers/waha/inboxes/:inboxId/history/import/:jobId', getWahaHistoryImport);
 
 app.post('/providers/waha/inboxes/:inboxId/history/import', async (request, response) => {
   if (!(await enforceRateLimit(request, response, 'waha-history-import', 5, 60))) return;
@@ -641,9 +765,15 @@ const conversationForMetaIdentity = async (event: IncomingMetaMessage) => {
   return { inbox, contact, conversation };
 };
 
-const conversationForWahaIdentity = async (inbox: { id: number; identifier: string }, event: IncomingWahaMessage) => {
+const conversationForWahaIdentity = async (inbox: { id: number; identifier: string }, event: IncomingWahaMessage, profileSynced?: Set<number>) => {
+  const syncProfile = async (contact: { id: number; source_id: string }) => {
+    if ((!event.contactName && !event.avatarUrl) || profileSynced?.has(contact.id)) return;
+    await chatwootBridge.updatePublicContact(inbox.identifier, contact.source_id, { name: event.contactName, avatarUrl: event.avatarUrl });
+    profileSynced?.add(contact.id);
+  };
   if (event.chatType === 'group') {
-    const contact = await chatwootBridge.createOrFindContact(inbox.identifier, { sourceId: event.sourceId, name: event.name });
+    const contact = await chatwootBridge.createOrFindContact(inbox.identifier, { sourceId: event.sourceId, name: event.name, avatarUrl: event.avatarUrl });
+    await syncProfile(contact);
     const conversation = await chatwootBridge.findOrCreateConversation(inbox.identifier, contact.source_id, contact.id, inbox.id);
     return { contact, conversation };
   }
@@ -665,7 +795,9 @@ const conversationForWahaIdentity = async (inbox: { id: number; identifier: stri
     sourceId: existingSource || event.sourceId,
     name: event.name,
     ...(phoneNumber ? { phoneNumber } : {}),
+    ...(event.avatarUrl ? { avatarUrl: event.avatarUrl } : {}),
   });
+  await syncProfile(contact);
   await chatwootBridge.saveWahaIdentity(contact.id, phoneNumber, event.lid);
   await identities.save(identityKeys, contact.source_id);
   const conversation = await chatwootBridge.findOrCreateConversation(inbox.identifier, contact.source_id, contact.id, inbox.id);
@@ -929,7 +1061,8 @@ app.post('/webhooks/waha', (request, response) => {
         const context = { chatType: message.chatType, participantJid: message.participantJid, participantName: message.participantName };
         if (message.media) {
           const media = await wahaTransport.downloadMedia(message.media);
-          await chatwootBridge.createIncomingTransportMediaMessage(conversation.id, 'waha', message.content, message.externalId, media, message.quotedMessageId, message.remoteJid, inReplyTo, context);
+          if (message.fromMe) await chatwootBridge.createMobileOutgoingTransportMediaMessage(conversation.id, 'waha', message.content, message.externalId, media, message.quotedMessageId, message.remoteJid, inReplyTo, context);
+          else await chatwootBridge.createIncomingTransportMediaMessage(conversation.id, 'waha', message.content, message.externalId, media, message.quotedMessageId, message.remoteJid, inReplyTo, context);
         } else if (message.fromMe) await chatwootBridge.createMobileOutgoingTransportMessage(conversation.id, 'waha', message.content, message.externalId, message.quotedMessageId, message.remoteJid, inReplyTo, context);
         else await chatwootBridge.createIncomingTransportMessage(inbox.identifier, contact.source_id, conversation.id, 'waha', message.content, message.externalId, message.quotedMessageId, message.remoteJid, inReplyTo, context);
         await dedup.commit(key); bridgeMetrics.increment('whatsapp_messages_received_total', { transport: 'waha', media: Boolean(message.media) });

@@ -18,6 +18,12 @@ export const authService = {
   getProfile(): Promise<ChatwootProfileDto> {
     return chatwootApiClient.get('/api/v1/profile');
   },
+  updateProfile(profile: Record<string, unknown>): Promise<ChatwootProfileDto> {
+    return chatwootApiClient.patch('/api/v1/profile', { profile });
+  },
+  resetAccessToken(): Promise<ChatwootProfileDto> {
+    return chatwootApiClient.post('/api/v1/profile/reset_access_token');
+  },
   setActiveAccount(accountId: number): Promise<void> {
     return chatwootApiClient.put('/api/v1/profile/set_active_account', { profile: { account_id: accountId } });
   },

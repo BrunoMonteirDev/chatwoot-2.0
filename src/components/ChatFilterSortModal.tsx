@@ -400,7 +400,7 @@ export const ChatSortPopover: React.FC<SortPopoverProps> = ({
 
   return (
     <div
-      className={`absolute right-0 top-full mt-2 w-80 rounded-2xl border shadow-2xl p-4 z-50 animate-fade-in ${
+      className={`fixed left-3 right-3 top-16 z-50 rounded-2xl border p-4 shadow-2xl animate-fade-in md:absolute md:left-auto md:right-0 md:top-full md:mt-2 md:w-80 ${
         isDarkMode
           ? 'bg-[#1f2c34] border-[#2a3942] text-white'
           : 'bg-white border-gray-200 text-[#111b21]'

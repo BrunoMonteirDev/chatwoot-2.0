@@ -5,6 +5,7 @@ import { errorMessageForUser } from '../integrations/chatwoot/errors';
 import { evolutionQrCode, evolutionService, type EvolutionConnection, type EvolutionConnectionStatus } from '../integrations/evolution/client';
 import { evolutionMetadataForInbox, isEvolutionInbox } from '../integrations/evolution/inbox';
 import { inboxService } from '../integrations/chatwoot/inboxes';
+import { wahaClient } from '../integrations/waha/client';
 import { MetaCloudSetup } from './MetaCloudSetup';
 import { WahaSetup } from './WahaSetup';
 import { metaCloudMetadataForInbox, transportStatusesForInbox, whatsappConfigurationForInbox, whatsappProviderForInbox } from '../integrations/whatsapp/provider';
@@ -26,8 +27,12 @@ const bridgeWebhookUrl = () => {
   const configured = (import.meta.env.VITE_BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
   if (!configured) return null;
   try {
-    const url = new URL(configured);
-    if (url.protocol === 'https:' || (import.meta.env.DEV && url.protocol === 'http:')) return `${url.toString().replace(/\/$/, '')}/webhooks/chatwoot`;
+    // `/bridge` is a browser-only proxy. Chatwoot delivers outgoing-message
+    // webhooks from its own container, where `localhost` points at Rails, not
+    // at the frontend proxy. Persist the Docker-network address instead.
+    if (configured.startsWith('/')) return 'http://bridge:3100/webhooks/chatwoot';
+    const url = new URL(configured, window.location.origin);
+    if (url.protocol === 'https:' || url.protocol === 'http:') return `${url.toString().replace(/\/$/, '')}/webhooks/chatwoot`;
   } catch { /* A mensagem abaixo orienta a configuração inválida. */ }
   return null;
 };
@@ -134,7 +139,9 @@ export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inb
     if (!accountId || !inboxPendingDeletion || deletingInbox) return;
     setDeletingInbox(true); setError(null);
     try {
-      await inboxService.delete(accountId, inboxPendingDeletion.id);
+      const wahaSession = inboxPendingDeletion.additionalAttributes.waha_session_name;
+      if (typeof wahaSession === 'string' && wahaSession) await wahaClient.deleteInboxAndSession({ accountId, inboxId: inboxPendingDeletion.id });
+      else await inboxService.delete(accountId, inboxPendingDeletion.id);
       if (selectedInbox?.id === inboxPendingDeletion.id) { setSelectedInbox(null); setScreen('list'); }
       setInboxPendingDeletion(null);
       await onRefresh();

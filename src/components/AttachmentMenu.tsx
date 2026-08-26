@@ -1,45 +1,59 @@
 import React from 'react';
-import { FileText, Image, Camera, User, BarChart2, Paintbrush, Mic } from 'lucide-react';
+import { BarChart2, Camera, FileText, Image, Mic, User, X } from 'lucide-react';
+
+type AttachmentOption = 'image' | 'document' | 'audio' | 'camera' | 'contact' | 'poll';
 
 interface Props {
-  onSelectOption: (type: 'image' | 'document' | 'audio' | 'camera' | 'contact' | 'poll') => void;
+  onSelectOption: (type: AttachmentOption) => void;
   onClose: () => void;
 }
 
+const options: Array<{ id: AttachmentOption; label: string; icon: typeof FileText; color: string }> = [
+  { id: 'document', label: 'Documento', icon: FileText, color: 'text-[#8b5cf6]' },
+  { id: 'image', label: 'Fotos e vídeos', icon: Image, color: 'text-[#00a884]' },
+  { id: 'camera', label: 'Câmera', icon: Camera, color: 'text-[#ec4899]' },
+  { id: 'audio', label: 'Áudio', icon: Mic, color: 'text-[#38bdf8]' },
+  { id: 'contact', label: 'Contato', icon: User, color: 'text-[#3b82f6]' },
+  { id: 'poll', label: 'Enquete', icon: BarChart2, color: 'text-[#f59e0b]' },
+];
+
+const mobileOptions: Array<{ id: AttachmentOption; label: string; icon: typeof FileText; color: string }> = [
+  { id: 'image', label: 'Fotos', icon: Image, color: 'text-[#00a884]' },
+  { id: 'document', label: 'Arquivos', icon: FileText, color: 'text-[#8b5cf6]' },
+  { id: 'camera', label: 'Câmera', icon: Camera, color: 'text-[#ec4899]' },
+];
+
 export const AttachmentMenu: React.FC<Props> = ({ onSelectOption, onClose }) => {
-  const options = [
-    { id: 'document', label: 'Documento', icon: FileText, color: 'bg-[#5157AE]' },
-    { id: 'audio', label: 'Arquivo de áudio', icon: Mic, color: 'bg-[#00a884]' },
-    { id: 'image', label: 'Fotos e vídeos', icon: Image, color: 'bg-[#007bfc]' },
-    { id: 'camera', label: 'Câmera', icon: Camera, color: 'bg-[#EC407A]' },
-    { id: 'contact', label: 'Contato', icon: User, color: 'bg-[#009de2]' },
-    { id: 'poll', label: 'Enquete', icon: BarChart2, color: 'bg-[#029D81]' },
-    { id: 'drawing', label: 'Desenho', icon: Paintbrush, color: 'bg-[#E35D5B]' },
-  ];
+  const choose = (option: AttachmentOption) => {
+    onSelectOption(option);
+    onClose();
+  };
 
   return (
-    <div
-      className="absolute bottom-16 left-2 sm:left-4 max-w-[calc(100vw-1rem)] bg-white border border-[#d1d7db] rounded-2xl shadow-xl p-2 z-50 flex flex-col space-y-1 min-w-[160px] animate-in fade-in slide-in-from-bottom-2 duration-150"
-      onClick={(e) => e.stopPropagation()}
-    >
-      {options.map((opt) => {
-        const IconComponent = opt.icon;
-        return (
-          <button
-            key={opt.id}
-            onClick={() => {
-              onSelectOption(opt.id as any);
-              onClose();
-            }}
-            className="flex items-center space-x-3 px-3 py-2 hover:bg-[#f0f2f5] rounded-xl transition-colors text-left"
-          >
-            <div className={`w-8 h-8 rounded-full ${opt.color} flex items-center justify-center text-white shadow-xs`}>
-              <IconComponent className="w-4 h-4" />
-            </div>
-            <span className="text-sm text-[#111b21] font-medium">{opt.label}</span>
-          </button>
-        );
-      })}
-    </div>
+    <>
+      <div className="absolute bottom-16 left-2 z-50 hidden min-w-[180px] flex-col space-y-1 rounded-2xl border border-[#d1d7db] bg-white p-2 shadow-xl md:flex" onClick={(event) => event.stopPropagation()}>
+        {options.map((option) => {
+          const Icon = option.icon;
+          return <button key={option.id} type="button" onClick={() => choose(option.id)} className="flex items-center space-x-3 rounded-xl px-3 py-2 text-left hover:bg-[#f0f2f5]">
+            <Icon className={`h-5 w-5 ${option.color}`} />
+            <span className="text-sm font-medium text-[#111b21]">{option.label}</span>
+          </button>;
+        })}
+      </div>
+
+      <div className="fixed inset-0 z-[70] md:hidden" role="dialog" aria-modal="true" aria-label="Anexar conteúdo">
+        <button type="button" aria-label="Fechar anexos" className="absolute inset-0 bg-black/55 backdrop-blur-[1px]" onClick={onClose} />
+        <section className="absolute inset-x-0 bottom-0 rounded-t-[28px] border-t border-[#2a3942] bg-[#111b21] px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-2 text-[#e9edef] shadow-2xl">
+          <div className="mx-auto mb-3 h-1.5 w-11 rounded-full bg-[#8696a0]" />
+          <div className="mb-5 flex items-center justify-between"><div><h2 className="text-lg font-semibold">Anexar</h2><p className="text-xs text-[#8696a0]">Escolha o que deseja enviar</p></div><button type="button" onClick={onClose} aria-label="Fechar" className="rounded-full p-2 text-[#aebac1] hover:bg-white/10"><X className="h-5 w-5" /></button></div>
+          <div className="grid grid-cols-3 gap-x-3">
+            {mobileOptions.map((option) => {
+              const Icon = option.icon;
+              return <button key={option.id} type="button" onClick={() => choose(option.id)} className="flex flex-col items-center gap-2 rounded-xl py-1 text-center active:scale-95"><span className={`flex h-14 w-14 items-center justify-center rounded-2xl border border-[#2a3942] bg-[#202c33] ${option.color}`}><Icon className="h-6 w-6" /></span><span className="text-[11px] font-medium text-[#c7d1d8]">{option.label}</span></button>;
+            })}
+          </div>
+        </section>
+      </div>
+    </>
   );
 };

@@ -1,5 +1,5 @@
-import type { AccountLabel, AssignableAgent, CannedResponse, ContactNote, ContactProfile, ConversationAttachment, ConversationMessage, ConversationSummary, ConversationTeam, CurrentAccount, CurrentUser, Inbox } from '../../domain/currentUser';
-import type { ChatwootAccountDto, ChatwootAgentDto, ChatwootAttachmentDto, ChatwootCannedResponseDto, ChatwootContactDto, ChatwootContactNoteDto, ChatwootConversationDto, ChatwootInboxDto, ChatwootLabelDto, ChatwootMessageDto, ChatwootProfileDto, ChatwootTeamDto } from './types';
+import type { AccountLabel, AssignableAgent, CannedResponse, ContactNote, ContactProfile, ConversationAttachment, ConversationMessage, ConversationSummary, ConversationTeam, CurrentAccount, CurrentUser, CustomRole, Inbox } from '../../domain/currentUser';
+import type { ChatwootAccountDto, ChatwootAgentDto, ChatwootAttachmentDto, ChatwootCannedResponseDto, ChatwootContactDto, ChatwootContactNoteDto, ChatwootConversationDto, ChatwootCustomRoleDto, ChatwootInboxDto, ChatwootLabelDto, ChatwootMessageDto, ChatwootProfileDto, ChatwootTeamDto } from './types';
 
 const normalizeAccount = (account: ChatwootAccountDto): CurrentAccount => ({
   id: account.id,
@@ -17,6 +17,10 @@ export const normalizeProfile = (profile: ChatwootProfileDto): CurrentUser => ({
   avatarUrl: profile.avatar_url,
   role: profile.role,
   isSuperAdmin: profile.type === 'SuperAdmin',
+  apiAccessToken: profile.access_token || '',
+  phoneNumber: profile.custom_attributes?.phone_number || null,
+  messageSignature: profile.message_signature || null,
+  uiSettings: profile.ui_settings || {},
   pubsubToken: profile.pubsub_token,
   accounts: profile.accounts.map(normalizeAccount),
   activeAccountId: profile.account_id,
@@ -69,6 +73,17 @@ export const normalizeAssignableAgent = (agent: ChatwootAgentDto): AssignableAge
   id: agent.id,
   name: agent.available_name || agent.name || 'Agente sem nome',
   avatarUrl: agent.thumbnail || null,
+  email: agent.email || null,
+  role: agent.role || null,
+  availability: agent.availability_status || null,
+  customRoleId: agent.custom_role_id ?? null,
+});
+
+export const normalizeCustomRole = (role: ChatwootCustomRoleDto): CustomRole => ({
+  id: role.id,
+  name: role.name,
+  description: role.description || null,
+  permissions: role.permissions || [],
 });
 
 export const normalizeTeam = (team: ChatwootTeamDto): ConversationTeam => ({ id: team.id, name: team.name });
@@ -153,7 +168,7 @@ export const normalizeMessage = (message: ChatwootMessageDto): ConversationMessa
     sourceId: message.source_id ?? null,
     senderName: message.sender?.available_name || message.sender?.name || null,
     senderAvatarUrl: message.sender?.thumbnail || null,
-    origin: message.content_attributes?.evolution_origin === 'mobile'
+    origin: message.content_attributes?.whatsapp_origin === 'mobile' || message.content_attributes?.evolution_origin === 'mobile'
       ? 'mobile'
       : kind === 'outgoing'
         ? 'platform'

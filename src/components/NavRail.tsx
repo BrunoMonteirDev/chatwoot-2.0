@@ -10,7 +10,6 @@ import {
   Settings,
   Search,
   Pencil,
-  Plus,
   ChevronDown,
   ChevronUp,
   ChevronLeft,
@@ -43,7 +42,6 @@ import {
   GitFork,
   Lock,
   LayoutGrid,
-  Maximize2,
   GripVertical,
 } from 'lucide-react';
 import { NavTab, MultiTenantAccount } from '../types';
@@ -65,6 +63,8 @@ interface Props {
   selectedSettingsTab?: string;
   onSelectSettingsTab?: (tabKey: string) => void;
   userAvatar: string;
+  userName: string;
+  userEmail: string;
   isDarkMode: boolean;
   onToggleDarkMode: () => void;
   onNewChatClick?: () => void;
@@ -76,7 +76,6 @@ interface Props {
   inboxesStatus?: InboxesStatus;
   inboxesError?: string | null;
   onRetryInboxes?: () => void;
-  onOpenDimensionsModal?: () => void;
   isSuperAdmin?: boolean;
   onOpenSuperAdmin?: () => void;
 }
@@ -89,6 +88,8 @@ export const NavRail: React.FC<Props> = ({
   selectedSettingsTab = 'conta',
   onSelectSettingsTab,
   userAvatar,
+  userName,
+  userEmail,
   isDarkMode,
   onToggleDarkMode,
   onNewChatClick,
@@ -100,7 +101,6 @@ export const NavRail: React.FC<Props> = ({
   inboxesStatus = 'idle',
   inboxesError = null,
   onRetryInboxes,
-  onOpenDimensionsModal,
   isSuperAdmin = false,
   onOpenSuperAdmin,
 }) => {
@@ -407,26 +407,6 @@ export const NavRail: React.FC<Props> = ({
                       })}
                     </div>
 
-                    {/* Bottom Action Footer */}
-                    <div
-                      className={`p-2 border-t text-xs font-semibold ${
-                        isDarkMode
-                          ? 'border-[#32363e] bg-[#181a1d]'
-                          : 'border-[#d1d7db] bg-[#f8f9fa]'
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowAccountDropdown(false);
-                          alert('Criação de nova conta multitenant');
-                        }}
-                        className="w-full py-1.5 px-2 rounded-lg text-[#00a884] hover:bg-[#00a884]/10 transition-colors flex items-center space-x-2 cursor-pointer"
-                      >
-                        <Plus className="w-4 h-4 shrink-0" />
-                        <span>Criar nova conta</span>
-                      </button>
-                    </div>
                   </div>
                 </>
               )}
@@ -1191,22 +1171,18 @@ export const NavRail: React.FC<Props> = ({
 
                 <div className="space-y-0.5 overflow-y-auto pr-1 flex-1 min-h-0">
                   {[
+                    { id: 'perfil', label: 'Perfil', icon: <User className="w-3.5 h-3.5" /> },
                     { id: 'conta', label: 'Conta', icon: <Building className="w-3.5 h-3.5" /> },
                     { id: 'agentes', label: 'Agentes', icon: <UserCheck className="w-3.5 h-3.5" /> },
                     { id: 'times', label: 'Times', icon: <Users className="w-3.5 h-3.5" /> },
                     { id: 'caixas', label: 'Caixas de Entrada', icon: <Inbox className="w-3.5 h-3.5" /> },
                     { id: 'etiquetas', label: 'Etiquetas', icon: <Tag className="w-3.5 h-3.5" /> },
                     { id: 'atributos', label: 'Atributos', icon: <Code className="w-3.5 h-3.5" /> },
-                    { id: 'kanban', label: 'Kanban', icon: <LayoutGrid className="w-3.5 h-3.5" /> },
-                    { id: 'kanbancrm', label: 'Kanban CRM', icon: <BarChart2 className="w-3.5 h-3.5" /> },
                     { id: 'automacao', label: 'Automação', icon: <Repeat className="w-3.5 h-3.5" /> },
-                    { id: 'n8n', label: 'N8N', icon: <GitFork className="w-3.5 h-3.5" /> },
-                    { id: 'bots', label: 'Bots', icon: <Bot className="w-3.5 h-3.5" /> },
                     { id: 'macros', label: 'Macros', icon: <Sliders className="w-3.5 h-3.5" /> },
                     { id: 'respostas', label: 'Respostas Prontas', icon: <MessageSquareQuote className="w-3.5 h-3.5" /> },
                     { id: 'agendadas', label: 'Mensagens Agendadas', icon: <Clock className="w-3.5 h-3.5" /> },
-                    { id: 'aplicacoes', label: 'Aplicações', icon: <LayoutGrid className="w-3.5 h-3.5" /> },
-                    { id: 'integracoes', label: 'Integrações', icon: <Plug className="w-3.5 h-3.5" /> },
+                    { id: 'integracoes', label: 'Integrações e Apps', icon: <Plug className="w-3.5 h-3.5" /> },
                     { id: 'auditoria', label: 'Registros de Auditoria', icon: <Scroll className="w-3.5 h-3.5" /> },
                     { id: 'permissoes', label: 'Permissões', icon: <ShieldCheck className="w-3.5 h-3.5" /> },
                   ].map((item) => {
@@ -1245,22 +1221,18 @@ export const NavRail: React.FC<Props> = ({
             {isExpanded && isSettingsOpen && (
               <div className="pl-3 border-l border-white/10 my-1 space-y-0.5 ml-3.5">
                 {[
+                  { id: 'perfil', label: 'Perfil', icon: <User className="w-3.5 h-3.5" /> },
                   { id: 'conta', label: 'Conta', icon: <Building className="w-3.5 h-3.5" /> },
                   { id: 'agentes', label: 'Agentes', icon: <UserCheck className="w-3.5 h-3.5" /> },
                   { id: 'times', label: 'Times', icon: <Users className="w-3.5 h-3.5" /> },
                   { id: 'caixas', label: 'Caixas de Entrada', icon: <Inbox className="w-3.5 h-3.5" /> },
                   { id: 'etiquetas', label: 'Etiquetas', icon: <Tag className="w-3.5 h-3.5" /> },
                   { id: 'atributos', label: 'Atributos', icon: <Code className="w-3.5 h-3.5" /> },
-                  { id: 'kanban', label: 'Kanban', icon: <LayoutGrid className="w-3.5 h-3.5" /> },
-                  { id: 'kanbancrm', label: 'Kanban CRM', icon: <BarChart2 className="w-3.5 h-3.5" /> },
                   { id: 'automacao', label: 'Automação', icon: <Repeat className="w-3.5 h-3.5" /> },
-                  { id: 'n8n', label: 'N8N', icon: <GitFork className="w-3.5 h-3.5" /> },
-                  { id: 'bots', label: 'Bots', icon: <Bot className="w-3.5 h-3.5" /> },
                   { id: 'macros', label: 'Macros', icon: <Sliders className="w-3.5 h-3.5" /> },
                   { id: 'respostas', label: 'Respostas Prontas', icon: <MessageSquareQuote className="w-3.5 h-3.5" /> },
                   { id: 'agendadas', label: 'Mensagens Agendadas', icon: <Clock className="w-3.5 h-3.5" /> },
-                  { id: 'aplicacoes', label: 'Aplicações', icon: <LayoutGrid className="w-3.5 h-3.5" /> },
-                  { id: 'integracoes', label: 'Integrações', icon: <Plug className="w-3.5 h-3.5" /> },
+                  { id: 'integracoes', label: 'Integrações e Apps', icon: <Plug className="w-3.5 h-3.5" /> },
                   { id: 'auditoria', label: 'Registros de Auditoria', icon: <Scroll className="w-3.5 h-3.5" /> },
                   { id: 'permissoes', label: 'Permissões', icon: <ShieldCheck className="w-3.5 h-3.5" /> },
                 ].map((item) => {
@@ -1306,19 +1278,18 @@ export const NavRail: React.FC<Props> = ({
                 : 'hover:bg-[#e9edef] text-[#111b21]'
             }`}
           >
-            {/* Avatar B with status dot */}
             <div className="relative shrink-0">
               <div className="w-8 h-8 rounded-full bg-[#2563eb] text-white font-semibold flex items-center justify-center text-sm shadow-xs">
-                B
+                {userAvatar ? <img src={userAvatar} alt="" className="h-full w-full rounded-full object-cover" /> : userName.slice(0, 1).toUpperCase()}
               </div>
               <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full ring-2 ${getStatusBadge().color} ${isDarkMode ? 'ring-[#182228]' : 'ring-[#f0f2f5]'}`} />
             </div>
 
             {isExpanded && (
               <div className="ml-3 text-left min-w-0 flex-1">
-                <div className="text-xs font-bold truncate leading-tight">bruno</div>
+                <div className="text-xs font-bold truncate leading-tight">{userName}</div>
                 <div className="text-[11px] text-[#8696a0] truncate leading-tight">
-                  bruno.alves@kopla.com.br
+                  {userEmail}
                 </div>
               </div>
             )}
@@ -1439,7 +1410,9 @@ export const NavRail: React.FC<Props> = ({
               <button
                 type="button"
                 onClick={() => {
-                  onTabChange('settings');
+                  // Use the settings route directly so this action also works
+                  // when the user is already on another settings subpage.
+                  onSelectSettingsTab?.('perfil');
                   setShowUserMenu(false);
                 }}
                 className={`w-full text-left px-2.5 py-2 rounded-xl text-xs font-medium flex items-center space-x-3 transition-colors cursor-pointer ${
@@ -1450,23 +1423,6 @@ export const NavRail: React.FC<Props> = ({
               >
                 <User className="w-4 h-4 text-[#8696a0] shrink-0" />
                 <span>Configurações do Perfil</span>
-              </button>
-
-              {/* Ajustar Dimensões e Aparelhamento */}
-              <button
-                type="button"
-                onClick={() => {
-                  onOpenDimensionsModal?.();
-                  setShowUserMenu(false);
-                }}
-                className={`w-full text-left px-2.5 py-2 rounded-xl text-xs font-semibold flex items-center space-x-3 transition-colors cursor-pointer ${
-                  isDarkMode
-                    ? 'hover:bg-[#2a3942] text-[#00a884]'
-                    : 'hover:bg-[#f0f2f5] text-[#00a884]'
-                }`}
-              >
-                <Maximize2 className="w-4 h-4 text-[#00a884] shrink-0" />
-                <span>Ajustar Largura e Altura</span>
               </button>
 
               {/* Alterar Tema */}

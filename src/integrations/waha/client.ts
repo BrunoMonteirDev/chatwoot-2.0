@@ -38,10 +38,12 @@ export const wahaClient = {
   startSession: (context: Context, name: string) => request<{ session: WahaSession }>(`/providers/waha/sessions/${encodeURIComponent(name)}/start`, { method: 'POST', body: JSON.stringify(context) }),
   restartSession: (context: Context, name: string) => request<{ session: WahaSession }>(`/providers/waha/sessions/${encodeURIComponent(name)}/restart`, { method: 'POST', body: JSON.stringify(context) }),
   logoutSession: (context: Context, name: string) => request<void>(`/providers/waha/sessions/${encodeURIComponent(name)}/logout`, { method: 'POST', body: JSON.stringify(context) }),
+  deleteSession: (context: Context, name: string) => request<void>(`/providers/waha/sessions/${encodeURIComponent(name)}`, { method: 'DELETE', body: JSON.stringify(context) }),
+  deleteInboxAndSession: (context: Context) => request<void>(`/providers/waha/inboxes/${context.inboxId}`, { method: 'DELETE', body: JSON.stringify(context) }),
   getQrCode: (context: Context, name: string) => request<WahaQrCode>(`/providers/waha/sessions/${encodeURIComponent(name)}/qr${query(context)}`),
   associateSession: (context: Context, name: string) => request<{ ok: true }>(`/providers/waha/sessions/${encodeURIComponent(name)}/associate`, { method: 'POST', body: JSON.stringify(context) }),
   startHistoryImport: (context: Context, range: WahaHistoryRange) => request<{ job: WahaHistoryJob }>(`/providers/waha/inboxes/${context.inboxId}/history/import`, { method: 'POST', body: JSON.stringify({ ...context, range }) }),
-  getCurrentHistoryImport: (context: Context) => request<{ job: WahaHistoryJob; running: boolean }>(`/providers/waha/inboxes/${context.inboxId}/history/import${query(context)}`),
+  getCurrentHistoryImport: (context: Context) => request<{ job: WahaHistoryJob | null; running: boolean }>(`/providers/waha/inboxes/${context.inboxId}/history/import${query(context)}`),
   getHistoryImport: (context: Context, jobId: string) => request<{ job: WahaHistoryJob; running: boolean }>(`/providers/waha/inboxes/${context.inboxId}/history/import/${encodeURIComponent(jobId)}${query(context)}`),
   cancelHistoryImport: (context: Context, jobId: string) => request<{ job: WahaHistoryJob }>(`/providers/waha/inboxes/${context.inboxId}/history/import/${encodeURIComponent(jobId)}/cancel`, { method: 'POST', body: JSON.stringify(context) }),
 };

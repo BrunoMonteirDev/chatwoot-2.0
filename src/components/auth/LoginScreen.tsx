@@ -11,9 +11,7 @@ export const LoginScreen = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [mfaToken, setMfaToken] = useState<string | null>(null);
   const [mfaCode, setMfaCode] = useState('');
-
-  const onSubmit = async (event: FormEvent) => {
-    event.preventDefault();
+  const attemptLogin = async () => {
     if (isSubmitting) return;
     setError(null);
     setMfaToken(null);
@@ -26,6 +24,11 @@ export const LoginScreen = () => {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const onSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    await attemptLogin();
   };
 
   const onMfaSubmit = async (event: FormEvent) => {

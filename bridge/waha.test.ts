@@ -57,6 +57,15 @@ describe('WAHA session transport', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('http://waha.test/api/empresa/lids/123');
   });
 
+  it('uses the WAHA GOWS reaction endpoint and payload', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}'));
+    vi.stubGlobal('fetch', fetchMock);
+    await wahaTransport.sendReaction('empresa', '5511999999999@c.us', 'message-id', '👍');
+    expect(fetchMock.mock.calls[0][0]).toBe('http://waha.test/api/reaction');
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('PUT');
+    expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({ session: 'empresa', chatId: '5511999999999@c.us', messageId: 'message-id', reaction: '👍' });
+  });
+
   it('lists GOWS history with all chats, bounded pagination and media disabled', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([{ id: '3EB0', timestamp: 1727745026 }])));
     vi.stubGlobal('fetch', fetchMock);
@@ -64,10 +73,29 @@ describe('WAHA session transport', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('http://waha.test/api/empresa/chats/all/messages?limit=100&offset=200&downloadMedia=false&filter.timestamp.gte=1727000000');
   });
 
+  it('reads chat names and obtains only WAHA-issued WhatsApp profile URLs', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: '5511999999999@c.us', name: 'Ana' }])))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ url: 'https://pps.whatsapp.net/avatar.jpg?signature=server-issued' })));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(wahaTransport.listChats('empresa')).resolves.toEqual([{ id: '5511999999999@c.us', name: 'Ana' }]);
+    await expect(wahaTransport.getChatAvatarUrl('empresa', '5511999999999@c.us')).resolves.toContain('pps.whatsapp.net');
+    expect(fetchMock.mock.calls[0][0]).toBe('http://waha.test/api/empresa/chats?limit=500');
+    expect(fetchMock.mock.calls[1][0]).toBe('http://waha.test/api/empresa/chats/5511999999999%40c.us/picture');
+  });
+
   it('fetches a single GOWS history record with media only on demand', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: '3EB0', media: { data: 'YQ==' } })));
     vi.stubGlobal('fetch', fetchMock);
     await wahaTransport.getHistoryMessage('empresa', '3EB0');
     expect(fetchMock.mock.calls[0][0]).toBe('http://waha.test/api/empresa/chats/all/messages/3EB0?downloadMedia=true');
+  });
+
+  it('translates only the localhost file URL emitted by GOWS to the configured WAHA origin', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(Buffer.from('audio')));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(wahaTransport.downloadMedia({ kind: 'audio', url: 'http://localhost:3000/api/files/empresa/audio.oga', mimetype: 'audio/ogg' }))
+      .resolves.toMatchObject({ contentType: 'audio/ogg', fileName: 'audio.ogg' });
+    expect(String(fetchMock.mock.calls[0][0])).toBe('http://waha.test/api/files/empresa/audio.oga');
   });
 });

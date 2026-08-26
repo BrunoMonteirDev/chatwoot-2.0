@@ -42,3 +42,14 @@ body {
   text-rendering: optimizeLegibility;
   overflow: hidden;
 }
+
+@media (max-width: 420px) {
+  section[class~="md:hidden"] label:has(> select) {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  section[class~="md:hidden"] label:has(> select) > select {
+    width: 100% !important;
+  }
+}

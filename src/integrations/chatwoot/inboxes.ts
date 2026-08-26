@@ -1,14 +1,16 @@
-import type { AssignableAgent, Inbox } from '../../domain/currentUser';
+import type { AssignableAgent, ConversationTeam, CustomRole, Inbox } from '../../domain/currentUser';
 import type { EvolutionInboxMetadata } from '../evolution/inbox';
 import type { MetaCloudInboxMetadata } from '../whatsapp/provider';
 import type { WhatsAppTransport } from '../whatsapp/provider';
 import { chatwootApiClient } from './client';
-import { normalizeAssignableAgent, normalizeInbox } from './normalizers';
-import type { ChatwootAgentDto, ChatwootInboxesResponse, ChatwootInboxDto } from './types';
+import { normalizeAssignableAgent, normalizeCustomRole, normalizeInbox, normalizeTeam } from './normalizers';
+import type { ChatwootAgentDto, ChatwootCustomRoleDto, ChatwootInboxesResponse, ChatwootInboxDto, ChatwootTeamDto } from './types';
 
 const root = (accountId: number) => `/api/v1/accounts/${accountId}`;
 
 export interface CreateEvolutionInboxParams { name: string; webhookUrl: string; }
+export interface SaveAgentParams { name: string; email?: string; role: 'agent' | 'administrator'; availability: 'online' | 'offline' | 'busy'; customRoleId?: number | null; }
+export interface SaveCustomRoleParams { name: string; description: string; permissions: string[]; }
 
 export const inboxService = {
   async list(accountId: number): Promise<Inbox[]> {
@@ -65,6 +67,50 @@ export const inboxService = {
   async listAgents(accountId: number): Promise<AssignableAgent[]> {
     const response = await chatwootApiClient.get<ChatwootAgentDto[]>(`${root(accountId)}/agents`);
     return response.map(normalizeAssignableAgent);
+  },
+
+  async createAgent(accountId: number, params: SaveAgentParams): Promise<AssignableAgent> {
+    const response = await chatwootApiClient.post<ChatwootAgentDto>(`${root(accountId)}/agents`, {
+      agent: { name: params.name, email: params.email, role: params.role, availability: params.availability },
+      custom_role_id: params.customRoleId ?? null,
+    });
+    return normalizeAssignableAgent(response);
+  },
+
+  async updateAgent(accountId: number, agentId: number, params: SaveAgentParams): Promise<AssignableAgent> {
+    const response = await chatwootApiClient.patch<ChatwootAgentDto>(`${root(accountId)}/agents/${agentId}`, {
+      agent: { name: params.name, role: params.role, availability: params.availability },
+      custom_role_id: params.customRoleId ?? null,
+    });
+    return normalizeAssignableAgent(response);
+  },
+
+  deleteAgent(accountId: number, agentId: number): Promise<void> {
+    return chatwootApiClient.delete(`${root(accountId)}/agents/${agentId}`);
+  },
+
+  async listCustomRoles(accountId: number): Promise<CustomRole[]> {
+    const response = await chatwootApiClient.get<ChatwootCustomRoleDto[]>(`${root(accountId)}/custom_roles`);
+    return response.map(normalizeCustomRole);
+  },
+
+  async createCustomRole(accountId: number, params: SaveCustomRoleParams): Promise<CustomRole> {
+    const response = await chatwootApiClient.post<ChatwootCustomRoleDto>(`${root(accountId)}/custom_roles`, { custom_role: params });
+    return normalizeCustomRole(response);
+  },
+
+  async updateCustomRole(accountId: number, roleId: number, params: SaveCustomRoleParams): Promise<CustomRole> {
+    const response = await chatwootApiClient.patch<ChatwootCustomRoleDto>(`${root(accountId)}/custom_roles/${roleId}`, { custom_role: params });
+    return normalizeCustomRole(response);
+  },
+
+  deleteCustomRole(accountId: number, roleId: number): Promise<void> {
+    return chatwootApiClient.delete(`${root(accountId)}/custom_roles/${roleId}`);
+  },
+
+  async listTeams(accountId: number): Promise<ConversationTeam[]> {
+    const response = await chatwootApiClient.get<ChatwootTeamDto[]>(`${root(accountId)}/teams`);
+    return response.map(normalizeTeam);
   },
 
   async listMembers(accountId: number, inboxId: number): Promise<AssignableAgent[]> {

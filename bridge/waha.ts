@@ -15,6 +15,7 @@ export interface WahaQrCode { mimetype: string; data: string; }
 export interface SentWahaMessage { messageId: string; chatId: string; fromMe: boolean; }
 export interface DownloadedWahaMedia { buffer: Buffer; contentType: string; fileName: string; }
 export interface WahaHistoryQuery { limit: number; offset: number; timestampGte?: number; timestampLte?: number; }
+export interface WahaChatProfile { id: string; name?: string; }
 
 export class WahaApiError extends Error {
   constructor(readonly kind: 'not_configured' | 'timeout' | 'network' | 'invalid_response' | 'api', readonly status?: number, details?: string) {
@@ -128,9 +129,10 @@ export const wahaTransport = {
   },
   async getSession(name) { return normalizeSession(await request(`/api/sessions/${namePath(name)}`)); },
   async createSession({ name, engine }: { name: string; engine?: string }) {
-    const webhook = config.publicUrl && config.wahaWebhookSecret ? {
+    const webhookBaseUrl = config.internalUrl || config.publicUrl;
+    const webhook = webhookBaseUrl && config.wahaWebhookSecret ? {
       webhooks: [{
-        url: `${config.publicUrl}/webhooks/waha`,
+        url: `${webhookBaseUrl}/webhooks/waha`,
         events: ['session.status', 'message', 'message.any', 'message.reaction', 'message.ack', 'message.ack.group', 'message.edited', 'message.revoked', 'group.v2.join', 'group.v2.leave', 'group.v2.participants', 'group.v2.update'],
         hmac: { key: config.wahaWebhookSecret },
         retries: { policy: 'exponential', delaySeconds: 2, attempts: 4 },
@@ -142,6 +144,10 @@ export const wahaTransport = {
   async restartSession(name) { return normalizeSession(await request(`/api/sessions/${namePath(name)}/restart`, { method: 'POST' })); },
   async logoutSession(name) {
     await request(`/api/sessions/logout`, { method: 'POST', body: JSON.stringify({ name }) });
+    return null;
+  },
+  async deleteSession(name) {
+    await request(`/api/sessions/${namePath(name)}`, { method: 'DELETE' });
     return null;
   },
   async getQrCode(name) {
@@ -163,7 +169,7 @@ export const wahaTransport = {
     return sent(await request(`/api/${kind}`, { method: 'POST', body: JSON.stringify({ session, chatId: normalizeWahaChatId(chatId), file, ...(caption ? { caption } : {}), ...(replyTo ? { reply_to: replyTo } : {}) }) }));
   },
   async sendReaction(session: string, chatId: string, messageId: string, emoji: string) {
-    await request('/api/reaction', { method: 'POST', body: JSON.stringify({ session, chatId: normalizeWahaChatId(chatId), messageId, reaction: emoji }) });
+    await request('/api/reaction', { method: 'PUT', body: JSON.stringify({ session, chatId: normalizeWahaChatId(chatId), messageId, reaction: emoji }) });
   },
   async editMessage(session: string, chatId: string, messageId: string, text: string) {
     await request(`/api/${namePath(session)}/chats/${encodeURIComponent(normalizeWahaChatId(chatId))}/messages/${encodeURIComponent(messageId)}`, { method: 'PUT', body: JSON.stringify({ text }) });
@@ -181,6 +187,29 @@ export const wahaTransport = {
     if (!Array.isArray(payload)) throw new WahaApiError('invalid_response');
     return payload;
   },
+  async listChats(session: string, query: { limit: number; offset?: number } = { limit: 500 }): Promise<WahaChatProfile[]> {
+    const parameters = new URLSearchParams({ limit: String(query.limit), ...(query.offset ? { offset: String(query.offset) } : {}) });
+    const payload = await request(`/api/${namePath(session)}/chats?${parameters}`);
+    if (!Array.isArray(payload)) throw new WahaApiError('invalid_response');
+    return payload.flatMap((item): WahaChatProfile[] => {
+      const chat = record(item);
+      const id = typeof chat?.id === 'string' ? chat.id : undefined;
+      if (!id) return [];
+      const name = typeof chat.name === 'string' && chat.name.trim() ? chat.name.trim() : undefined;
+      return [{ id, ...(name ? { name } : {}) }];
+    });
+  },
+  async getChatAvatarUrl(session: string, chatId: string): Promise<string | undefined> {
+    const payload = record(await request(`/api/${namePath(session)}/chats/${encodeURIComponent(chatId)}/picture`));
+    const url = typeof payload?.url === 'string' ? payload.url : undefined;
+    if (!url) return undefined;
+    try {
+      const parsed = new URL(url);
+      // WAHA returns the signed WhatsApp profile picture URL. Never turn this
+      // method into an arbitrary remote URL relay.
+      return parsed.protocol === 'https:' && (parsed.hostname === 'pps.whatsapp.net' || parsed.hostname.endsWith('.whatsapp.net')) ? parsed.toString() : undefined;
+    } catch { return undefined; }
+  },
   async getHistoryMessage(session: string, messageId: string): Promise<unknown> {
     // GOWS explicitly supports an unqualified message id together with
     // `chats/all`; media is intentionally fetched one item at a time.
@@ -190,7 +219,14 @@ export const wahaTransport = {
     let buffer: Buffer;
     if (media.data) buffer = Buffer.from(media.data.replace(/^data:[^;]+;base64,/i, ''), 'base64');
     else if (media.url) {
-      const { baseUrl, apiKey } = requireWaha(); const url = new URL(media.url, baseUrl); const allowed = new URL(baseUrl);
+      const { baseUrl, apiKey } = requireWaha(); let url = new URL(media.url, baseUrl); const allowed = new URL(baseUrl);
+      // GOWS reports its own cached files as localhost even when WAHA is
+      // reached through Docker/host networking. Translate only that documented
+      // internal `/api/files` URL to the configured WAHA origin; all other
+      // foreign URLs remain blocked by the SSRF guard.
+      const isWahaLoopbackFile = ['localhost', '127.0.0.1', '::1'].includes(url.hostname)
+        && url.pathname.startsWith('/api/files/');
+      if (isWahaLoopbackFile) url = new URL(`${url.pathname}${url.search}`, allowed);
       if (url.origin !== allowed.origin) throw new Error('URL de mídia WAHA não permitida.');
       const response = await fetch(url, { headers: { 'X-Api-Key': apiKey }, signal: AbortSignal.timeout(config.wahaRequestTimeoutMs) });
       if (!response.ok) throw new Error(`WAHA não disponibilizou a mídia (${response.status}).`); buffer = Buffer.from(await response.arrayBuffer());

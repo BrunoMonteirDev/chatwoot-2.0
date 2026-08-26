@@ -26,6 +26,7 @@ export interface ChatwootAccountDto {
 }
 
 export interface ChatwootProfileDto {
+  access_token?: string;
   account_id: number | null;
   avatar_url: string | null;
   display_name: string | null;
@@ -36,6 +37,9 @@ export interface ChatwootProfileDto {
   role: string | null;
   type?: string | null;
   uid: string;
+  custom_attributes?: { phone_number?: string } | null;
+  message_signature?: string | null;
+  ui_settings?: Record<string, unknown> | null;
   accounts: ChatwootAccountDto[];
 }
 
@@ -109,7 +113,22 @@ export interface ChatwootContactsResponse {
 }
 export interface ChatwootContactNoteDto { id: number; content: string; created_at: number; user?: { name?: string; available_name?: string } | null; }
 
-export interface ChatwootAgentDto { id: number; name?: string; available_name?: string; thumbnail?: string | null; }
+export interface ChatwootAgentDto {
+  id: number;
+  name?: string;
+  available_name?: string;
+  thumbnail?: string | null;
+  email?: string | null;
+  role?: string | null;
+  availability_status?: string | null;
+  custom_role_id?: number | null;
+}
+export interface ChatwootCustomRoleDto {
+  id: number;
+  name: string;
+  description?: string | null;
+  permissions?: string[] | null;
+}
 export interface ChatwootAssignableAgentsResponse { payload: ChatwootAgentDto[]; }
 export interface ChatwootTeamDto { id: number; name: string; }
 export interface ChatwootLabelDto { id: number; title: string; color?: string | null; }

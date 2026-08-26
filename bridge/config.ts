@@ -11,6 +11,9 @@ const optionalUrl = (name: string) => (process.env[name] || '').replace(/\/$/, '
 export const config = {
   port: Number(process.env.BRIDGE_PORT || 3100),
   publicUrl: (process.env.BRIDGE_PUBLIC_URL || '').replace(/\/$/, ''),
+  // Container-to-container webhooks stay on the private Compose network.
+  // BRIDGE_PUBLIC_URL remains only for access from outside Docker.
+  internalUrl: optionalUrl('BRIDGE_INTERNAL_URL'),
   webhookSecret: required('BRIDGE_WEBHOOK_SECRET'),
   chatwootBaseUrl: required('CHATWOOT_BASE_URL'),
   chatwootAccountId: Number(required('CHATWOOT_ACCOUNT_ID')),

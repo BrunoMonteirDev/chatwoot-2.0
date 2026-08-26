@@ -14,7 +14,7 @@ interface AuthContextValue {
   currentAccount: CurrentAccount | null;
   selectAccount(accountId: number): Promise<void>;
   error: string | null;
-  login(credentials: AuthCredentials): Promise<MfaRequiredResponse | null>;
+  login(credentials: AuthCredentials, revokeSessionId?: number | 'all'): Promise<MfaRequiredResponse | null>;
   verifyMfa(credentials: MfaVerificationCredentials): Promise<void>;
   logout(): Promise<void>;
   retryBootstrap(): Promise<void>;
@@ -67,6 +67,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const login = useCallback(async (credentials: AuthCredentials): Promise<MfaRequiredResponse | null> => {
     setError(null);
     try {
+      // A stale token must not be sent with a new sign-in attempt.
+      authSession.clear();
       const result = await authService.login(credentials);
       if ('mfa_required' in result) {
         setStatus('unauthenticated');
