@@ -27,7 +27,7 @@ services:
       retries: 10
 
   rails:
-    build: { context: ../chatwoot, dockerfile: docker/Dockerfile }
+    image: ${CHATWOOT_RAILS_IMAGE:?set CHATWOOT_RAILS_IMAGE}
     restart: unless-stopped
     env_file: ${PRODUCTION_ENV_FILE:-.env.production}
     environment: { RAILS_ENV: production, NODE_ENV: production, INSTALLATION_ENV: docker }
@@ -42,7 +42,7 @@ services:
     depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_healthy } }
 
   sidekiq:
-    build: { context: ../chatwoot, dockerfile: docker/Dockerfile }
+    image: ${CHATWOOT_RAILS_IMAGE:?set CHATWOOT_RAILS_IMAGE}
     restart: unless-stopped
     env_file: ${PRODUCTION_ENV_FILE:-.env.production}
     environment: { RAILS_ENV: production, NODE_ENV: production, INSTALLATION_ENV: docker }
@@ -51,7 +51,7 @@ services:
     depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_healthy } }
 
   bridge:
-    build: { context: ., dockerfile: Dockerfile.bridge }
+    image: ${CHATWOOT_BRIDGE_IMAGE:?set CHATWOOT_BRIDGE_IMAGE}
     restart: unless-stopped
     env_file: ${PRODUCTION_ENV_FILE:-.env.production}
     environment:
@@ -90,11 +90,7 @@ services:
       retries: 10
 
   frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-      args:
-        VITE_BRIDGE_PUBLIC_URL: "/bridge"
+    image: ${CHATWOOT_FRONTEND_IMAGE:?set CHATWOOT_FRONTEND_IMAGE}
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/"]

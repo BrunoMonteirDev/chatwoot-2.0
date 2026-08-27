@@ -32,6 +32,15 @@ curl -fsS https://$BRIDGE_DOMAIN/ready
 
 O Caddy obtém e renova TLS automaticamente após DNS e portas estarem corretos. O frontend preserva rotas SPA, inclusive `/app/accounts/<account>/inbox/<inbox>/conversations/<conversation>`. O Nginx interno encaminha `/api`, `/auth` e `/cable` ao Rails; `/cable` usa WebSocket.
 
+As imagens `rails`, `frontend` e `bridge` são construídas pelo GitHub Actions e
+publicadas no GitHub Container Registry (GHCR); a VPS somente baixa imagens
+prontas. Caso os pacotes GHCR permaneçam privados, faça login uma vez na VPS
+com um Personal Access Token que tenha `read:packages`:
+
+```bash
+echo 'SEU_TOKEN_GITHUB' | docker login ghcr.io -u BrunoMonteirDev --password-stdin
+```
+
 ## 3. WAHA
 
 Abra `https://$APP_DOMAIN`, faça login e acesse Configurações → Caixas de entrada. Crie/seleciona uma inbox, escolha **Conectar WAHA**, crie uma sessão, mostre o QR e escaneie pelo WhatsApp. Espere o estado `WORKING`, então clique **Associar sessão a esta inbox**.
