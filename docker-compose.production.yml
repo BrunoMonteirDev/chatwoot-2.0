@@ -101,7 +101,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 6
-    ports: ["3000:80"]
+    # Caddy reaches this service through the private Compose network. Keep the
+    # development convenience port local so production traffic uses HTTPS.
+    ports: ["127.0.0.1:3000:80"]
     depends_on: { rails: { condition: service_healthy } }
 
   caddy:
