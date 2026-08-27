@@ -26,6 +26,14 @@ services:
       timeout: 5s
       retries: 10
 
+  db-migrate:
+    image: ${CHATWOOT_RAILS_IMAGE:?set CHATWOOT_RAILS_IMAGE}
+    restart: "no"
+    env_file: ${PRODUCTION_ENV_FILE:-.env.production}
+    environment: { RAILS_ENV: production, NODE_ENV: production, INSTALLATION_ENV: docker }
+    command: ["bundle", "exec", "rails", "db:chatwoot_prepare"]
+    depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_healthy } }
+
   rails:
     image: ${CHATWOOT_RAILS_IMAGE:?set CHATWOOT_RAILS_IMAGE}
     restart: unless-stopped
@@ -39,7 +47,7 @@ services:
       timeout: 5s
       retries: 12
       start_period: 30s
-    depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_healthy } }
+    depends_on: { db-migrate: { condition: service_completed_successfully } }
 
   sidekiq:
     image: ${CHATWOOT_RAILS_IMAGE:?set CHATWOOT_RAILS_IMAGE}
@@ -48,7 +56,7 @@ services:
     environment: { RAILS_ENV: production, NODE_ENV: production, INSTALLATION_ENV: docker }
     command: ["bundle", "exec", "sidekiq", "-C", "config/sidekiq.yml"]
     volumes: [chatwoot_storage:/app/storage]
-    depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_healthy } }
+    depends_on: { db-migrate: { condition: service_completed_successfully } }
 
   bridge:
     image: ${CHATWOOT_BRIDGE_IMAGE:?set CHATWOOT_BRIDGE_IMAGE}

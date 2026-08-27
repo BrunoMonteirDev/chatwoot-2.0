@@ -24,7 +24,6 @@ Não use `VITE_*` para tokens, API keys ou segredos.
 
 ```bash
 ./scripts/deploy.sh
-docker compose --env-file .env.production -f docker-compose.production.yml exec rails bundle exec rails db:chatwoot_prepare
 docker compose --env-file .env.production -f docker-compose.production.yml ps
 curl -fsS https://$BRIDGE_DOMAIN/health
 curl -fsS https://$BRIDGE_DOMAIN/ready
@@ -32,7 +31,8 @@ curl -fsS https://$BRIDGE_DOMAIN/ready
 
 O Caddy obtém e renova TLS automaticamente após DNS e portas estarem corretos. O frontend preserva rotas SPA, inclusive `/app/accounts/<account>/inbox/<inbox>/conversations/<conversation>`. O Nginx interno encaminha `/api`, `/auth` e `/cable` ao Rails; `/cable` usa WebSocket.
 
-As imagens `rails`, `frontend` e `bridge` são construídas pelo GitHub Actions e
+O serviço único `db-migrate` executa `rails db:chatwoot_prepare` antes de
+iniciar Rails e Sidekiq, inclusive no primeiro deploy. As imagens `rails`, `frontend` e `bridge` são construídas pelo GitHub Actions e
 publicadas no GitHub Container Registry (GHCR); a VPS somente baixa imagens
 prontas. Caso os pacotes GHCR permaneçam privados, faça login uma vez na VPS
 com um Personal Access Token que tenha `read:packages`:
