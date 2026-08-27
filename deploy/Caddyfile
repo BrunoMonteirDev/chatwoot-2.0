@@ -1,4 +1,4 @@
-http://{$APP_DOMAIN} {
+{$APP_DOMAIN} {
   encode zstd gzip
   handle_path /bridge/* {
     reverse_proxy bridge:3100
@@ -8,7 +8,7 @@ http://{$APP_DOMAIN} {
   }
 }
 
-http://{$BRIDGE_DOMAIN} {
+{$BRIDGE_DOMAIN} {
   encode zstd gzip
   reverse_proxy bridge:3100
 }

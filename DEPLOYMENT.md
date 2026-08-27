@@ -1,14 +1,18 @@
 # Deploy do MVP em VPS
 
-Esta stack mantém Evolution como legado, usa WAHA/GOWS para novas sessões Web e mantém Meta Cloud no bridge. Ela pressupõe que os diretórios `chatwoot/` e `frontend-chatwoot-whatsapp/` estejam lado a lado no mesmo repositório/pasta da VPS.
+Esta stack mantém Evolution como legado, usa WAHA/GOWS para novas sessões Web e mantém Meta Cloud no bridge. Ela pressupõe que os diretórios `chatwoot/` (backend) e `frontend-chatwoot-whatsapp/` (frontend + bridge) estejam lado a lado na VPS.
 
 ## 1. DNS e pré-requisitos
 
 Crie registros A/AAAA para `APP_DOMAIN` e `BRIDGE_DOMAIN` apontando para a VPS. Libere TCP 80 e 443. Instale Docker Engine e Docker Compose v2.
 
 ```bash
-git clone <seu-repositorio> chatwoot
-cd chatwoot/frontend-chatwoot-whatsapp
+sudo mkdir -p /opt/chatwoot-stack
+sudo chown "$USER":"$USER" /opt/chatwoot-stack
+cd /opt/chatwoot-stack
+git clone https://github.com/BrunoMonteirDev/chatwoot-backend.git chatwoot
+git clone https://github.com/BrunoMonteirDev/chatwoot-2.0.git frontend-chatwoot-whatsapp
+cd frontend-chatwoot-whatsapp
 ./scripts/setup-production.sh
 ```
 
