@@ -4,6 +4,7 @@ import { authenticatedBridgeHeaders } from '../bridge/auth';
 export type WhatsAppReactionTransport = 'evolution' | 'waha' | 'meta_cloud';
 
 export interface SendWhatsAppReactionInput {
+  accountId: number;
   inboxId: number;
   conversationId: number;
   sourceId: string;

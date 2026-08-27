@@ -42,7 +42,9 @@ app.get('/health', (_request, response) => response.json({ ok: true, redis: brid
 app.get('/ready', async (_request, response) => {
   try {
     const [chatwoot, redis, waha] = await Promise.all([
-      fetch(`${config.chatwootBaseUrl}/api/v1/accounts/${config.chatwootAccountId}/inboxes`, { headers: { api_access_token: config.chatwootApiAccessToken } }),
+      // The Chatwoot root serves HTML and deliberately rejects an explicit
+      // JSON Accept header. Readiness only needs to prove the service answers.
+      fetch(`${config.chatwootBaseUrl}/`),
       bridgeRedis.ping(),
       wahaTransport.health(),
     ]);
@@ -92,9 +94,9 @@ app.post('/meta/embedded-signup/start', async (request, response) => {
   const body = request.body as { accountId?: unknown; inboxId?: unknown; inboxName?: unknown; onboardingMode?: unknown };
   const inboxId = body.inboxId === null || body.inboxId === undefined ? null : body.inboxId;
   const onboardingMode: MetaOnboardingMode = body.onboardingMode === 'coexistence' ? 'coexistence' : 'standard';
-  if (!Number.isInteger(body.accountId) || body.accountId !== config.chatwootAccountId || (inboxId !== null && !Number.isInteger(inboxId)) || (inboxId === null && (typeof body.inboxName !== 'string' || !body.inboxName.trim()))) return response.status(400).json({ error: 'Invalid Embedded Signup request.' });
+  if (!Number.isInteger(body.accountId) || (inboxId !== null && !Number.isInteger(inboxId)) || (inboxId === null && (typeof body.inboxName !== 'string' || !body.inboxName.trim()))) return response.status(400).json({ error: 'Invalid Embedded Signup request.' });
   try {
-    if (inboxId !== null) await chatwootBridge.findWhatsAppInboxById(inboxId as number);
+    if (inboxId !== null) await chatwootBridge.withAccount(body.accountId as number, () => chatwootBridge.findWhatsAppInboxById(inboxId as number));
     const session = await metaEmbeddedSignupSessions.start({ accountId: body.accountId as number, inboxId: inboxId as number | null, inboxName: inboxId === null ? (body.inboxName as string).trim() : null, onboardingMode });
     return response.status(201).json({ onboardingSession: session.id, expiresAt: session.expiresAt });
   } catch (error) {
@@ -256,21 +258,21 @@ const wahaContext = async (request: express.Request, response: express.Response,
   // itself—profile auth and an account-scoped inbox lookup still follow.
   const number = (value: unknown) => typeof value === 'number' ? value : typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : NaN;
   const accountId = number(source.accountId); const inboxId = number(source.inboxId);
-  if (!Number.isInteger(accountId) || accountId !== config.chatwootAccountId || !Number.isInteger(inboxId)) { response.status(403).json({ error: 'WAHA session is not available for this inbox.' }); return null; }
-  try { await chatwootBridge.findApiInboxById(inboxId as number); return { accountId: accountId as number, inboxId: inboxId as number }; }
+  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId)) { response.status(403).json({ error: 'WAHA session is not available for this inbox.' }); return null; }
+  try { await chatwootBridge.withAccount(accountId as number, () => chatwootBridge.findApiInboxById(inboxId as number)); return { accountId: accountId as number, inboxId: inboxId as number }; }
   catch { response.status(403).json({ error: 'WAHA session is not available for this inbox.' }); return null; }
 };
 const wahaOwnershipResponse = (response: express.Response, error: unknown) => {
   if (error instanceof WahaSessionOwnershipError) return response.status(error.code === 'conflict' ? 409 : 403).json({ error: 'WAHA session is not available for this inbox.' });
   return null;
 };
-const configureWahaInbox = async (inboxId: number, sessionName: string, status?: string) => {
+const configureWahaInbox = async (accountId: number, inboxId: number, sessionName: string, status?: string) => chatwootBridge.withAccount(accountId, async () => {
   const inbox = await chatwootBridge.findApiInboxById(inboxId);
   const configuration = transportConfigurationForInbox(inbox.additionalAttributes);
   const transports = [...new Set([...(configuration?.transports || []), 'waha'])];
   await chatwootBridge.updateInboxAdditionalAttributes(inboxId, { waha_session_name: sessionName, waha_provider: 'waha', ...(status ? { waha_connection_status: status } : {}), whatsapp_transports: transports, whatsapp_mode: transports.length > 1 ? 'hybrid' : 'web' });
-};
-const clearWahaInbox = async (inboxId: number) => {
+});
+const clearWahaInbox = async (accountId: number, inboxId: number) => chatwootBridge.withAccount(accountId, async () => {
   const inbox = await chatwootBridge.findApiInboxById(inboxId);
   const configuration = transportConfigurationForInbox(inbox.additionalAttributes);
   const transports = (configuration?.transports || []).filter((transport) => transport !== 'waha');
@@ -279,12 +281,12 @@ const clearWahaInbox = async (inboxId: number) => {
     whatsapp_transports: transports,
     whatsapp_mode: transports.length > 1 ? 'hybrid' : transports[0] === 'meta_cloud' ? 'official' : transports[0] === 'evolution' ? 'web' : '',
   });
-};
+});
 // Controlled one-time adoption for inboxes configured before ownership storage
 // existed. The bridge verifies the account-scoped Chatwoot inbox itself; it
 // never adopts an arbitrary browser-provided session name.
 const adoptLegacyWahaOwnership = async (accountId: number, inboxId: number) => {
-  const inbox = await chatwootBridge.findApiInboxById(inboxId);
+  const inbox = await chatwootBridge.withAccount(accountId, () => chatwootBridge.findApiInboxById(inboxId));
   const sessionName = inbox.additionalAttributes.waha_session_name;
   const transports = transportConfigurationForInbox(inbox.additionalAttributes)?.transports || [];
   if (typeof sessionName !== 'string' || !validWahaSessionName(sessionName) || !transports.includes('waha')) return null;
@@ -432,6 +434,7 @@ const importWahaHistory = async (job: WahaHistoryJob) => {
   const profiles: WahaHistoryProfiles = { names: new Map(), avatarUrls: new Map(), syncedContacts: new Set() };
   let offset = 0;
   try {
+    await chatwootBridge.withAccount(job.accountId, async () => {
     // History messages do not consistently contain push names (and GOWS uses
     // `from` for both directions). Read the session chat index once so the
     // import can retain the actual WhatsApp contact/group name.
@@ -459,6 +462,7 @@ const importWahaHistory = async (job: WahaHistoryJob) => {
     }
     await parallelForEach([...conversations], config.wahaHistoryMessageConcurrency, conversationId => chatwootBridge.resolveHistoricalReplies(conversationId));
     await wahaHistory.update(job.accountId, job.inboxId, { status: 'completed', finishedAt: new Date().toISOString(), conversations: conversations.size });
+    });
   } catch (error) {
     await wahaHistory.update(job.accountId, job.inboxId, { status: 'failed', finishedAt: new Date().toISOString(), conversations: conversations.size, lastError: error instanceof Error ? error.message.slice(0, 300) : 'Falha desconhecida na importação WAHA.' });
     console.error('[waha] history import failed', { trackId: job.trackId, inboxId: job.inboxId, error: error instanceof Error ? error.message : 'unknown' });
@@ -527,7 +531,7 @@ app.post('/providers/waha/sessions', async (request, response) => {
     catch (error) { await wahaSessions.remove(context.accountId, context.inboxId, generatedName); throw error; }
     const session = start === false ? created : await wahaTransport.startSession(generatedName);
     await wahaSessions.update(generatedName, { status: session.status, engine: session.engine, phone: session.me?.id });
-    await configureWahaInbox(context.inboxId, generatedName, session.connectionStatus);
+    await configureWahaInbox(context.accountId, context.inboxId, generatedName, session.connectionStatus);
     return response.status(201).json({ session });
   } catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
 });
@@ -568,7 +572,7 @@ app.delete('/providers/waha/sessions/:sessionName', async (request, response) =>
     await wahaSessions.assertOwned(context.accountId, context.inboxId, request.params.sessionName);
     await wahaTransport.deleteSession(request.params.sessionName);
     await wahaSessions.remove(context.accountId, context.inboxId, request.params.sessionName);
-    await clearWahaInbox(context.inboxId);
+    await clearWahaInbox(context.accountId, context.inboxId);
     return response.status(204).end();
   } catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
 });
@@ -581,7 +585,7 @@ app.delete('/providers/waha/inboxes/:inboxId', async (request, response) => {
   const inboxId = Number(request.params.inboxId);
   const context = await wahaContext(request, response, request.body as Record<string, unknown>); if (!context || context.inboxId !== inboxId) return;
   try {
-    const inbox = await chatwootBridge.findApiInboxById(inboxId);
+    const inbox = await chatwootBridge.withAccount(context.accountId, () => chatwootBridge.findApiInboxById(inboxId));
     const sessionName = inbox.additionalAttributes.waha_session_name;
     if (validWahaSessionName(sessionName)) {
       const ownership = await wahaSessions.get(sessionName);
@@ -591,7 +595,7 @@ app.delete('/providers/waha/inboxes/:inboxId', async (request, response) => {
         await wahaSessions.remove(context.accountId, context.inboxId, sessionName);
       }
     }
-    await chatwootBridge.deleteInbox(inboxId);
+    await chatwootBridge.withAccount(context.accountId, () => chatwootBridge.deleteInbox(inboxId));
     return response.status(204).end();
   } catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
 });
@@ -628,7 +632,7 @@ app.post('/providers/waha/sessions/:sessionName/associate', async (request, resp
   const context = await wahaContext(request, response, request.body as Record<string, unknown>); if (!context) return;
   try {
     const ownership = await wahaSessions.assertOwned(context.accountId, context.inboxId, request.params.sessionName);
-    await configureWahaInbox(context.inboxId, ownership.sessionName, ownership.status);
+    await configureWahaInbox(context.accountId, context.inboxId, ownership.sessionName, ownership.status);
     return response.status(200).json({ ok: true });
   } catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
 });
@@ -660,7 +664,7 @@ app.post('/providers/waha/inboxes/:inboxId/history/import', async (request, resp
   if (!['7d', '30d', '90d', 'all'].includes(String(range))) return response.status(400).json({ error: 'Período de histórico inválido.' });
   let createdJob: WahaHistoryJob | undefined;
   try {
-    const inbox = await chatwootBridge.findApiInboxById(context.inboxId);
+    const inbox = await chatwootBridge.withAccount(context.accountId, () => chatwootBridge.findApiInboxById(context.inboxId));
     const sessionName = inbox.additionalAttributes.waha_session_name;
     if (!validWahaSessionName(sessionName)) return response.status(422).json({ error: 'Esta inbox não possui uma sessão WAHA associada.' });
     await wahaSessions.assertOwned(context.accountId, context.inboxId, sessionName);
@@ -1012,15 +1016,16 @@ app.post('/webhooks/meta', async (request, response) => {
 const wahaInboxForWebhook = async (sessionName: string) => {
   let ownership = await wahaSessions.get(sessionName);
   if (!ownership) {
-    // Only migration-era configurations already stored in this bridge's own
-    // account can be adopted; unknown WAHA sessions remain invisible.
-    const inbox = await chatwootBridge.findWahaInbox(sessionName);
-    ownership = await adoptLegacyWahaOwnership(config.chatwootAccountId, inbox.id);
+    // Legacy adoption is available only when a one-account fallback was
+    // explicitly configured. New sessions always have durable ownership.
+    if (!config.chatwootDefaultAccountId) throw new WahaSessionOwnershipError('not_found');
+    const inbox = await chatwootBridge.withAccount(config.chatwootDefaultAccountId, () => chatwootBridge.findWahaInbox(sessionName));
+    ownership = await adoptLegacyWahaOwnership(config.chatwootDefaultAccountId, inbox.id);
   }
-  if (!ownership || ownership.accountId !== config.chatwootAccountId) throw new WahaSessionOwnershipError('not_found');
-  const inbox = await chatwootBridge.findWahaInbox(sessionName);
+  if (!ownership) throw new WahaSessionOwnershipError('not_found');
+  const inbox = await chatwootBridge.withAccount(ownership.accountId, () => chatwootBridge.findWahaInbox(sessionName));
   if (inbox.id !== ownership.inboxId) throw new WahaSessionOwnershipError('forbidden');
-  return inbox;
+  return { ...inbox, accountId: ownership.accountId };
 };
 
 app.post('/webhooks/waha', (request, response) => {
@@ -1038,10 +1043,12 @@ app.post('/webhooks/waha', (request, response) => {
       if (await dedup.hasOrLock(key)) return;
       try {
         const inbox = await wahaInboxForWebhook(groupLifecycle.session);
-        const sourceId = `whatsapp:group:${encodeURIComponent(groupLifecycle.groupId)}`;
-        const contact = await chatwootBridge.createOrFindContact(inbox.identifier, { sourceId, name: groupLifecycle.subject || groupLifecycle.groupId });
-        await chatwootBridge.saveEvolutionGroup(contact.id, groupLifecycle.groupId, groupLifecycle.subject || groupLifecycle.groupId, { avatarUrl: groupLifecycle.avatarUrl, description: groupLifecycle.description, participants: groupLifecycle.participants, participantAction: groupLifecycle.participantAction });
-        await chatwootBridge.findOrCreateConversation(inbox.identifier, contact.source_id, contact.id, inbox.id);
+        await chatwootBridge.withAccount(inbox.accountId, async () => {
+          const sourceId = `whatsapp:group:${encodeURIComponent(groupLifecycle.groupId)}`;
+          const contact = await chatwootBridge.createOrFindContact(inbox.identifier, { sourceId, name: groupLifecycle.subject || groupLifecycle.groupId });
+          await chatwootBridge.saveEvolutionGroup(contact.id, groupLifecycle.groupId, groupLifecycle.subject || groupLifecycle.groupId, { avatarUrl: groupLifecycle.avatarUrl, description: groupLifecycle.description, participants: groupLifecycle.participants, participantAction: groupLifecycle.participantAction });
+          await chatwootBridge.findOrCreateConversation(inbox.identifier, contact.source_id, contact.id, inbox.id);
+        });
         await dedup.commit(key);
       } catch (error) { dedup.release(key); console.error('[waha] group lifecycle processing failed', { trackId: groupLifecycle.trackId, event: groupLifecycle.event, error: error instanceof Error ? error.message : 'unknown' }); }
       return;
@@ -1052,6 +1059,7 @@ app.post('/webhooks/waha', (request, response) => {
       if (await dedup.hasOrLock(key)) return;
       try {
         const inbox = await wahaInboxForWebhook(message.session);
+        await chatwootBridge.withAccount(inbox.accountId, async () => {
         const { contact, conversation } = await conversationForWahaIdentity(inbox, message);
         if (message.chatType === 'group') await chatwootBridge.saveEvolutionGroup(contact.id, message.remoteJid, message.name, { participants: message.participantJid ? [{ jid: message.participantJid, name: message.participantName }] : undefined });
         // The public API message endpoint does not infer a Chatwoot internal
@@ -1065,24 +1073,27 @@ app.post('/webhooks/waha', (request, response) => {
           else await chatwootBridge.createIncomingTransportMediaMessage(conversation.id, 'waha', message.content, message.externalId, media, message.quotedMessageId, message.remoteJid, inReplyTo, context);
         } else if (message.fromMe) await chatwootBridge.createMobileOutgoingTransportMessage(conversation.id, 'waha', message.content, message.externalId, message.quotedMessageId, message.remoteJid, inReplyTo, context);
         else await chatwootBridge.createIncomingTransportMessage(inbox.identifier, contact.source_id, conversation.id, 'waha', message.content, message.externalId, message.quotedMessageId, message.remoteJid, inReplyTo, context);
+        });
         await dedup.commit(key); bridgeMetrics.increment('whatsapp_messages_received_total', { transport: 'waha', media: Boolean(message.media) });
       } catch (error) { dedup.release(key); console.error('[waha] message processing failed', { trackId: message.trackId, event: message.event, error: error instanceof Error ? error.message : 'unknown' }); }
       return;
     }
     const reaction = parseIncomingWahaReaction(request.body);
     if (reaction) {
-      try { await wahaInboxForWebhook(reaction.session); } catch { return; }
+      let routedInbox;
+      try { routedInbox = await wahaInboxForWebhook(reaction.session); } catch { return; }
       const key = `waha-reaction:${reaction.session}:${reaction.targetMessageId}:${reaction.senderId}:${reaction.emoji}`;
       if (await dedup.hasOrLock(key)) return;
-      try { await chatwootBridge.updateWhatsAppReactionBySourceId(externalMessageId('waha', reaction.targetMessageId), { senderId: reaction.senderId, emoji: reaction.emoji, transport: 'waha', origin: reaction.fromMe ? 'mobile' : 'contact', eventId: reaction.trackId }); await dedup.commit(key); }
+      try { await chatwootBridge.withAccount(routedInbox.accountId, () => chatwootBridge.updateWhatsAppReactionBySourceId(externalMessageId('waha', reaction.targetMessageId), { senderId: reaction.senderId, emoji: reaction.emoji, transport: 'waha', origin: reaction.fromMe ? 'mobile' : 'contact', eventId: reaction.trackId })); await dedup.commit(key); }
       catch { dedup.release(key); }
       return;
     }
     const mutation = parseIncomingWahaMutation(request.body);
     if (mutation) {
-      try { await wahaInboxForWebhook(mutation.session); } catch { return; }
+      let routedInbox;
+      try { routedInbox = await wahaInboxForWebhook(mutation.session); } catch { return; }
       const key = `waha-${mutation.event}:${mutation.targetMessageId}`; if (await dedup.hasOrLock(key)) return;
-      try { if (mutation.event === 'message.edited' && mutation.content) await chatwootBridge.editWhatsAppMessageBySourceId(externalMessageId('waha', mutation.targetMessageId), mutation.content); if (mutation.event === 'message.revoked') await chatwootBridge.revokeWhatsAppMessageBySourceId(externalMessageId('waha', mutation.targetMessageId)); await dedup.commit(key); } catch { dedup.release(key); }
+      try { await chatwootBridge.withAccount(routedInbox.accountId, async () => { if (mutation.event === 'message.edited' && mutation.content) await chatwootBridge.editWhatsAppMessageBySourceId(externalMessageId('waha', mutation.targetMessageId), mutation.content); if (mutation.event === 'message.revoked') await chatwootBridge.revokeWhatsAppMessageBySourceId(externalMessageId('waha', mutation.targetMessageId)); }); await dedup.commit(key); } catch { dedup.release(key); }
     }
     if (event.event === 'message.ack' || event.event === 'message.ack.group') {
       const root = request.body as Record<string, unknown>; const payload = root.payload && typeof root.payload === 'object' ? root.payload as Record<string, unknown> : {};
@@ -1095,7 +1106,8 @@ app.post('/webhooks/waha', (request, response) => {
         // associated with its provider ID. That is an expected race, not a
         // fatal webhook error. A later ACK/retry will update it normally.
         try {
-          await chatwootBridge.updateWhatsAppMessageStatus(externalMessageId('waha', id), status);
+          const routedInbox = await wahaInboxForWebhook(event.session);
+          await chatwootBridge.withAccount(routedInbox.accountId, () => chatwootBridge.updateWhatsAppMessageStatus(externalMessageId('waha', id), status));
           console.info('[waha] ACK applied', { messageId: id.slice(-12), ack, status });
         }
         catch (error) {
@@ -1103,7 +1115,7 @@ app.post('/webhooks/waha', (request, response) => {
           // IDs were introduced (they used the full true_/false_ value).
           if (rawId !== id) {
             try {
-              await chatwootBridge.updateWhatsAppMessageStatus(externalMessageId('waha', rawId), status);
+              await chatwootBridge.withAccount((await wahaInboxForWebhook(event.session)).accountId, () => chatwootBridge.updateWhatsAppMessageStatus(externalMessageId('waha', rawId), status));
               console.info('[waha] ACK applied to legacy ID', { messageId: id.slice(-12), ack, status });
               return;
             }
@@ -1231,17 +1243,18 @@ app.post('/operations/messages/:operation', async (request, response) => {
   if (!(await enforceRateLimit(request, response, `message-${operation}`, 60, 60))) return;
   if (!(await requireBridgeUser(request, response))) return;
   const body = request.body as Record<string, unknown>;
-  const { inboxId, sourceId, remoteJid, targetFromMe, participantJid, content } = body;
-  if (!Number.isInteger(inboxId) || typeof sourceId !== 'string' || typeof remoteJid !== 'string' || typeof targetFromMe !== 'boolean' || (participantJid !== undefined && typeof participantJid !== 'string' && participantJid !== null) || (operation === 'edit' && (typeof content !== 'string' || !content.trim()))) return response.status(400).json({ error: 'Invalid WhatsApp message operation' });
+  const { accountId, inboxId, sourceId, remoteJid, targetFromMe, participantJid, content } = body;
+  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || typeof sourceId !== 'string' || typeof remoteJid !== 'string' || typeof targetFromMe !== 'boolean' || (participantJid !== undefined && typeof participantJid !== 'string' && participantJid !== null) || (operation === 'edit' && (typeof content !== 'string' || !content.trim()))) return response.status(400).json({ error: 'Invalid WhatsApp message operation' });
   const external = parseExternalMessageId(sourceId);
   const transport = resolveMessageOperationTransport({ sourceId, contentAttributes: { whatsapp_transport: external?.provider } });
   if (!external || (transport !== 'evolution' && transport !== 'waha') || external.provider !== transport || !targetFromMe || remoteJid === 'status@broadcast') return response.status(422).json({ error: 'This message cannot be changed remotely.', category: 'operation_unsupported' });
   try {
+    return await chatwootBridge.withAccount(accountId as number, async () => {
     const inbox = await chatwootBridge.findWhatsAppInboxById(inboxId as number);
     if (transport === 'waha') {
       if (!inbox.configuration.transports.includes('waha') || !inbox.configuration.wahaSessionName) return response.status(409).json({ error: 'WAHA is not available for this inbox.', category: 'transport_unavailable' });
-      await adoptLegacyWahaOwnership(config.chatwootAccountId, inbox.id);
-      await wahaSessions.assertOwned(config.chatwootAccountId, inbox.id, inbox.configuration.wahaSessionName);
+      await adoptLegacyWahaOwnership(accountId as number, inbox.id);
+      await wahaSessions.assertOwned(accountId as number, inbox.id, inbox.configuration.wahaSessionName);
       if (operation === 'edit') await wahaTransport.editMessage(inbox.configuration.wahaSessionName, remoteJid, external.id, content as string);
       else await wahaTransport.revokeMessage(inbox.configuration.wahaSessionName, remoteJid, external.id);
       const updated = operation === 'edit' ? await chatwootBridge.editWhatsAppMessageBySourceId(sourceId, content as string) : await chatwootBridge.revokeWhatsAppMessageBySourceId(sourceId);
@@ -1259,6 +1272,7 @@ app.post('/operations/messages/:operation', async (request, response) => {
     const updated = await chatwootBridge.revokeWhatsAppMessageBySourceId(sourceId);
     bridgeMetrics.increment('whatsapp_messages_revoked_total', { transport: 'evolution', origin: 'platform' });
     return response.json(updated);
+    });
   } catch (error) {
     console.error('[evolution-bridge] remote message operation failed', { operation, inboxId, sourceId, error: error instanceof Error ? error.message : 'unknown error' });
     return response.status(502).json({ error: operation === 'edit' ? 'Could not edit WhatsApp message' : 'Could not revoke WhatsApp message' });
@@ -1269,6 +1283,7 @@ app.post('/operations/reactions', async (request, response) => {
   if (!(await enforceRateLimit(request, response, 'reactions', 120, 60))) return;
   if (!(await requireBridgeUser(request, response))) return;
   const body = request.body as Record<string, unknown>;
+  const accountId = body.accountId;
   const inboxId = body.inboxId;
   const conversationId = body.conversationId;
   const sourceId = body.sourceId;
@@ -1277,20 +1292,21 @@ app.post('/operations/reactions', async (request, response) => {
   const participantJid = body.participantJid;
   const emoji = body.emoji;
   const declaredTransport = body.transport;
-  if (!Number.isInteger(inboxId) || !Number.isInteger(conversationId) || typeof sourceId !== 'string' || typeof remoteJid !== 'string' || typeof targetFromMe !== 'boolean' || typeof emoji !== 'string' || (participantJid !== undefined && typeof participantJid !== 'string' && participantJid !== null) || (declaredTransport !== 'evolution' && declaredTransport !== 'waha' && declaredTransport !== 'meta_cloud')) {
+  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !Number.isInteger(conversationId) || typeof sourceId !== 'string' || typeof remoteJid !== 'string' || typeof targetFromMe !== 'boolean' || typeof emoji !== 'string' || (participantJid !== undefined && typeof participantJid !== 'string' && participantJid !== null) || (declaredTransport !== 'evolution' && declaredTransport !== 'waha' && declaredTransport !== 'meta_cloud')) {
     return response.status(400).json({ error: 'Invalid reaction operation' });
   }
   const external = parseExternalMessageId(sourceId);
   const transport = resolveMessageOperationTransport({ sourceId, contentAttributes: { whatsapp_transport: declaredTransport } });
   if (!external || !transport || external.provider !== transport || remoteJid === 'status@broadcast') return response.status(400).json({ error: 'Unsupported reaction target' });
   try {
+    return await chatwootBridge.withAccount(accountId as number, async () => {
     const inbox = await chatwootBridge.findWhatsAppInboxById(inboxId as number);
     if (!inbox.configuration.transports.includes(transport)) return response.status(409).json({ error: 'The message transport is no longer configured for this inbox' });
     const metaConfig = transport === 'meta_cloud' ? await metaConfigs.get(inbox.id) : null;
     if (transport === 'waha') {
       if (!inbox.configuration.wahaSessionName) return response.status(409).json({ error: 'WAHA is not available for this inbox.' });
-      await adoptLegacyWahaOwnership(config.chatwootAccountId, inbox.id);
-      await wahaSessions.assertOwned(config.chatwootAccountId, inbox.id, inbox.configuration.wahaSessionName);
+      await adoptLegacyWahaOwnership(accountId as number, inbox.id);
+      await wahaSessions.assertOwned(accountId as number, inbox.id, inbox.configuration.wahaSessionName);
     }
     await reactionTransport.send({
       transport,
@@ -1304,6 +1320,7 @@ app.post('/operations/reactions', async (request, response) => {
     });
     bridgeMetrics.increment('whatsapp_reactions_sent_total', { transport });
     return response.status(200).json({ ok: true });
+    });
   } catch (error) {
     if (error instanceof UnsupportedReactionTransportError) return response.status(422).json({ error: `Reactions are not available for ${error.message.includes('waha') ? 'WAHA' : 'Meta Cloud'} yet` });
     console.error('[evolution-bridge] outgoing reaction failed', { inboxId, conversationId, sourceId, error: error instanceof Error ? error.message : 'unknown error' });
@@ -1316,7 +1333,10 @@ const validChatwootSignature = async (request: express.Request & { rawBody?: str
   const timestamp = request.header('x-chatwoot-timestamp');
   if (!signature?.startsWith('sha256=') || !timestamp || !request.rawBody) return false;
   const received = signature.slice('sha256='.length);
-  const inboxes = await chatwootBridge.listApiInboxes();
+  const account = request.body && typeof request.body === 'object' ? (request.body as { account?: { id?: unknown } }).account : undefined;
+  const accountId = account && Number.isInteger(account.id) ? Number(account.id) : config.chatwootDefaultAccountId;
+  if (!accountId) return false;
+  const inboxes = await chatwootBridge.withAccount(accountId, () => chatwootBridge.listApiInboxes());
   return inboxes.some(inbox => {
     if (!inbox.secret) return false;
     const expected = createHmac('sha256', inbox.secret).update(`${timestamp}.${request.rawBody}`).digest('hex');
@@ -1329,7 +1349,8 @@ app.post('/webhooks/chatwoot', async (request, response) => {
     if (!(await validChatwootSignature(request))) return response.status(401).json({ error: 'Invalid Chatwoot signature' });
     const event = parseOutgoingChatwootMessage(request.body);
     if (!event) return response.status(202).json({ ignored: true });
-    const dedupId = `chatwoot-outgoing:${event.messageId}`;
+    return chatwootBridge.withAccount(event.accountId, async () => {
+    const dedupId = `chatwoot-outgoing:${event.accountId}:${event.messageId}`;
     if (await dedup.hasOrLock(dedupId)) {
       console.info('[evolution-bridge] outgoing duplicate ignored', { messageId: event.messageId });
       return response.status(200).json({ duplicate: true });
@@ -1366,8 +1387,8 @@ app.post('/webhooks/chatwoot', async (request, response) => {
       if (transport === 'waha') {
         const session = routedInbox.configuration.wahaSessionName;
         if (!session) throw new Error('A inbox WAHA não possui sessão configurada.');
-        await adoptLegacyWahaOwnership(config.chatwootAccountId, routedInbox.id);
-        await wahaSessions.assertOwned(config.chatwootAccountId, routedInbox.id, session);
+        await adoptLegacyWahaOwnership(event.accountId, routedInbox.id);
+        await wahaSessions.assertOwned(event.accountId, routedInbox.id, session);
         const status = await wahaTransport.getSession(session);
         if (status.connectionStatus !== 'connected') return response.status(409).json({ error: 'WAHA session is not WORKING.', category: 'transport_unavailable' });
         const quoted = parseExternalMessageId(event.quotedExternalId);
@@ -1439,6 +1460,7 @@ app.post('/webhooks/chatwoot', async (request, response) => {
       if (error instanceof MetaCloudError) return response.status(422).json({ error: 'Meta Cloud could not send this message', category: error.category });
       return response.status(502).json({ error: 'Could not send message through Evolution' });
     }
+    });
   } catch (error) {
     console.error('[evolution-bridge] outgoing webhook validation failed', { error: error instanceof Error ? error.message : 'unknown error' });
     return response.status(502).json({ error: 'Could not validate Chatwoot webhook' });

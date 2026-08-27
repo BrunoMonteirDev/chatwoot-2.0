@@ -4,6 +4,11 @@ import { config } from './config.js';
 const SESSION_HEADERS = ['access-token', 'token-type', 'client', 'expiry', 'uid'] as const;
 
 type ChatwootProfile = { account_id?: unknown; role?: unknown; accounts?: Array<{ id?: unknown; role?: unknown }> };
+const requestedAccountId = (request: express.Request) => {
+  const value = request.header('x-chatwoot-account-id') || request.query.accountId || (request.body && typeof request.body === 'object' ? (request.body as { accountId?: unknown }).accountId : undefined);
+  const accountId = typeof value === 'number' ? value : typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : null;
+  return Number.isInteger(accountId) && accountId! > 0 ? accountId : null;
+};
 
 const sessionHeaders = (request: express.Request) => {
   const headers = new Headers({ Accept: 'application/json' });
@@ -24,8 +29,10 @@ export const requireChatwootSession = async (request: express.Request, administr
     const response = await fetch(`${config.chatwootBaseUrl}/api/v1/profile`, { headers });
     if (!response.ok) return false;
     const profile = await response.json() as ChatwootProfile;
-    const account = profile.accounts?.find(item => item.id === config.chatwootAccountId);
-    const role = account?.role || (profile.account_id === config.chatwootAccountId ? profile.role : null);
+    const accountId = requestedAccountId(request) ?? config.chatwootDefaultAccountId;
+    if (!accountId) return false;
+    const account = profile.accounts?.find(item => item.id === accountId);
+    const role = account?.role || (profile.account_id === accountId ? profile.role : null);
     return !administrator || role === 'administrator';
   } catch {
     return false;

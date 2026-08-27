@@ -175,6 +175,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
     setMessages(current => current.map((message) => message.id === messageId ? { ...message, contentAttributes: expectedAttributes } : message));
     try {
       await whatsappReactionService.send({
+        accountId,
         inboxId,
         conversationId,
         sourceId: target.sourceId,
@@ -195,7 +196,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
     } finally {
       reactionInFlight.current.delete(operationId);
     }
-  }, [conversationId, fallbackPhoneNumber, inboxId, messages]);
+  }, [accountId, conversationId, fallbackPhoneNumber, inboxId, messages]);
 
   const mutate = useCallback(async (operation: 'edit' | 'revoke', messageId: number, content?: string) => {
     if (!inboxId || messageId < 1) return false;
@@ -205,12 +206,12 @@ export const useConversationMessages = (accountId: number | null, conversationId
     if (!remoteJid) return false;
     try {
       const updated = await whatsappMessageMutationService.send(operation, {
-        inboxId, sourceId: target.sourceId, remoteJid, targetFromMe: typeof target.contentAttributes.whatsapp_from_me === 'boolean' ? target.contentAttributes.whatsapp_from_me : target.kind === 'outgoing', participantJid: typeof target.contentAttributes.whatsapp_participant_jid === 'string' ? target.contentAttributes.whatsapp_participant_jid : null, transport: 'evolution', ...(content ? { content } : {}),
+        accountId, inboxId, sourceId: target.sourceId, remoteJid, targetFromMe: typeof target.contentAttributes.whatsapp_from_me === 'boolean' ? target.contentAttributes.whatsapp_from_me : target.kind === 'outgoing', participantJid: typeof target.contentAttributes.whatsapp_participant_jid === 'string' ? target.contentAttributes.whatsapp_participant_jid : null, transport: 'evolution', ...(content ? { content } : {}),
       });
       setMessages(current => current.map(message => message.id === messageId ? { ...message, content: updated.content, contentAttributes: updated.content_attributes } : message));
       return true;
     } catch { return false; }
-  }, [fallbackPhoneNumber, inboxId, messages]);
+  }, [accountId, fallbackPhoneNumber, inboxId, messages]);
 
   const upsertRealtimeMessage = useCallback((message: ConversationMessage) => {
     if (message.conversationId !== conversationId) return;

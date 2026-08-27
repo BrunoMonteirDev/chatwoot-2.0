@@ -16,7 +16,10 @@ export const config = {
   internalUrl: optionalUrl('BRIDGE_INTERNAL_URL'),
   webhookSecret: required('BRIDGE_WEBHOOK_SECRET'),
   chatwootBaseUrl: required('CHATWOOT_BASE_URL'),
-  chatwootAccountId: Number(required('CHATWOOT_ACCOUNT_ID')),
+  // Kept only as a migration fallback for existing single-account installs.
+  // New operations resolve the account from the authenticated request or
+  // from the persisted WAHA session ownership.
+  chatwootDefaultAccountId: process.env.CHATWOOT_ACCOUNT_ID ? Number(process.env.CHATWOOT_ACCOUNT_ID) : null,
   chatwootApiAccessToken: required('CHATWOOT_API_ACCESS_TOKEN'),
   evolutionBaseUrl: required('EVOLUTION_BASE_URL'),
   evolutionApiKey: required('EVOLUTION_API_KEY'),
@@ -60,7 +63,7 @@ export const config = {
   metaAppSecret: process.env.META_APP_SECRET || '',
 };
 
-if (!Number.isInteger(config.chatwootAccountId) || config.chatwootAccountId < 1) throw new Error('CHATWOOT_ACCOUNT_ID deve ser um número positivo.');
+if (config.chatwootDefaultAccountId !== null && (!Number.isInteger(config.chatwootDefaultAccountId) || config.chatwootDefaultAccountId < 1)) throw new Error('CHATWOOT_ACCOUNT_ID deve ser um número positivo.');
 if (!Number.isFinite(config.metaEmbeddedSignupSessionTtlMs) || config.metaEmbeddedSignupSessionTtlMs < 60_000) throw new Error('META_EMBEDDED_SIGNUP_SESSION_TTL_SECONDS deve ser pelo menos 60.');
 if (!Number.isInteger(config.historyImportBatchSize) || config.historyImportBatchSize < 1 || config.historyImportBatchSize > 1_000) throw new Error('HISTORY_IMPORT_BATCH_SIZE deve estar entre 1 e 1000.');
 if (!Number.isInteger(config.historyMediaConcurrency) || config.historyMediaConcurrency < 1 || config.historyMediaConcurrency > 10) throw new Error('HISTORY_MEDIA_CONCURRENCY deve estar entre 1 e 10.');
