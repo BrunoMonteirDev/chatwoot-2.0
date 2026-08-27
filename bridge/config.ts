@@ -21,8 +21,10 @@ export const config = {
   // from the persisted WAHA session ownership.
   chatwootDefaultAccountId: process.env.CHATWOOT_ACCOUNT_ID ? Number(process.env.CHATWOOT_ACCOUNT_ID) : null,
   chatwootApiAccessToken: required('CHATWOOT_API_ACCESS_TOKEN'),
-  evolutionBaseUrl: required('EVOLUTION_BASE_URL'),
-  evolutionApiKey: required('EVOLUTION_API_KEY'),
+  // Evolution is a legacy transport. New WAHA-only installations must be
+  // able to boot without provisioning an Evolution API.
+  evolutionBaseUrl: optionalUrl('EVOLUTION_BASE_URL'),
+  evolutionApiKey: process.env.EVOLUTION_API_KEY || '',
   // WAHA is optional during the Evolution-to-WAHA migration. Requiring it at
   // bridge boot would break existing Evolution and Meta installations.
   wahaBaseUrl: optionalUrl('WAHA_BASE_URL'),
