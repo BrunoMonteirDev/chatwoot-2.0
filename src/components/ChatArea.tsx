@@ -1649,7 +1649,7 @@ export const ChatArea: React.FC<Props> = ({
                   isMe ? 'items-end' : 'items-start'
                 }`}
               >
-                <div className="flex items-end gap-1.5">
+                <div className={`flex w-full items-end gap-1.5 ${isMe ? 'justify-end' : 'justify-start'}`}>
                 <div
                   onContextMenu={(e) => handleMessageContextMenu(e, msg)}
                   className={`max-w-[85%] sm:max-w-[75%] lg:max-w-[65%] w-fit rounded-lg px-3 py-1.5 shadow-xs relative group border select-none ${
