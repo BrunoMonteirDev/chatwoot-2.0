@@ -43,6 +43,10 @@ body {
   overflow: hidden;
 }
 
+html, body, #root {
+  min-height: 100%;
+}
+
 @media (max-width: 420px) {
   section[class~="md:hidden"] label:has(> select) {
     flex-wrap: wrap;

@@ -86,6 +86,26 @@ export default function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
+  // Mobile browsers keep `100vh` tied to the layout viewport while their
+  // address bar is expanded. Use the visual viewport instead so the message
+  // composer remains visible in Chrome/Safari. In an installed PWA both
+  // measurements are equivalent, so its standalone layout is unchanged.
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const syncViewportHeight = () => {
+      document.documentElement.style.setProperty('--app-viewport-height', `${Math.round(viewport?.height || window.innerHeight)}px`);
+    };
+    syncViewportHeight();
+    viewport?.addEventListener('resize', syncViewportHeight);
+    window.addEventListener('resize', syncViewportHeight);
+    window.addEventListener('orientationchange', syncViewportHeight);
+    return () => {
+      viewport?.removeEventListener('resize', syncViewportHeight);
+      window.removeEventListener('resize', syncViewportHeight);
+      window.removeEventListener('orientationchange', syncViewportHeight);
+    };
+  }, []);
+
   const handleChatContextMenu = (e: React.MouseEvent, chatItem: Chat) => {
     const items = getChatContextMenuItems(chatItem, {
       onSelectChat: (selected) => {
@@ -816,7 +836,8 @@ export default function App() {
 
   return (
     <div
-      className={`w-screen h-screen flex flex-col font-sans antialiased overflow-hidden select-none transition-colors ${
+      style={{ height: 'var(--app-viewport-height, 100dvh)' }}
+      className={`w-screen flex flex-col font-sans antialiased overflow-hidden select-none transition-colors ${
         isDarkMode ? 'bg-[#0e0c0c]' : 'bg-[#f0f2f5]'
       }`}
     >
