@@ -11,8 +11,8 @@ const root = (accountId: number) => `/api/v1/accounts/${accountId}`;
 export interface CreateEvolutionInboxParams { name: string; webhookUrl: string; }
 export interface SaveAgentParams { name: string; email?: string; role: 'agent' | 'administrator'; availability: 'online' | 'offline' | 'busy'; customRoleId?: number | null; }
 export interface SaveCustomRoleParams { name: string; description: string; permissions: string[]; }
-export interface SavePermissionProfileParams { name: string; description: string; inboxPermissions: string[]; systemPermissions: string[]; }
-const normalizePermissionProfile = (dto: ChatwootPermissionProfileDto): PermissionProfile => ({ id: dto.id, name: dto.name, description: dto.description || null, inboxPermissions: dto.inbox_permissions || [], systemPermissions: dto.system_permissions || [], isDefault: Boolean(dto.default) });
+export interface SavePermissionProfileParams { name: string; description: string; kind: 'inbox' | 'system'; inboxPermissions: string[]; systemPermissions: string[]; }
+const normalizePermissionProfile = (dto: ChatwootPermissionProfileDto): PermissionProfile => ({ id: dto.id, name: dto.name, description: dto.description || null, kind: dto.kind || 'inbox', inboxPermissions: dto.inbox_permissions || [], systemPermissions: dto.system_permissions || [], isDefault: Boolean(dto.default) });
 
 export const inboxService = {
   async list(accountId: number): Promise<Inbox[]> {
@@ -114,11 +114,11 @@ export const inboxService = {
     return (await chatwootApiClient.get<ChatwootPermissionProfileDto[]>(`${root(accountId)}/permission_profiles`)).map(normalizePermissionProfile);
   },
   async createPermissionProfile(accountId: number, params: SavePermissionProfileParams): Promise<PermissionProfile> {
-    const response = await chatwootApiClient.post<ChatwootPermissionProfileDto>(`${root(accountId)}/permission_profiles`, { permission_profile: { name: params.name, description: params.description, inbox_permissions: params.inboxPermissions, system_permissions: params.systemPermissions } });
+    const response = await chatwootApiClient.post<ChatwootPermissionProfileDto>(`${root(accountId)}/permission_profiles`, { permission_profile: { name: params.name, description: params.description, kind: params.kind, inbox_permissions: params.inboxPermissions, system_permissions: params.systemPermissions } });
     return normalizePermissionProfile(response);
   },
   async updatePermissionProfile(accountId: number, id: number, params: SavePermissionProfileParams): Promise<PermissionProfile> {
-    const response = await chatwootApiClient.patch<ChatwootPermissionProfileDto>(`${root(accountId)}/permission_profiles/${id}`, { permission_profile: { name: params.name, description: params.description, inbox_permissions: params.inboxPermissions, system_permissions: params.systemPermissions } });
+    const response = await chatwootApiClient.patch<ChatwootPermissionProfileDto>(`${root(accountId)}/permission_profiles/${id}`, { permission_profile: { name: params.name, description: params.description, kind: params.kind, inbox_permissions: params.inboxPermissions, system_permissions: params.systemPermissions } });
     return normalizePermissionProfile(response);
   },
   deletePermissionProfile(accountId: number, id: number): Promise<void> { return chatwootApiClient.delete(`${root(accountId)}/permission_profiles/${id}`); },

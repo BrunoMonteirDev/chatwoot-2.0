@@ -108,6 +108,7 @@ export interface PermissionProfile {
   inboxPermissions: string[];
   systemPermissions: string[];
   isDefault: boolean;
+  kind: 'inbox' | 'system';
 }
 
 export interface AgentPermissionAssignment {

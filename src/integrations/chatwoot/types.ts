@@ -136,6 +136,7 @@ export interface ChatwootPermissionProfileDto {
   inbox_permissions?: string[] | null;
   system_permissions?: string[] | null;
   default?: boolean;
+  kind?: 'inbox' | 'system';
 }
 export interface ChatwootAgentPermissionAssignmentDto {
   agent_id: number;

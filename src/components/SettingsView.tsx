@@ -219,17 +219,6 @@ export const SettingsView: React.FC<Props> = ({
     return () => { active = false; };
   }, [accountId, activeTab]);
 
-  useEffect(() => {
-    if (activeTab !== 'agentes' || !accountId) return;
-    let active = true;
-    setCustomRolesStatus('loading');
-    void inboxService.listCustomRoles(accountId).then((roles) => {
-      if (!active) return;
-      setCustomRoles(roles); setCustomRolesStatus('ready');
-    }).catch(() => { if (active) setCustomRolesStatus('unavailable'); });
-    return () => { active = false; };
-  }, [accountId, activeTab]);
-
   const openCreateAgent = () => {
     setEditingAgent(null); setAgentError(null);
     setAgentForm({ name: '', email: '', role: 'agent', availability: 'online', customRoleId: '' });
@@ -737,8 +726,6 @@ export const SettingsView: React.FC<Props> = ({
                 ))}
                 {agentsStatus === 'ready' && agents.length > 0 && !agents.some((agent) => `${agent.name} ${agent.email || ''}`.toLocaleLowerCase().includes(agentQuery.trim().toLocaleLowerCase())) && <p className="py-6 text-center text-xs text-[#8696a0]">Nenhum agente encontrado.</p>}
               </div>
-
-              <section className={`border-t pt-5 ${isDarkMode ? 'border-[#2a3942]' : 'border-[#d1d7db]'}`}><div className="flex items-center justify-between gap-3"><div><h4 className="text-sm font-bold">Funções e permissões</h4><p className="mt-1 text-xs text-[#8696a0]">Crie funções personalizadas e atribua-as aos atendentes.</p></div>{customRolesStatus === 'ready' && <button type="button" onClick={openCreateRole} className="rounded-xl border border-[#00a884]/50 px-3 py-2 text-xs font-bold text-[#00a884]">Adicionar função</button>}</div>{customRolesStatus === 'loading' && <p className="py-4 text-xs text-[#8696a0]">Carregando funções…</p>}{customRolesStatus === 'unavailable' && <p className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600">As funções personalizadas não estão habilitadas para esta conta.</p>}{customRolesStatus === 'ready' && <div className="mt-4 space-y-2">{customRoles.length === 0 && <p className="text-xs text-[#8696a0]">Nenhuma função personalizada criada.</p>}{customRoles.map(role => <div key={role.id} className={`flex items-center justify-between gap-3 rounded-xl border p-3 ${isDarkMode ? 'border-[#2a3942] bg-[#182228]' : 'border-[#d1d7db] bg-gray-50'}`}><div><p className="text-xs font-bold">{role.name}</p><p className="mt-1 text-[11px] text-[#8696a0]">{role.description || 'Sem descrição'} · {role.permissions.length} permissões</p></div><div className="flex gap-1"><button type="button" onClick={() => openEditRole(role)} className="rounded-lg p-2 text-[#8696a0] hover:bg-white/10 hover:text-[#00a884]"><Edit3 className="h-4 w-4" /></button><button type="button" onClick={() => void deleteRole(role)} className="rounded-lg p-2 text-[#8696a0] hover:bg-red-500/10 hover:text-red-400"><Trash2 className="h-4 w-4" /></button></div></div>)}</div>}</section>
 
               {agentModal && <div className="fixed inset-0 z-[100] grid place-items-center bg-black/65 p-4" role="dialog" aria-modal="true"><div className={`w-full max-w-md rounded-2xl border p-5 shadow-2xl ${isDarkMode ? 'border-[#2a3942] bg-[#182228]' : 'border-[#d1d7db] bg-white'}`}><div className="flex items-center justify-between"><h3 className="text-base font-bold">{agentModal === 'create' ? 'Adicionar agente' : `Editar agente · ${editingAgent?.name}`}</h3><button type="button" onClick={() => setAgentModal(null)} className="text-[#8696a0]"><X className="h-4 w-4" /></button></div><p className="mt-1 text-xs text-[#8696a0]">Defina o acesso e a disponibilidade deste usuário na conta.</p>{agentError && <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">{agentError}</p>}<div className="mt-4 space-y-3"><label className="block text-xs font-semibold">Nome<input value={agentForm.name} onChange={(event) => setAgentForm(current => ({ ...current, name: event.target.value }))} className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`} /></label><label className="block text-xs font-semibold">E-mail<input type="email" disabled={agentModal === 'edit'} value={agentForm.email} onChange={(event) => setAgentForm(current => ({ ...current, email: event.target.value }))} className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none disabled:opacity-60 ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`} /></label><div className="grid grid-cols-2 gap-3"><label className="block text-xs font-semibold">Função<select value={agentForm.role} onChange={(event) => setAgentForm(current => ({ ...current, role: event.target.value as 'agent' | 'administrator', customRoleId: event.target.value === 'administrator' ? '' : current.customRoleId }))} className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`}><option value="agent">Atendente</option><option value="administrator">Administrador</option></select></label><label className="block text-xs font-semibold">Disponibilidade<select value={agentForm.availability} onChange={(event) => setAgentForm(current => ({ ...current, availability: event.target.value as 'online' | 'offline' | 'busy' }))} className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`}><option value="online">Disponível</option><option value="offline">Offline</option><option value="busy">Ocupado</option></select></label></div>{agentForm.role === 'agent' && customRolesStatus === 'ready' && <label className="block text-xs font-semibold">Permissões personalizadas<select value={agentForm.customRoleId} onChange={(event) => setAgentForm(current => ({ ...current, customRoleId: event.target.value }))} className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`}><option value="">Padrão de atendente</option>{customRoles.map(role => <option key={role.id} value={role.id}>{role.name}</option>)}</select></label>}</div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setAgentModal(null)} className="rounded-xl px-3 py-2 text-xs font-bold text-[#8696a0]">Cancelar</button><button type="button" disabled={agentSaving || !agentForm.name.trim() || (agentModal === 'create' && !agentForm.email.trim())} onClick={() => void saveAgent()} className="rounded-xl bg-[#00a884] px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{agentSaving ? 'Salvando…' : agentModal === 'create' ? 'Adicionar agente' : 'Salvar alterações'}</button></div></div></div>}
               {permissionsAgent && accountId && <AgentInboxPermissionsModal accountId={accountId} agent={permissionsAgent} onClose={() => setPermissionsAgent(null)} isDarkMode={isDarkMode} />}
@@ -1517,57 +1504,7 @@ export const SettingsView: React.FC<Props> = ({
 
           {/* ==================== 14. PERMISSÕES ==================== */}
           {activeTab === 'permissoes' && (
-            <>
             <PermissionProfilesPanel accountId={accountId} isDarkMode={isDarkMode} />
-            <div className={`p-6 rounded-2xl border shadow-xl space-y-6 ${isDarkMode ? 'bg-[#111b21] border-[#222d34]' : 'bg-white border-[#d1d7db]'}`}>
-              <div className="border-b pb-4 border-white/10">
-                <h3 className="text-lg font-bold">Matriz de Permissões & Níveis de Acesso</h3>
-                <p className="text-xs text-[#8696a0]">Defina o que atendentes e supervisores podem acessar no sistema.</p>
-              </div>
-
-              <div className="space-y-3 text-xs">
-                {[
-                  { key: 'viewOtherChats', label: 'Ver conversas e atendimentos de outros agentes' },
-                  { key: 'exportContacts', label: 'Exportar lista de contatos para arquivos CSV / JSON' },
-                  { key: 'deleteMessages', label: 'Excluir mensagens ou apagar histórico de conversas' },
-                  { key: 'manageSettings', label: 'Acessar e alterar painel de configurações do workspace' },
-                  { key: 'manageAgents', label: 'Adicionar e remover novos agentes de atendimento' },
-                  { key: 'assignChats', label: 'Reatribuir conversas manualmente para outros times' },
-                ].map((item) => {
-                  const permKey = item.key as keyof typeof permissions;
-                  const isChecked = permissions[permKey];
-                  return (
-                    <div
-                      key={item.key}
-                      onClick={() => togglePermission(permKey)}
-                      className={`p-3.5 rounded-xl border flex items-center justify-between cursor-pointer transition-colors ${
-                        isDarkMode ? 'bg-[#182228] border-[#2a3942]' : 'bg-[#f0f2f5] border-[#d1d7db]'
-                      }`}
-                    >
-                      <span className="font-medium">{item.label}</span>
-                      <div
-                        className={`w-5 h-5 rounded-md flex items-center justify-center transition-colors ${
-                          isChecked ? 'bg-[#00a884] text-white' : 'bg-gray-600/30 border border-gray-500'
-                        }`}
-                      >
-                        {isChecked && <Check className="w-3.5 h-3.5" />}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="pt-2 flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => showToast('Permissões salvas com sucesso!')}
-                  className="px-5 py-2.5 bg-[#00a884] hover:bg-[#008069] text-white font-bold text-xs rounded-xl shadow-md cursor-pointer"
-                >
-                  Salvar Permissões
-                </button>
-              </div>
-            </div>
-            </>
           )}
         </div>
       </div>
