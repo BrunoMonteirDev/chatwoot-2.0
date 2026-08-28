@@ -47,11 +47,17 @@ app.get('/ready', async (_request, response) => {
       // Rails is behind a TLS-terminating reverse proxy in production. The
       // bridge reaches Puma over the private HTTP network, so preserve the
       // original HTTPS scheme to avoid a FORCE_SSL redirect to `https://rails`.
-      fetch(`${config.chatwootBaseUrl}/`, { headers: { 'X-Forwarded-Proto': 'https', 'X-Forwarded-Ssl': 'on' } }),
+      fetch(`${config.chatwootBaseUrl}/`, {
+        headers: { 'X-Forwarded-Proto': 'https', 'X-Forwarded-Ssl': 'on' },
+        // A fresh Chatwoot redirects / to onboarding. Its HTTP response
+        // proves Puma is ready; following it would attempt TLS on the
+        // private HTTP-only Rails port.
+        redirect: 'manual',
+      }),
       bridgeRedis.ping(),
       wahaTransport.health(),
     ]);
-    if (!chatwoot.ok || !redis || !waha) throw new Error('dependency unavailable');
+    if (chatwoot.status >= 500 || !redis || !waha) throw new Error('dependency unavailable');
     return response.json({ ok: true });
   } catch {
     return response.status(503).json({ ok: false });
