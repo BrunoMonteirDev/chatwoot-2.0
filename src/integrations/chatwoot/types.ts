@@ -129,6 +129,19 @@ export interface ChatwootCustomRoleDto {
   description?: string | null;
   permissions?: string[] | null;
 }
+export interface ChatwootPermissionProfileDto {
+  id: number;
+  name: string;
+  description?: string | null;
+  inbox_permissions?: string[] | null;
+  system_permissions?: string[] | null;
+  default?: boolean;
+}
+export interface ChatwootAgentPermissionAssignmentDto {
+  agent_id: number;
+  permission_profile_id?: number | null;
+  inboxes: Array<{ inbox_id: number; inbox_name: string; permission_profile_id?: number | null }>;
+}
 export interface ChatwootAssignableAgentsResponse { payload: ChatwootAgentDto[]; }
 export interface ChatwootTeamDto { id: number; name: string; }
 export interface ChatwootLabelDto { id: number; title: string; color?: string | null; }

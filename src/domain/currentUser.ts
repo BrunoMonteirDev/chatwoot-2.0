@@ -101,6 +101,21 @@ export interface CustomRole {
   permissions: string[];
 }
 
+export interface PermissionProfile {
+  id: number;
+  name: string;
+  description: string | null;
+  inboxPermissions: string[];
+  systemPermissions: string[];
+  isDefault: boolean;
+}
+
+export interface AgentPermissionAssignment {
+  agentId: number;
+  permissionProfileId: number | null;
+  inboxes: Array<{ inboxId: number; inboxName: string; permissionProfileId: number | null }>;
+}
+
 export interface ConversationTeam {
   id: number;
   name: string;
