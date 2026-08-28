@@ -766,7 +766,7 @@ app.post('/meta/history/:inboxId/import', async (request, response) => {
   }
 });
 
-type EvolutionIdentityEvent = Pick<IncomingEvolutionMessage | IncomingEvolutionReaction, 'instance' | 'sourceId' | 'phoneNumber' | 'lid' | 'name' | 'chatType' | 'participantJid' | 'participantName'> & Partial<Pick<IncomingEvolutionMessage, 'remoteJid'>>;
+type EvolutionIdentityEvent = Pick<IncomingEvolutionMessage | IncomingEvolutionReaction, 'instance' | 'sourceId' | 'phoneNumber' | 'lid' | 'name' | 'chatType' | 'participantJid' | 'participantName'> & Partial<Pick<IncomingEvolutionMessage, 'remoteJid' | 'contactName'>>;
 
 const conversationForEvolutionIdentity = async (event: EvolutionIdentityEvent) => {
   const inbox = await chatwootBridge.findInbox(event.instance);
@@ -785,6 +785,10 @@ const conversationForEvolutionIdentity = async (event: EvolutionIdentityEvent) =
   // manually before their first WhatsApp message.
   const existingSource = await chatwootBridge.findContactSourceByPhone(inbox.id, event.phoneNumber) || await identities.find(identityKeys);
   const contact = await chatwootBridge.createOrFindContact(inbox.identifier, { ...event, sourceId: existingSource || event.sourceId });
+  // Creation is idempotent in Chatwoot and does not refresh an existing
+  // contact's display name. Keep a name supplied by WhatsApp, but never
+  // replace a manually chosen name with the phone/LID fallback.
+  if (event.contactName) await chatwootBridge.updatePublicContact(inbox.identifier, contact.source_id, { name: event.contactName });
   await chatwootBridge.saveEvolutionIdentity(contact.id, event.phoneNumber, event.lid);
   await identities.save(identityKeys, contact.source_id);
   const conversation = await chatwootBridge.findOrCreateConversation(inbox.identifier, contact.source_id, contact.id, inbox.id);
@@ -798,6 +802,7 @@ const conversationForMetaIdentity = async (event: IncomingMetaMessage) => {
   // single conversation instead of creating a Meta-specific identity.
   const existingSource = await chatwootBridge.findContactSourceByPhone(inbox.id, event.phoneNumber);
   const contact = await chatwootBridge.createOrFindContact(inbox.identifier, { sourceId: existingSource || event.sourceId, name: event.name, phoneNumber: event.phoneNumber });
+  if (event.contactName) await chatwootBridge.updatePublicContact(inbox.identifier, contact.source_id, { name: event.contactName });
   const conversation = await chatwootBridge.findOrCreateConversation(inbox.identifier, contact.source_id, contact.id, inbox.id);
   return { inbox, contact, conversation };
 };
@@ -1093,6 +1098,18 @@ app.post('/webhooks/waha', (request, response) => {
     }
     const message = parseIncomingWahaMessage(request.body);
     if (message) {
+      console.info('[waha] message normalized', {
+        trackId: message.trackId,
+        session: message.session,
+        messageId: message.externalId,
+        chatType: message.chatType,
+        fromMe: message.fromMe,
+        hasContent: Boolean(message.content),
+        hasMedia: Boolean(message.media),
+        mediaKind: message.media?.kind,
+        hasMediaUrl: Boolean(message.media?.url),
+        hasMediaData: Boolean(message.media?.data),
+      });
       const key = externalMessageId('waha', message.externalId);
       if (await dedup.hasOrLock(key)) return;
       try {
@@ -1118,8 +1135,12 @@ app.post('/webhooks/waha', (request, response) => {
         else await chatwootBridge.createIncomingTransportMessage(inbox.identifier, contact.source_id, conversation.id, 'waha', message.content, message.externalId, message.quotedMessageId, message.remoteJid, inReplyTo, context);
         });
         await dedup.commit(key); bridgeMetrics.increment('whatsapp_messages_received_total', { transport: 'waha', media: Boolean(message.media) });
+        console.info('[waha] message created', { trackId: message.trackId, messageId: message.externalId, conversationId: conversation.id, media: Boolean(message.media) });
       } catch (error) { dedup.release(key); console.error('[waha] message processing failed', { trackId: message.trackId, event: message.event, error: error instanceof Error ? error.message : 'unknown' }); }
       return;
+    }
+    if (event.event === 'message' || event.event === 'message.any') {
+      console.warn('[waha] message ignored by parser', { trackId: event.trackId, session: event.session, event: event.event, externalId: event.externalId });
     }
     const reaction = parseIncomingWahaReaction(request.body);
     if (reaction) {

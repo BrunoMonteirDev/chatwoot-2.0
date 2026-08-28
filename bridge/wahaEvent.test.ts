@@ -13,6 +13,7 @@ describe('WAHA webhook normalization', () => {
     expect(parseIncomingWahaMessage({ event: 'message', session: 'empresa', payload: { id: 'm1', from: '5511999999999@s.whatsapp.net', chatId: '5511999999999@c.us', body: 'oi', timestamp: 1 } })).toMatchObject({ externalId: 'm1', sourceId: 'whatsapp:5511999999999', phoneNumber: '+5511999999999', chatType: 'private' });
     expect(parseIncomingWahaMessage({ event: 'message.any', session: 'empresa', payload: { id: 'm2', from: 'abc@lid', chatId: 'abc@lid', fromMe: false, hasMedia: true, media: { data: 'YQ==', mimetype: 'image/jpeg' } } })).toMatchObject({ lid: 'abc', sourceId: 'whatsapp:lid:abc', media: { kind: 'image' } });
     expect(parseIncomingWahaMessage({ event: 'message', session: 'empresa', payload: { id: 'm3', from: '120@g.us', chatId: '120@g.us', participant: '5511@c.us', body: 'grupo' } })).toMatchObject({ chatType: 'group', sourceId: 'whatsapp:group:120@g.us', participantJid: '5511@c.us' });
+    expect(parseIncomingWahaMessage({ event: 'message', session: 'empresa', payload: { id: 'm4', from: '120@g.us', chatId: '120@g.us', pushName: 'Ana', subject: 'Vendas', body: 'grupo' } })).toMatchObject({ chatType: 'group', name: 'Vendas', groupName: 'Vendas', participantName: 'Ana' });
   });
 
   it('identifica alvo real de reaction, edit e revoke', () => {

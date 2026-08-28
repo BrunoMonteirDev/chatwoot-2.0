@@ -17,6 +17,8 @@ interface Props {
   inboxesError: string | null;
   onRefresh: () => Promise<void> | void;
   isDarkMode: boolean;
+  selectedInboxId?: number | null;
+  onOpenInbox?: (inboxId: number) => void;
 }
 
 type Screen = 'list' | 'provider' | 'create' | 'configure' | 'adopt' | 'meta' | 'waha';
@@ -38,7 +40,7 @@ const bridgeWebhookUrl = () => {
 };
 const chatwootWebhookUrl = bridgeWebhookUrl();
 
-export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inboxesStatus, inboxesError, onRefresh, isDarkMode }) => {
+export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inboxesStatus, inboxesError, onRefresh, isDarkMode, selectedInboxId = null, onOpenInbox }) => {
   const [screen, setScreen] = useState<Screen>('list');
   const [selectedInbox, setSelectedInbox] = useState<Inbox | null>(null);
   const [name, setName] = useState('');
@@ -55,6 +57,12 @@ export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inb
   const [savingMembers, setSavingMembers] = useState(false);
   const [inboxPendingDeletion, setInboxPendingDeletion] = useState<Inbox | null>(null);
   const [deletingInbox, setDeletingInbox] = useState(false);
+
+  useEffect(() => {
+    if (!selectedInboxId) return;
+    const inbox = inboxes.find(item => item.id === selectedInboxId);
+    if (inbox) { setSelectedInbox(inbox); setScreen('waha'); }
+  }, [inboxes, selectedInboxId]);
 
   const selectedInstance = selectedInbox ? instanceOf(selectedInbox) : null;
   const selectedConfiguration = selectedInbox ? whatsappConfigurationForInbox(selectedInbox) : null;
@@ -108,7 +116,7 @@ export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inb
     setCreating(true); setError(null);
     try {
       const inbox = await inboxService.createEvolutionInbox(accountId, { name: name.trim(), webhookUrl: chatwootWebhookUrl });
-      await onRefresh(); setSelectedInbox(inbox); setScreen('waha'); setName('');
+      await onRefresh(); onOpenInbox?.(inbox.id); setName('');
     } catch (cause) { setError(errorMessageForUser(cause)); }
     finally { setCreating(false); }
   };
@@ -168,13 +176,13 @@ export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inb
         const meta = metaCloudMetadataForInbox(inbox);
         const transportStatuses = transportStatusesForInbox(inbox);
         const historyLabel = meta?.meta_history_status === 'synced' ? 'Histórico sincronizado' : meta?.meta_history_status === 'importing' ? 'Histórico importando' : meta?.meta_history_status === 'ready' ? 'Histórico disponível' : meta?.meta_history_status === 'receiving' ? 'Histórico recebendo' : meta?.meta_history_status === 'waiting' ? 'Histórico aguardando autorização' : meta?.meta_history_status === 'failed' ? 'Histórico com falha' : meta?.meta_history_status === 'not_available' ? 'Histórico não autorizado' : null;
-        const action = <button type="button" onClick={() => { setSelectedInbox(inbox); setScreen('provider'); }} className="px-3 py-1.5 rounded-xl text-[11px] font-bold bg-[#00a884]/15 text-[#00a884] border border-[#00a884]/30">Gerenciar conexões</button>;
+        const action = <button type="button" onClick={() => onOpenInbox ? onOpenInbox(inbox.id) : (setSelectedInbox(inbox), setScreen('waha'))} className="px-3 py-1.5 rounded-xl text-[11px] font-bold bg-[#00a884]/15 text-[#00a884] border border-[#00a884]/30">Gerenciar inbox</button>;
         return <div key={inbox.id} className={`p-4 rounded-xl border flex items-center justify-between ${card}`}><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-[#00a884]/20 text-[#00a884] flex items-center justify-center"><Wifi className="w-5 h-5" /></div><div><h4 className="font-bold text-xs sm:text-sm">{inbox.name}</h4><p className="text-[11px] text-[#8696a0]">{configuration ? `WhatsApp · conexões: ${configuration.transports.map(transport => transport === 'meta_cloud' ? 'API oficial' : transport === 'waha' ? 'WAHA' : 'Evolution').join(' + ')}` : inbox.channelType}</p>{meta?.meta_onboarding_mode === 'coexistence' && <p className="text-[11px] text-[#8696a0]">WhatsApp Business App: {meta.meta_business_app_status === 'offboarded' ? 'reconexão necessária' : 'coexistência ativa'} · {historyLabel || 'Histórico aguardando'}</p>}{configuration && configuration.transports.length > 1 && <p className="text-[11px] text-[#8696a0]">API oficial: {transportStatuses.meta_cloud === 'connected' ? 'conectada' : transportStatuses.meta_cloud || 'não vinculada'} · API não oficial: {transportStatuses.waha || transportStatuses.evolution || 'não vinculada'}</p>}</div></div><div className="flex items-center gap-2">{action}<button type="button" onClick={() => setInboxPendingDeletion(inbox)} aria-label={`Excluir ${inbox.name}`} title="Excluir caixa de entrada" className="rounded-xl border border-red-500/30 p-2 text-red-400 hover:bg-red-500/10"><Trash2 className="h-4 w-4" /></button></div></div>;
       })}</div>
       <p className="text-[11px] text-[#8696a0]">Outros canais permanecem indisponíveis neste MVP.</p>
     </>}
     {screen === 'provider' && <div className="mx-auto grid max-w-3xl gap-4 md:grid-cols-2"><button type="button" onClick={() => setScreen('meta')} className={`rounded-2xl border p-5 text-left ${card}`}><p className="font-bold">Conectar API oficial Meta</p><p className="mt-2 text-xs text-[#8696a0]">{selectedInbox ? 'Vincula a API oficial a esta inbox. Você pode escolher coexistência durante o cadastro.' : 'Cria uma inbox com API oficial, por cadastro incorporado ou configuração manual.'}</p></button><button type="button" onClick={() => selectedInbox ? setScreen('waha') : setScreen('create')} className={`rounded-2xl border p-5 text-left ${card}`}><p className="font-bold">Conectar API não oficial</p><p className="mt-2 text-xs text-[#8696a0]">{selectedInbox ? 'Vincula uma sessão WAHA a esta mesma inbox por QR Code.' : 'Cria uma inbox e conecta uma sessão WAHA por QR Code.'} Evolution permanece disponível apenas para inboxes legadas.</p></button></div>}
-    {screen === 'meta' && accountId && <MetaCloudSetup accountId={accountId} inbox={selectedInbox} webhookUrl={chatwootWebhookUrl || ''} isDarkMode={isDarkMode} onSaved={async () => { await onRefresh(); setScreen('list'); }} />}
+    {screen === 'meta' && accountId && <MetaCloudSetup accountId={accountId} inbox={selectedInbox} webhookUrl={chatwootWebhookUrl || ''} isDarkMode={isDarkMode} onSaved={async (saved) => { await onRefresh(); onOpenInbox?.(saved.id); }} />}
     {screen === 'waha' && accountId && selectedInbox && <WahaSetup accountId={accountId} inbox={selectedInbox} webhookUrl={chatwootWebhookUrl || ''} isDarkMode={isDarkMode} onSaved={onRefresh} />}
     {screen === 'create' && <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center gap-3 text-xs">

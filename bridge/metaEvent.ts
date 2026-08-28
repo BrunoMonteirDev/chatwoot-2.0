@@ -14,6 +14,7 @@ export interface IncomingMetaMessage {
   sourceId: string;
   phoneNumber: string;
   name: string;
+  contactName?: string;
   content: string;
   media?: IncomingMetaMedia;
   quotedMessageId?: string;
@@ -152,9 +153,10 @@ export const parseMetaWebhook = (payload: unknown): { messages: IncomingMetaMess
         const content = contentFor(message, type);
         if (type !== 'text' && !media) continue;
         const quotedMessageId = text(record(message.context).id);
+        const contactName = text(record(contact.profile).name);
         messages.push({
           transport: 'meta_cloud', phoneNumberId, messageId, sourceId: `whatsapp:${from}`, phoneNumber: `+${from}`,
-          name: text(record(contact.profile).name) || from, content, ...(media ? { media } : {}),
+          name: contactName || from, ...(contactName ? { contactName } : {}), content, ...(media ? { media } : {}),
           ...(quotedMessageId ? { quotedMessageId } : {}), timestamp: timestamp(message.timestamp),
         });
       }

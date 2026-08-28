@@ -4,6 +4,7 @@ import type { AssignableAgent, Inbox } from '../domain/currentUser';
 import { errorMessageForUser } from '../integrations/chatwoot/errors';
 import { inboxService } from '../integrations/chatwoot/inboxes';
 import { wahaClient, type WahaHistoryJob, type WahaHistoryRange, type WahaQrCode, type WahaSession } from '../integrations/waha/client';
+import { MetaCloudSetup } from './MetaCloudSetup';
 
 type Props = { accountId: number; inbox: Inbox; webhookUrl: string; isDarkMode: boolean; onSaved: () => Promise<void> | void };
 const statusLabel: Record<string, string> = { STOPPED: 'Parada', STARTING: 'Iniciando', SCAN_QR_CODE: 'Aguardando QR Code', WORKING: 'Conectada', FAILED: 'Erro' };
@@ -18,7 +19,7 @@ export const WahaSetup = ({ accountId, inbox, isDarkMode, onSaved }: Props) => {
   const [qr, setQr] = useState<WahaQrCode | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'general' | 'collaborators' | 'whatsapp'>('general');
+  const [tab, setTab] = useState<'general' | 'collaborators' | 'unofficial' | 'official'>('general');
   const [inboxName, setInboxName] = useState(inbox.name);
   const [agents, setAgents] = useState<AssignableAgent[]>([]);
   const [members, setMembers] = useState<number[]>([]);
@@ -148,9 +149,9 @@ export const WahaSetup = ({ accountId, inbox, isDarkMode, onSaved }: Props) => {
   // The collaborators list is an overlay. The card must not clip it when the
   // picker opens near the bottom of the settings panel.
   return <div className={`mx-auto max-w-3xl overflow-visible rounded-2xl border ${card}`}>
-    <div className="border-b border-white/10 p-5"><h4 className="font-bold">Configurações da caixa de entrada</h4><p className="mt-1 text-xs text-[#8696a0]">Gerencie colaboradores e a conexão WhatsApp desta caixa.</p></div>
+    <div className="border-b border-white/10 p-5"><h4 className="font-bold">Configurações da caixa de entrada</h4><p className="mt-1 text-xs text-[#8696a0]">Gerencie a inbox, colaboradores e as conexões WhatsApp.</p></div>
     <div className="flex gap-1 overflow-x-auto border-b border-white/10 px-4 pt-3">
-      {([['general', 'Geral'], ['collaborators', 'Colaboradores'], ['whatsapp', 'WhatsApp']] as const).map(([value, label]) => <button key={value} type="button" onClick={() => setTab(value)} className={`whitespace-nowrap rounded-t-lg px-3 py-2 text-xs font-semibold ${tab === value ? 'bg-[#00a884] text-white' : 'text-[#8696a0] hover:bg-white/5 hover:text-[#e9edef]'}`}>{label}</button>)}
+      {([['general', 'Geral'], ['collaborators', 'Colaboradores'], ['unofficial', 'WhatsApp não oficial'], ['official', 'WhatsApp oficial']] as const).map(([value, label]) => <button key={value} type="button" onClick={() => setTab(value)} className={`whitespace-nowrap rounded-t-lg px-3 py-2 text-xs font-semibold ${tab === value ? 'bg-[#00a884] text-white' : 'text-[#8696a0] hover:bg-white/5 hover:text-[#e9edef]'}`}>{label}</button>)}
     </div>
     <div className="space-y-4 p-5">
     {error && <div className="flex gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400"><AlertCircle className="h-4 w-4 shrink-0" />{error}</div>}
@@ -168,8 +169,8 @@ export const WahaSetup = ({ accountId, inbox, isDarkMode, onSaved }: Props) => {
         <p className="mt-2 text-[11px] leading-4 text-[#8696a0]">Os agentes selecionados terão acesso às conversas desta inbox. Remova um agente para retirar o acesso.</p>
       </div>
     </section>}
-    {tab === 'whatsapp' && <section className="space-y-5">
-      <div><h5 className="font-bold">Conexão com WhatsApp</h5><p className="mt-1 text-xs text-[#8696a0]">Conecte o WhatsApp que esta caixa de entrada vai usar. A conexão é privada desta inbox.</p></div>
+    {tab === 'unofficial' && <section className="space-y-5">
+      <div><h5 className="font-bold">Conexão WhatsApp não oficial</h5><p className="mt-1 text-xs text-[#8696a0]">Conecte uma sessão WAHA por QR Code. A conexão é privada desta inbox.</p></div>
 
       <div className="rounded-xl border border-white/10 p-4">
         <div className="mb-3 flex items-start gap-3"><span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#00a884] text-xs font-bold text-white">1</span><div><p className="text-xs font-bold">Conexão desta caixa</p><p className="mt-1 text-[11px] leading-4 text-[#8696a0]">Cada caixa permite apenas uma conexão WAHA. Para usar outro número, exclua primeiro a conexão atual.</p></div></div>
@@ -193,6 +194,7 @@ export const WahaSetup = ({ accountId, inbox, isDarkMode, onSaved }: Props) => {
       {historyJob && <div className={`mt-4 rounded-xl border p-3 text-xs ${historyJob.status === 'failed' ? 'border-red-500/30 bg-red-500/10' : historyJob.status === 'completed' ? 'border-[#00a884]/30 bg-[#00a884]/10' : 'border-white/10 bg-white/5'} `}><div className="flex items-center justify-between gap-3"><p className="font-semibold">{historyJob.status === 'completed' ? 'Importação concluída' : historyJob.status === 'failed' ? 'Importação finalizada com erro' : historyJob.status === 'cancelled' ? 'Importação cancelada' : 'Importando histórico…'}</p><div className="flex items-center gap-2"><span className="text-[#8696a0]">{historyJob.processed} processadas</span>{['pending', 'running'].includes(historyJob.status) && <button type="button" onClick={() => void cancelHistoryImport()} disabled={busy} className="rounded-md border border-red-500/40 px-2 py-1 text-[11px] font-semibold text-red-400 disabled:opacity-40">Cancelar</button>}</div></div><div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-[#8696a0] sm:grid-cols-3"><span>Conversas: {historyJob.conversations}</span><span>Importadas: {historyJob.imported}</span><span>Já existentes: {historyJob.duplicates}</span><span>Ignoradas: {historyJob.skipped}</span><span>Falhas: {historyJob.failed}</span><span>Mídias: {historyJob.mediaImported}{historyJob.mediaFailed ? ` (${historyJob.mediaFailed} falhas)` : ''}</span></div>{historyJob.lastError && <p className="mt-2 text-red-400">{historyJob.lastError}</p>}</div>}
     </div></>}
     </section>}
+    {tab === 'official' && <section><MetaCloudSetup accountId={accountId} inbox={inbox} webhookUrl={webhookUrl} isDarkMode={isDarkMode} onSaved={async () => { await onSaved(); }} /></section>}
     </div>
   </div>;
 };

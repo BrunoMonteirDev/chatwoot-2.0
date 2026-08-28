@@ -14,6 +14,8 @@ describe('app routes', () => {
 
   it('maps routes for settings and primary application pages', () => {
     expect(route('/app/accounts/42/settings/caixas')).toEqual({ accountId: '42', tab: 'settings', settingsTab: 'caixas' });
+    expect(route('/app/accounts/35/settings/inboxes/193')).toEqual({ accountId: '35', tab: 'settings', settingsTab: 'caixas', settingsInboxId: '193' });
+    expect(urlForAppRoute({ accountId: '35', tab: 'settings', settingsTab: 'caixas', settingsInboxId: '193' })).toBe('/app/accounts/35/settings/inboxes/193');
     expect(route('/app/accounts/42/contacts')).toEqual({ accountId: '42', tab: 'communities' });
     expect(route('/app/accounts/42/calls')).toEqual({ accountId: '42', tab: 'calls' });
     expect(route('/unknown')).toEqual({ tab: 'chats' });

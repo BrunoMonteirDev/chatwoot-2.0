@@ -6,6 +6,7 @@ export type AppRoute = {
   conversationId?: string;
   inbox?: string;
   settingsTab?: string;
+  settingsInboxId?: string;
 };
 
 const tabForPath: Record<string, NavTab> = {
@@ -33,6 +34,8 @@ export const appRouteFromUrl = (url: Pick<URL, 'pathname' | 'searchParams'>): Ap
   const inboxList = suffix.match(/^inbox\/(\d+)\/conversations$/);
   if (accountId && inboxList) return { accountId, tab: 'chats', inbox: inboxList[1] };
   if (accountId && (suffix === '' || suffix === 'conversations')) return { accountId, tab: 'chats' };
+  const settingsInbox = accountId && suffix.match(/^settings\/(?:inboxes|caixas)\/(\d+)$/);
+  if (accountId && settingsInbox) return { accountId, tab: 'settings', settingsTab: 'caixas', settingsInboxId: settingsInbox[1] };
   const settings = accountId && suffix.match(/^settings(?:\/([^/]+))?$/);
   if (accountId && settings) return { accountId, tab: 'settings', ...(settings[1] ? { settingsTab: decodeURIComponent(settings[1]) } : {}) };
   const accountTab = accountId && tabForPath[`/${suffix}`];
@@ -55,7 +58,7 @@ export const urlForAppRoute = (route: AppRoute) => {
     pathname = route.inbox && route.inbox !== 'todas' && !route.conversationId
       ? `${base}/inbox/${encodeURIComponent(route.inbox)}`
       : `${base}${inbox}/conversations${route.conversationId ? `/${encodeURIComponent(route.conversationId)}` : ''}`;
-  } else if (route.tab === 'settings') pathname = `${base}/settings${route.settingsTab ? `/${encodeURIComponent(route.settingsTab)}` : ''}`;
+  } else if (route.tab === 'settings') pathname = route.settingsInboxId ? `${base}/settings/inboxes/${encodeURIComponent(route.settingsInboxId)}` : `${base}/settings${route.settingsTab ? `/${encodeURIComponent(route.settingsTab)}` : ''}`;
   else if (route.tab === 'status') pathname = `${base}/status`;
   else if (route.tab === 'calls') pathname = `${base}/calls`;
   else if (route.tab === 'communities') pathname = `${base}/contacts`;

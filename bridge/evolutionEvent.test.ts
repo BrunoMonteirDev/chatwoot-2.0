@@ -4,7 +4,7 @@ import { parseIncomingEvolutionEdit, parseIncomingEvolutionGroupLifecycle, parse
 describe('parseIncomingEvolutionMessage', () => {
   it('normaliza texto incoming do evento messages.upsert', () => {
     expect(parseIncomingEvolutionMessage({ event: 'messages.upsert', instance: 'cw-1-vendas', data: { key: { remoteJid: '5511999999999@s.whatsapp.net', id: 'BAE5', fromMe: false }, pushName: 'Ana', message: { conversation: 'Olá' } } }))
-      .toEqual({ instance: 'cw-1-vendas', messageId: 'BAE5', sourceId: 'whatsapp:5511999999999', remoteJid: '5511999999999@s.whatsapp.net', phoneNumber: '+5511999999999', fromMe: false, name: 'Ana', content: 'Olá' });
+      .toEqual({ instance: 'cw-1-vendas', messageId: 'BAE5', sourceId: 'whatsapp:5511999999999', remoteJid: '5511999999999@s.whatsapp.net', phoneNumber: '+5511999999999', fromMe: false, name: 'Ana', contactName: 'Ana', content: 'Olá' });
   });
 
   it('usa extendedTextMessage e identifica mensagens enviadas pelo próprio número', () => {
@@ -66,6 +66,13 @@ describe('parseIncomingEvolutionMessage', () => {
     expect(parseIncomingEvolutionMessage({ ...base, data: { ...base.data, message: { documentMessage: { mimetype: 'application/pdf', fileName: 'proposta.pdf' } } } })).toMatchObject({ media: { kind: 'document', fileName: 'proposta.pdf' } });
   });
 
+  it('aceita mídia encapsulada por mensagens temporárias ou visualização única', () => {
+    const base = { event: 'messages.upsert', instance: 'cw-1', data: { key: { remoteJid: '5511999999999@s.whatsapp.net', id: 'wrapped-image', fromMe: false }, message: { ephemeralMessage: { message: { viewOnceMessageV2: { message: { imageMessage: { mimetype: 'image/jpeg', caption: 'Imagem temporária' } } } } } } } };
+    expect(parseIncomingEvolutionMessage(base)).toMatchObject({
+      messageId: 'wrapped-image', content: 'Imagem temporária', media: { kind: 'image', mimetype: 'image/jpeg' },
+    });
+  });
+
   it('preserva fromMe em mídia para o bridge criar uma mensagem outgoing', () => {
     expect(parseIncomingEvolutionMessage({
       event: 'messages.upsert', instance: 'cw-1',
@@ -95,7 +102,7 @@ describe('parseIncomingEvolutionReaction', () => {
     })).toEqual({
       instance: 'cw-1', eventId: 'reaction-event-1', targetMessageId: 'original-1', targetFromMe: true,
       sourceId: 'whatsapp:5511999999999', remoteJid: '5511999999999@s.whatsapp.net', phoneNumber: '+5511999999999',
-      fromMe: false, name: 'Ana', senderId: 'contact:5511999999999', emoji: '😂',
+      fromMe: false, name: 'Ana', contactName: 'Ana', senderId: 'contact:5511999999999', emoji: '😂',
     });
   });
 

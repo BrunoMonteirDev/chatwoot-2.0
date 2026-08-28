@@ -11,7 +11,7 @@ export interface IncomingEvolutionMedia {
   message: Record<string, unknown>;
 }
 
-export interface IncomingEvolutionMessage { instance: string; messageId: string; sourceId: string; remoteJid: string; phoneNumber?: string; lid?: string; fromMe: boolean; name: string; content: string; chatType?: 'private' | 'group'; participantJid?: string; participantName?: string; media?: IncomingEvolutionMedia; quotedMessageId?: string; }
+export interface IncomingEvolutionMessage { instance: string; messageId: string; sourceId: string; remoteJid: string; phoneNumber?: string; lid?: string; fromMe: boolean; name: string; contactName?: string; content: string; chatType?: 'private' | 'group'; participantJid?: string; participantName?: string; media?: IncomingEvolutionMedia; quotedMessageId?: string; }
 
 export interface IncomingEvolutionReaction {
   instance: string;
@@ -24,6 +24,7 @@ export interface IncomingEvolutionReaction {
   lid?: string;
   fromMe: boolean;
   name: string;
+  contactName?: string;
   chatType?: 'private' | 'group';
   participantJid?: string;
   participantName?: string;
@@ -73,6 +74,7 @@ type EvolutionIdentity = {
   fromMe: boolean;
   sourceId: string;
   name: string;
+  contactName?: string;
   phoneNumber?: string;
   lid?: string;
   chatType?: 'private' | 'group';
@@ -108,6 +110,21 @@ const mediaFor = (data: RecordValue, image: RecordValue, audio: RecordValue, vid
   };
 };
 
+// WhatsApp wraps media when disappearing messages or view-once are enabled.
+// Evolution preserves that envelope, but the media download endpoint still
+// needs the original event `data` (not this unwrapped inner message).
+const unwrapMessage = (value: unknown): RecordValue => {
+  let message = record(value);
+  for (let depth = 0; depth < 4; depth += 1) {
+    const wrapped = [message.ephemeralMessage, message.viewOnceMessage, message.viewOnceMessageV2, message.viewOnceMessageV2Extension]
+      .map(record)
+      .find(candidate => Object.keys(record(candidate.message)).length > 0);
+    if (!wrapped) break;
+    message = record(wrapped.message);
+  }
+  return message;
+};
+
 const identityFor = (key: RecordValue, data: RecordValue, remoteJid: string): EvolutionIdentity | null => {
   const fromMe = key.fromMe === true;
   const jidNumber = remoteJid.endsWith('@s.whatsapp.net') ? remoteJid.replace(/@.+$/, '').replace(/\D/g, '') : '';
@@ -117,12 +134,14 @@ const identityFor = (key: RecordValue, data: RecordValue, remoteJid: string): Ev
   const phone = (fromMe ? [jidNumber, senderPn] : [senderPn, jidNumber]).find(value => /^\d{8,15}$/.test(value));
   const lid = remoteJid.endsWith('@lid') ? remoteJid.replace(/@.+$/, '') : undefined;
   if (!phone && !lid) return null;
+  const contactName = text(data.pushName, data.verifiedBizName, data.notifyName);
   return {
     fromMe,
     ...(phone ? { phoneNumber: `+${phone}` } : {}),
     ...(lid ? { lid } : {}),
     sourceId: phone ? `whatsapp:${phone}` : `whatsapp:lid:${lid}`,
-    name: text(data.pushName, data.verifiedBizName, data.notifyName) || phone || lid!,
+    name: contactName || phone || lid!,
+    ...(contactName ? { contactName } : {}),
   };
 };
 
@@ -146,7 +165,7 @@ export const parseIncomingEvolutionMessage = (payload: unknown): IncomingEvoluti
   const key = record(data.key);
   const remoteJid = text(key.remoteJid, data.remoteJid);
   if (!remoteJid || remoteJid === 'status@broadcast') return null;
-  const message = record(data.message);
+  const message = unwrapMessage(data.message);
   const extended = record(message.extendedTextMessage);
   const image = record(message.imageMessage);
   const audio = record(message.audioMessage);

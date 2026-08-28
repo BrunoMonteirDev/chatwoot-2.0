@@ -332,6 +332,7 @@ export default function App() {
     subtitle?: string;
   } | null>(null);
   const [selectedSettingsTab, setSelectedSettingsTab] = useState<SettingsTab>(() => isSettingsTab(initialRoute.settingsTab) ? initialRoute.settingsTab : 'conta');
+  const [selectedSettingsInboxId, setSelectedSettingsInboxId] = useState<string | null>(() => initialRoute.settingsInboxId || null);
   const [showContactsModal, setShowContactsModal] = useState<boolean>(false);
   const [showNewConversationModal, setShowNewConversationModal] = useState<boolean>(false);
   const [showNewGroupModal, setShowNewGroupModal] = useState<boolean>(false);
@@ -342,6 +343,7 @@ export default function App() {
     setActiveChatId(route.conversationId || '');
     setSelectedInbox(route.inbox || 'todas');
     if (isSettingsTab(route.settingsTab)) setSelectedSettingsTab(route.settingsTab);
+    setSelectedSettingsInboxId(route.settingsInboxId || null);
     setShowContactsModal(false);
     setShowMobileChat(Boolean(route.conversationId));
   }, []);
@@ -364,6 +366,7 @@ export default function App() {
   }, [navigate, selectedInbox]);
 
   const navigateToSettings = useCallback((tab: SettingsTab) => navigate({ tab: 'settings', settingsTab: tab }), [navigate]);
+  const navigateToSettingsInbox = useCallback((inboxId: number) => navigate({ tab: 'settings', settingsTab: 'caixas', settingsInboxId: String(inboxId) }), [navigate]);
 
   const selectInboxRoute = useCallback((inbox: string) => {
     navigate({ tab: 'chats', ...(inbox !== 'todas' ? { inbox } : {}) });
@@ -388,9 +391,9 @@ export default function App() {
     // Canonicalize legacy/local links only after authentication determines the
     // account. Every operational route is then isolated by account ID.
     if (routeAccountId !== String(currentAccount.id)) {
-      navigate({ tab: activeNavTab, ...(activeChatId ? { conversationId: activeChatId } : {}), ...(selectedInbox !== 'todas' ? { inbox: selectedInbox } : {}), ...(activeNavTab === 'settings' ? { settingsTab: selectedSettingsTab } : {}), accountId: String(currentAccount.id) }, true);
+      navigate({ tab: activeNavTab, ...(activeChatId ? { conversationId: activeChatId } : {}), ...(selectedInbox !== 'todas' ? { inbox: selectedInbox } : {}), ...(activeNavTab === 'settings' ? { settingsTab: selectedSettingsTab, ...(selectedSettingsInboxId ? { settingsInboxId: selectedSettingsInboxId } : {}) } : {}), accountId: String(currentAccount.id) }, true);
     }
-  }, [activeChatId, activeNavTab, authenticatedUser, currentAccount, navigate, routeAccountId, selectAccount, selectedInbox, selectedSettingsTab]);
+  }, [activeChatId, activeNavTab, authenticatedUser, currentAccount, navigate, routeAccountId, selectAccount, selectedInbox, selectedSettingsInboxId, selectedSettingsTab]);
 
   // Selected Chat Object
   const listChats = useMemo(() => conversations.map((conversation) => toChatListItem(conversation, inboxes)), [conversations, inboxes]);
@@ -939,6 +942,8 @@ export default function App() {
             onSelectWallpaper={(id) => setWallpaperId(id)}
             activeTab={selectedSettingsTab}
             onTabChange={navigateToSettings}
+            selectedInboxId={selectedSettingsInboxId ? Number(selectedSettingsInboxId) : null}
+            onOpenInbox={navigateToSettingsInbox}
             accountId={currentAccount?.id ?? null}
             inboxes={inboxes}
             inboxesStatus={inboxesStatus}

@@ -109,6 +109,8 @@ interface Props {
   profile?: CurrentUser | null;
   onSaveProfile?: (profile: { name: string; displayName: string; email: string; phoneNumber: string; messageSignature: string; currentPassword?: string; password?: string; passwordConfirmation?: string }) => Promise<void>;
   onResetAccessToken?: () => Promise<void>;
+  selectedInboxId?: number | null;
+  onOpenInbox?: (inboxId: number) => void;
 }
 
 export const SettingsView: React.FC<Props> = ({
@@ -129,6 +131,8 @@ export const SettingsView: React.FC<Props> = ({
   profile = null,
   onSaveProfile,
   onResetAccessToken,
+  selectedInboxId = null,
+  onOpenInbox,
 }: Props) => {
   const [internalTab, setInternalTab] = useState<SettingsTab>('conta');
   const activeTab = propActiveTab || internalTab;
@@ -841,7 +845,7 @@ export const SettingsView: React.FC<Props> = ({
 
           {/* ==================== 4. CAIXAS DE ENTRADA ==================== */}
           {activeTab === 'caixas' && (
-            <EvolutionInboxesPanel accountId={accountId} inboxes={chatwootInboxes} inboxesStatus={inboxesStatus} inboxesError={inboxesError} onRefresh={onRefreshInboxes} isDarkMode={isDarkMode} />
+            <EvolutionInboxesPanel accountId={accountId} inboxes={chatwootInboxes} inboxesStatus={inboxesStatus} inboxesError={inboxesError} onRefresh={onRefreshInboxes} isDarkMode={isDarkMode} selectedInboxId={selectedInboxId} onOpenInbox={onOpenInbox} />
           )}
 
           {/* ==================== 5. ETIQUETAS ==================== */}
