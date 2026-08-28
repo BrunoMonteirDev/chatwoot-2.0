@@ -21,7 +21,7 @@ import { bridgeMetrics } from './metrics.js';
 import { enforceRateLimit } from './rateLimit.js';
 import { wahaTransport, WahaApiError } from './waha.js';
 import { WahaSessionOwnershipError, WahaSessionStore } from './wahaSessionStore.js';
-import { normalizeWahaMessageId, parseIncomingWahaGroupLifecycle, parseIncomingWahaMessage, parseIncomingWahaMutation, parseIncomingWahaReaction, parseWahaHistoryMessage, parseWahaWebhook, type IncomingWahaMessage } from './wahaEvent.js';
+import { normalizeWahaMessageId, parseIncomingWahaGroupLifecycle, parseIncomingWahaMessage, parseIncomingWahaMutation, parseIncomingWahaReaction, parseWahaHistoryMessage, parseWahaWebhook, wahaGroupSourceId, type IncomingWahaMessage } from './wahaEvent.js';
 import { createTrackId } from './track.js';
 import { WahaHistoryStore, type WahaHistoryJob, type WahaHistoryRange } from './wahaHistoryStore.js';
 
@@ -809,7 +809,10 @@ const conversationForWahaIdentity = async (inbox: { id: number; identifier: stri
     profileSynced?.add(contact.id);
   };
   if (event.chatType === 'group') {
-    const contact = await chatwootBridge.createOrFindContact(inbox.identifier, { sourceId: event.sourceId, name: event.name, avatarUrl: event.avatarUrl });
+    const identityKeys = [`${inbox.id}:group:${event.remoteJid}`];
+    const sourceId = await identities.find(identityKeys) || event.sourceId;
+    const contact = await chatwootBridge.createOrFindContact(inbox.identifier, { sourceId, name: event.name, avatarUrl: event.avatarUrl });
+    await identities.save(identityKeys, contact.source_id);
     await syncProfile(contact);
     const conversation = await chatwootBridge.findOrCreateConversation(inbox.identifier, contact.source_id, contact.id, inbox.id);
     return { contact, conversation };
@@ -1077,8 +1080,10 @@ app.post('/webhooks/waha', (request, response) => {
       try {
         const inbox = await wahaInboxForWebhook(groupLifecycle.session);
         await chatwootBridge.withAccount(inbox.accountId, async () => {
-          const sourceId = `whatsapp:group:${encodeURIComponent(groupLifecycle.groupId)}`;
+          const identityKeys = [`${inbox.id}:group:${groupLifecycle.groupId}`];
+          const sourceId = await identities.find(identityKeys) || wahaGroupSourceId(groupLifecycle.groupId);
           const contact = await chatwootBridge.createOrFindContact(inbox.identifier, { sourceId, name: groupLifecycle.subject || groupLifecycle.groupId });
+          await identities.save(identityKeys, contact.source_id);
           await chatwootBridge.saveEvolutionGroup(contact.id, groupLifecycle.groupId, groupLifecycle.subject || groupLifecycle.groupId, { avatarUrl: groupLifecycle.avatarUrl, description: groupLifecycle.description, participants: groupLifecycle.participants, participantAction: groupLifecycle.participantAction });
           await chatwootBridge.findOrCreateConversation(inbox.identifier, contact.source_id, contact.id, inbox.id);
         });
