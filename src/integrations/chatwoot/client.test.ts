@@ -5,7 +5,7 @@ import { ChatwootApiClient } from './client';
 
 describe('ChatwootApiClient', () => {
   beforeEach(() => {
-    sessionStorage.clear();
+    sessionStorage.clear(); localStorage.clear();
     vi.stubGlobal('fetch', vi.fn());
   });
 

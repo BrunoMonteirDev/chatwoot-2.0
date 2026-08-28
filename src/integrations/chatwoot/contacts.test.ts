@@ -10,7 +10,7 @@ const contactPayload = {
 
 describe('contactService', () => {
   beforeEach(() => {
-    sessionStorage.clear();
+    sessionStorage.clear(); localStorage.clear();
     authSession.set({ accessToken: 'token', tokenType: 'Bearer', client: 'client', expiry: '1', uid: 'agent@example.test' });
     vi.stubGlobal('fetch', vi.fn());
   });

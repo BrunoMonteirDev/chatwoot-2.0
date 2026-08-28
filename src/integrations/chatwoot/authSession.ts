@@ -12,10 +12,16 @@ export const authSession = {
     if (!isBrowser()) return null;
 
     try {
-      const raw = window.sessionStorage.getItem(storageKey);
+      // A login must survive closing the browser or reopening an installed
+      // PWA. Keep a one-time migration from the old tab-only store so current
+      // sessions continue seamlessly after this release.
+      const raw = window.localStorage.getItem(storageKey) || window.sessionStorage.getItem(storageKey);
       if (!raw) return null;
       const value = JSON.parse(raw) as Partial<AuthSession>;
-      return hasRequiredFields(value) ? value : null;
+      if (!hasRequiredFields(value)) return null;
+      window.localStorage.setItem(storageKey, JSON.stringify(value));
+      window.sessionStorage.removeItem(storageKey);
+      return value;
     } catch {
       this.clear();
       return null;
@@ -24,11 +30,12 @@ export const authSession = {
 
   set(session: AuthSession): void {
     if (!isBrowser()) return;
-    window.sessionStorage.setItem(storageKey, JSON.stringify(session));
+    window.localStorage.setItem(storageKey, JSON.stringify(session));
   },
 
   clear(): void {
     if (!isBrowser()) return;
+    window.localStorage.removeItem(storageKey);
     window.sessionStorage.removeItem(storageKey);
   },
 };

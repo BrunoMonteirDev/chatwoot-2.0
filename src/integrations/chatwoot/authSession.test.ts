@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { authSession } from './authSession';
 
 describe('authSession', () => {
-  beforeEach(() => sessionStorage.clear());
+  beforeEach(() => { sessionStorage.clear(); localStorage.clear(); });
 
   it('persiste somente os cinco headers necessários para a sessão Devise', () => {
     authSession.set({ accessToken: 'a', tokenType: 'Bearer', client: 'c', expiry: '1', uid: 'u@example.test' });
