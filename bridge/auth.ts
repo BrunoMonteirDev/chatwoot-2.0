@@ -11,7 +11,10 @@ const requestedAccountId = (request: express.Request) => {
 };
 
 const sessionHeaders = (request: express.Request) => {
-  const headers = new Headers({ Accept: 'application/json' });
+  // The bridge reaches Rails through Docker HTTP while the public request is
+  // HTTPS through Caddy. Preserve that scheme so FORCE_SSL does not redirect
+  // the token validation request to an unavailable internal TLS endpoint.
+  const headers = new Headers({ Accept: 'application/json', 'X-Forwarded-Proto': 'https', 'X-Forwarded-Ssl': 'on' });
   for (const name of SESSION_HEADERS) {
     const value = request.header(name);
     if (!value) return null;
