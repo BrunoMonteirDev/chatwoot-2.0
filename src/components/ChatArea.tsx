@@ -1649,6 +1649,7 @@ export const ChatArea: React.FC<Props> = ({
                   isMe ? 'items-end' : 'items-start'
                 }`}
               >
+                <div className="flex items-end gap-1.5">
                 <div
                   onContextMenu={(e) => handleMessageContextMenu(e, msg)}
                   className={`max-w-[85%] sm:max-w-[75%] lg:max-w-[65%] w-fit rounded-lg px-3 py-1.5 shadow-xs relative group border select-none ${
@@ -1828,6 +1829,18 @@ export const ChatArea: React.FC<Props> = ({
                       )}
                     </div>
                   )}
+                </div>
+                {isMe && !msg.isPrivate && msg.origin !== 'mobile' && msg.senderName && (
+                  <span
+                    title={`${msg.senderName}${msg.senderEmail ? `\n${msg.senderEmail}` : ''}`}
+                    aria-label={`Enviado por ${msg.senderName}${msg.senderEmail ? `, ${msg.senderEmail}` : ''}`}
+                    className={`grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border text-[10px] font-bold shadow-sm ${
+                      isDarkMode ? 'border-[#3b4a54] bg-[#1f2c34] text-[#d9fdd3]' : 'border-[#d1d7db] bg-white text-[#008069]'
+                    }`}
+                  >
+                    {msg.senderAvatarUrl ? <img src={msg.senderAvatarUrl} alt="" className="h-full w-full object-cover" /> : msg.senderName.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toUpperCase()}
+                  </span>
+                )}
                 </div>
                 {msg.reactions && msg.reactions.length > 0 && (
                   <MessageReactions reactions={msg.reactions} isDarkMode={isDarkMode} onSelect={(emoji) => void handleReaction(msg, emoji)} />

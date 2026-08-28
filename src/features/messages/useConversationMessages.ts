@@ -105,6 +105,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
       status: 'sending',
       echoId,
       senderName: null,
+      senderEmail: null,
       senderAvatarUrl: null,
       origin: isPrivate ? null : 'platform',
       attachments: [],

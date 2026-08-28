@@ -23,6 +23,8 @@ export const toChatMessages = (items: ConversationMessage[]): Message[] => items
   senderName: typeof message.contentAttributes.whatsapp_participant_name === 'string'
     ? message.contentAttributes.whatsapp_participant_name
     : message.senderName || undefined,
+  senderEmail: message.senderEmail || undefined,
+  senderAvatarUrl: message.senderAvatarUrl || undefined,
   origin: message.origin || undefined,
   text: message.content || undefined,
   time: new Date(message.createdAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),

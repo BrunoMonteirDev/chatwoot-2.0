@@ -36,6 +36,30 @@ const wahaSessions = new WahaSessionStore(config.wahaSessionOwnershipFile);
 const wahaHistory = new WahaHistoryStore(config.wahaHistoryFile);
 const historyImports = new Map<number, Promise<void>>();
 const wahaHistoryImports = new Map<number, Promise<void>>();
+// WAHA can emit its own `fromMe` webhook before the send endpoint returns the
+// provider message id. During that small window, Chatwoot still owns the
+// outgoing bubble and the echo must not become a second "mobile" bubble.
+type PendingWahaOutgoing = { session: string; destination: string; content: string; media: boolean; expiresAt: number };
+const pendingWahaOutgoing = new Map<string, PendingWahaOutgoing>();
+const wahaDestination = (value: string) => value.endsWith('@g.us') ? value : value.replace(/\D/g, '');
+const queueWahaOutgoing = (session: string, destination: string, content: string, media: boolean) => {
+  const key = `${session}:${randomUUID()}`;
+  pendingWahaOutgoing.set(key, { session, destination: wahaDestination(destination), content: content.trim(), media, expiresAt: Date.now() + 30_000 });
+  return key;
+};
+const consumePendingWahaOutgoing = (session: string, message: { remoteJid: string; content: string; media?: unknown }) => {
+  const destination = wahaDestination(message.remoteJid);
+  const content = message.content.trim();
+  const media = Boolean(message.media);
+  for (const [key, pending] of pendingWahaOutgoing) {
+    if (pending.expiresAt < Date.now()) { pendingWahaOutgoing.delete(key); continue; }
+    if (pending.session === session && pending.destination === destination && pending.content === content && pending.media === media) {
+      pendingWahaOutgoing.delete(key);
+      return true;
+    }
+  }
+  return false;
+};
 app.use(express.json({ limit: '2mb', verify: (request, _response, buffer) => { (request as express.Request & { rawBody?: string }).rawBody = buffer.toString('utf8'); } }));
 app.use(bridgeCors);
 app.get('/health', (_request, response) => response.json({ ok: true, redis: bridgeRedis.enabled ? 'configured' : 'local-development', metrics: bridgeMetrics.snapshot() }));
@@ -1068,6 +1092,11 @@ app.post('/webhooks/waha', (request, response) => {
       if (await dedup.hasOrLock(key)) return;
       try {
         const inbox = await wahaInboxForWebhook(message.session);
+        if (message.fromMe && consumePendingWahaOutgoing(message.session, message)) {
+          await dedup.commit(key);
+          console.info('[waha] platform echo ignored', { session: message.session, messageId: message.externalId });
+          return;
+        }
         await chatwootBridge.withAccount(inbox.accountId, async () => {
         const { contact, conversation } = await conversationForWahaIdentity(inbox, message);
         if (message.chatType === 'group') await chatwootBridge.saveEvolutionGroup(contact.id, message.remoteJid, message.name, { participants: message.participantJid ? [{ jid: message.participantJid, name: message.participantName }] : undefined });
@@ -1403,12 +1432,19 @@ app.post('/webhooks/chatwoot', async (request, response) => {
         const quoted = parseExternalMessageId(event.quotedExternalId);
         const replyTo = quoted?.provider === 'waha' ? quoted.id : undefined;
         const trackId = createTrackId();
+        const pendingKey = queueWahaOutgoing(session, event.number, event.content, event.attachments.length > 0);
         let sentMessage = null;
-        if (event.attachments.length) for (const [index, attachment] of event.attachments.entries()) sentMessage ||= await wahaTransport.sendMedia(session, event.number, attachment, index === 0 ? event.content : '', replyTo);
-        else sentMessage = await wahaTransport.sendText(session, event.number, event.content, replyTo);
+        try {
+          if (event.attachments.length) for (const [index, attachment] of event.attachments.entries()) sentMessage ||= await wahaTransport.sendMedia(session, event.number, attachment, index === 0 ? event.content : '', replyTo);
+          else sentMessage = await wahaTransport.sendText(session, event.number, event.content, replyTo);
+        } catch (error) {
+          pendingWahaOutgoing.delete(pendingKey);
+          throw error;
+        }
         if (!sentMessage) throw new Error('WAHA não retornou o ID da mensagem enviada.');
         const providerMessageId = normalizeWahaMessageId(sentMessage.messageId);
         await chatwootBridge.updateWhatsAppMessageTransport(event.conversationId, event.messageId, { sourceId: externalMessageId('waha', providerMessageId), transport: 'waha', remoteJid: sentMessage.chatId || event.number, fromMe: true });
+        pendingWahaOutgoing.delete(pendingKey);
         await dedup.commit(externalMessageId('waha', providerMessageId)); await dedup.commit(dedupId);
         console.info('[waha] outgoing message accepted', { trackId, inboxId: event.inboxId, messageId: event.messageId });
         return response.status(200).json({ ok: true, trackId });

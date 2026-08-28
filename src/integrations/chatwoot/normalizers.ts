@@ -167,6 +167,7 @@ export const normalizeMessage = (message: ChatwootMessageDto): ConversationMessa
     echoId: message.echo_id,
     sourceId: message.source_id ?? null,
     senderName: message.sender?.available_name || message.sender?.name || null,
+    senderEmail: message.sender?.email || null,
     senderAvatarUrl: message.sender?.thumbnail || null,
     origin: message.content_attributes?.whatsapp_origin === 'mobile' || message.content_attributes?.evolution_origin === 'mobile'
       ? 'mobile'

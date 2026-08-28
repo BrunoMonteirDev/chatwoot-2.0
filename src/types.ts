@@ -46,6 +46,8 @@ export interface Message {
   id: string;
   sender: 'me' | 'them';
   senderName?: string;
+  senderEmail?: string;
+  senderAvatarUrl?: string;
   origin?: 'platform' | 'mobile';
   text?: string;
   time: string;

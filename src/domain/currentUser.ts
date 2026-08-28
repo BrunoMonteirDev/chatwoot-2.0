@@ -145,6 +145,7 @@ export interface ConversationMessage {
   sourceId?: string | null;
   error?: string | null;
   senderName: string | null;
+  senderEmail?: string | null;
   senderAvatarUrl: string | null;
   origin: 'platform' | 'mobile' | null;
   attachments: ConversationAttachment[];
