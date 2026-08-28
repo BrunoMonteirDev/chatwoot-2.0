@@ -78,6 +78,7 @@ interface Props {
   onRetryInboxes?: () => void;
   isSuperAdmin?: boolean;
   onOpenSuperAdmin?: () => void;
+  systemPermissions?: string[];
 }
 
 export const NavRail: React.FC<Props> = ({
@@ -103,6 +104,7 @@ export const NavRail: React.FC<Props> = ({
   onRetryInboxes,
   isSuperAdmin = false,
   onOpenSuperAdmin,
+  systemPermissions = [],
 }) => {
   const [isExpanded, setIsExpanded] = useState(true);
   const [expandedWidth, setExpandedWidth] = useState<number>(() => {
@@ -150,6 +152,23 @@ export const NavRail: React.FC<Props> = ({
   const [isConversasOpen, setIsConversasOpen] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(true);
   const [hoveredFlyout, setHoveredFlyout] = useState<string | null>(null);
+  const canManage = (permission: string) => systemPermissions.includes('administrator') || systemPermissions.includes(permission);
+  const settingsMenuItems = [
+    { id: 'perfil', label: 'Perfil', icon: <User className="w-3.5 h-3.5" /> },
+    { id: 'conta', label: 'Conta', icon: <Building className="w-3.5 h-3.5" />, permission: 'account_settings_manage' },
+    { id: 'agentes', label: 'Agentes', icon: <UserCheck className="w-3.5 h-3.5" />, permission: 'agents_manage' },
+    { id: 'times', label: 'Times', icon: <Users className="w-3.5 h-3.5" />, permission: 'teams_manage' },
+    { id: 'caixas', label: 'Caixas de Entrada', icon: <Inbox className="w-3.5 h-3.5" />, permission: 'inboxes_manage' },
+    { id: 'etiquetas', label: 'Etiquetas', icon: <Tag className="w-3.5 h-3.5" />, permission: 'labels_manage' },
+    { id: 'atributos', label: 'Atributos', icon: <Code className="w-3.5 h-3.5" />, permission: 'account_settings_manage' },
+    { id: 'automacao', label: 'Automação', icon: <Repeat className="w-3.5 h-3.5" />, permission: 'account_settings_manage' },
+    { id: 'macros', label: 'Macros', icon: <Sliders className="w-3.5 h-3.5" />, permission: 'account_settings_manage' },
+    { id: 'respostas', label: 'Respostas Prontas', icon: <MessageSquareQuote className="w-3.5 h-3.5" />, permission: 'canned_responses_manage' },
+    { id: 'agendadas', label: 'Mensagens Agendadas', icon: <Clock className="w-3.5 h-3.5" />, permission: 'account_settings_manage' },
+    { id: 'integracoes', label: 'Integrações e Apps', icon: <Plug className="w-3.5 h-3.5" />, permission: 'integrations_manage' },
+    { id: 'auditoria', label: 'Registros de Auditoria', icon: <Scroll className="w-3.5 h-3.5" />, permission: 'audit_logs_view' },
+    { id: 'permissoes', label: 'Permissões', icon: <ShieldCheck className="w-3.5 h-3.5" />, permission: 'agents_manage' },
+  ].filter(item => !item.permission || canManage(item.permission));
   const flyoutTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleMouseEnterFlyout = (key: string) => {
@@ -1170,22 +1189,7 @@ export const NavRail: React.FC<Props> = ({
                 </div>
 
                 <div className="space-y-0.5 overflow-y-auto pr-1 flex-1 min-h-0">
-                  {[
-                    { id: 'perfil', label: 'Perfil', icon: <User className="w-3.5 h-3.5" /> },
-                    { id: 'conta', label: 'Conta', icon: <Building className="w-3.5 h-3.5" /> },
-                    { id: 'agentes', label: 'Agentes', icon: <UserCheck className="w-3.5 h-3.5" /> },
-                    { id: 'times', label: 'Times', icon: <Users className="w-3.5 h-3.5" /> },
-                    { id: 'caixas', label: 'Caixas de Entrada', icon: <Inbox className="w-3.5 h-3.5" /> },
-                    { id: 'etiquetas', label: 'Etiquetas', icon: <Tag className="w-3.5 h-3.5" /> },
-                    { id: 'atributos', label: 'Atributos', icon: <Code className="w-3.5 h-3.5" /> },
-                    { id: 'automacao', label: 'Automação', icon: <Repeat className="w-3.5 h-3.5" /> },
-                    { id: 'macros', label: 'Macros', icon: <Sliders className="w-3.5 h-3.5" /> },
-                    { id: 'respostas', label: 'Respostas Prontas', icon: <MessageSquareQuote className="w-3.5 h-3.5" /> },
-                    { id: 'agendadas', label: 'Mensagens Agendadas', icon: <Clock className="w-3.5 h-3.5" /> },
-                    { id: 'integracoes', label: 'Integrações e Apps', icon: <Plug className="w-3.5 h-3.5" /> },
-                    { id: 'auditoria', label: 'Registros de Auditoria', icon: <Scroll className="w-3.5 h-3.5" /> },
-                    { id: 'permissoes', label: 'Permissões', icon: <ShieldCheck className="w-3.5 h-3.5" /> },
-                  ].map((item) => {
+                  {settingsMenuItems.map((item) => {
                     const isSelected = activeTab === 'settings' && selectedSettingsTab === item.id;
                     return (
                       <button
@@ -1220,22 +1224,7 @@ export const NavRail: React.FC<Props> = ({
             {/* Sub-items list (Only in expanded mode & when open) */}
             {isExpanded && isSettingsOpen && (
               <div className="pl-3 border-l border-white/10 my-1 space-y-0.5 ml-3.5">
-                {[
-                  { id: 'perfil', label: 'Perfil', icon: <User className="w-3.5 h-3.5" /> },
-                  { id: 'conta', label: 'Conta', icon: <Building className="w-3.5 h-3.5" /> },
-                  { id: 'agentes', label: 'Agentes', icon: <UserCheck className="w-3.5 h-3.5" /> },
-                  { id: 'times', label: 'Times', icon: <Users className="w-3.5 h-3.5" /> },
-                  { id: 'caixas', label: 'Caixas de Entrada', icon: <Inbox className="w-3.5 h-3.5" /> },
-                  { id: 'etiquetas', label: 'Etiquetas', icon: <Tag className="w-3.5 h-3.5" /> },
-                  { id: 'atributos', label: 'Atributos', icon: <Code className="w-3.5 h-3.5" /> },
-                  { id: 'automacao', label: 'Automação', icon: <Repeat className="w-3.5 h-3.5" /> },
-                  { id: 'macros', label: 'Macros', icon: <Sliders className="w-3.5 h-3.5" /> },
-                  { id: 'respostas', label: 'Respostas Prontas', icon: <MessageSquareQuote className="w-3.5 h-3.5" /> },
-                  { id: 'agendadas', label: 'Mensagens Agendadas', icon: <Clock className="w-3.5 h-3.5" /> },
-                  { id: 'integracoes', label: 'Integrações e Apps', icon: <Plug className="w-3.5 h-3.5" /> },
-                  { id: 'auditoria', label: 'Registros de Auditoria', icon: <Scroll className="w-3.5 h-3.5" /> },
-                  { id: 'permissoes', label: 'Permissões', icon: <ShieldCheck className="w-3.5 h-3.5" /> },
-                ].map((item) => {
+                {settingsMenuItems.map((item) => {
                   const isSelected = activeTab === 'settings' && selectedSettingsTab === item.id;
                   return (
                     <button

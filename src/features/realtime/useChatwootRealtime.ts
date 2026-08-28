@@ -10,6 +10,7 @@ interface RealtimeHandlers {
   onUnreadInvalidated: () => void;
   onReconnect: () => void;
   onContact: (contact: ContactProfile) => void;
+  onAccessChanged: () => void;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -34,7 +35,14 @@ export const useChatwootRealtime = (
     client.onStatusChange = setConnectionStatus;
     client.onReconnect = () => handlersRef.current.onReconnect();
     client.onEvent = ({ event, data }: RealtimeEvent) => {
-      if (numberValue(data.account_id) !== account?.id) return;
+      // This websocket is already subscribed to one account. Conversation and
+      // cache-invalidation payloads do not carry account_id, so filtering by it
+      // here silently discarded assignment and permission updates.
+      if (numberValue(data.account_id) !== undefined && numberValue(data.account_id) !== account?.id) return;
+      if (event === 'account.cache_invalidated') {
+        handlersRef.current.onAccessChanged();
+        return;
+      }
       if (event === 'message.created' || event === 'message.updated') {
         if (numberValue(data.conversation_id) === undefined) return;
         const message = normalizeMessage(data as unknown as ChatwootMessageDto);

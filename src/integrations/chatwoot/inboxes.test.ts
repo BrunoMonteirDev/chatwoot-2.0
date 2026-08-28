@@ -55,7 +55,7 @@ describe('inboxService', () => {
     const inbox = { id: 5, name: 'WhatsApp', avatarUrl: null, channelType: 'Channel::Api', channelId: 1, webhookUrl: null, inboxIdentifier: 'token', additionalAttributes: { whatsapp_transports: ['meta_cloud'], meta_waba_id: 'waba', meta_phone_number_id: 'phone' } };
     await inboxService.saveWhatsAppTransport(12, inbox, 'evolution', { evolution_provider: 'evolution', evolution_instance_name: 'cw-x' });
     const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
-    expect(body.channel.additional_attributes).toMatchObject({ whatsapp_mode: 'hybrid', whatsapp_transports: ['meta_cloud', 'evolution'], meta_waba_id: 'waba', evolution_instance_name: 'cw-x' });
+    expect(body.channel.additional_attributes).toMatchObject({ whatsapp_mode: 'official', whatsapp_transports: ['meta_cloud', 'evolution'], meta_waba_id: 'waba', evolution_instance_name: 'cw-x' });
     expect(JSON.stringify(body)).not.toContain('accessToken');
   });
 

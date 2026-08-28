@@ -143,6 +143,8 @@ export interface ChatwootAgentPermissionAssignmentDto {
   permission_profile_id?: number | null;
   inboxes: Array<{ inbox_id: number; inbox_name: string; permission_profile_id?: number | null }>;
 }
+export interface ChatwootAutomationRuleDto { id: number; name: string; description?: string | null; event_name: string; active: boolean; conditions: Array<{ attribute_key: string; filter_operator: string; query_operator?: 'AND' | 'OR' | ''; values?: string[] }>; actions: Array<{ action_name: string; action_params?: Array<string | Record<string, unknown>> }>; created_on: number; }
+export interface ChatwootAutomationRulesResponse { payload: ChatwootAutomationRuleDto[]; }
 export interface ChatwootAssignableAgentsResponse { payload: ChatwootAgentDto[]; }
 export interface ChatwootTeamDto { id: number; name: string; }
 export interface ChatwootLabelDto { id: number; title: string; color?: string | null; }

@@ -4,7 +4,7 @@ export const WHATSAPP_TRANSPORTS = ['evolution', 'waha', 'meta_cloud'] as const;
 export type WhatsAppTransport = typeof WHATSAPP_TRANSPORTS[number];
 // Kept as an alias for the previous public integration API.
 export type WhatsAppProvider = WhatsAppTransport;
-export const WHATSAPP_MODES = ['official', 'web', 'hybrid'] as const;
+export const WHATSAPP_MODES = ['official', 'web'] as const;
 export type WhatsAppMode = typeof WHATSAPP_MODES[number];
 export const WHATSAPP_TRANSPORT_STATUSES = ['connected', 'disconnected', 'pending'] as const;
 export type WhatsAppTransportStatus = typeof WHATSAPP_TRANSPORT_STATUSES[number];
@@ -37,7 +37,9 @@ export const whatsappConfigurationForInbox = (inbox: Inbox): WhatsAppInboxConfig
   const attributes = inbox.additionalAttributes;
   const transports = transportsFor(attributes);
   if (!transports.length) return null;
-  const mode: WhatsAppMode = transports.length > 1 ? 'hybrid' : transports[0] === 'meta_cloud' ? 'official' : 'web';
+  // Uma inbox pode conter várias conexões. Isso não cria outro tipo de inbox:
+  // a API oficial apenas prevalece como conexão principal quando estiver presente.
+  const mode: WhatsAppMode = transports.includes('meta_cloud') ? 'official' : 'web';
   const hasMeta = transports.includes('meta_cloud') && typeof attributes.meta_waba_id === 'string' && typeof attributes.meta_phone_number_id === 'string';
   return {
     mode, transports,

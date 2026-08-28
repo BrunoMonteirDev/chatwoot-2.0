@@ -1,10 +1,10 @@
-import type { AgentPermissionAssignment, AssignableAgent, ConversationTeam, CustomRole, Inbox, PermissionProfile } from '../../domain/currentUser';
+import type { AgentPermissionAssignment, AssignableAgent, AutomationAction, AutomationCondition, AutomationRule, ConversationTeam, CustomRole, Inbox, PermissionProfile } from '../../domain/currentUser';
 import type { EvolutionInboxMetadata } from '../evolution/inbox';
 import type { MetaCloudInboxMetadata } from '../whatsapp/provider';
 import type { WhatsAppTransport } from '../whatsapp/provider';
 import { chatwootApiClient } from './client';
 import { normalizeAssignableAgent, normalizeCustomRole, normalizeInbox, normalizeTeam } from './normalizers';
-import type { ChatwootAgentDto, ChatwootAgentPermissionAssignmentDto, ChatwootCustomRoleDto, ChatwootInboxesResponse, ChatwootInboxDto, ChatwootPermissionProfileDto, ChatwootTeamDto } from './types';
+import type { ChatwootAgentDto, ChatwootAgentPermissionAssignmentDto, ChatwootAutomationRuleDto, ChatwootAutomationRulesResponse, ChatwootCustomRoleDto, ChatwootInboxesResponse, ChatwootInboxDto, ChatwootPermissionProfileDto, ChatwootTeamDto } from './types';
 
 const root = (accountId: number) => `/api/v1/accounts/${accountId}`;
 
@@ -13,6 +13,7 @@ export interface SaveAgentParams { name: string; email?: string; role: 'agent' |
 export interface SaveCustomRoleParams { name: string; description: string; permissions: string[]; }
 export interface SavePermissionProfileParams { name: string; description: string; kind: 'inbox' | 'system'; inboxPermissions: string[]; systemPermissions: string[]; }
 const normalizePermissionProfile = (dto: ChatwootPermissionProfileDto): PermissionProfile => ({ id: dto.id, name: dto.name, description: dto.description || null, kind: dto.kind || 'inbox', inboxPermissions: dto.inbox_permissions || [], systemPermissions: dto.system_permissions || [], isDefault: Boolean(dto.default) });
+const normalizeAutomationRule = (dto: ChatwootAutomationRuleDto): AutomationRule => ({ id: dto.id, name: dto.name, description: dto.description || null, eventName: dto.event_name, active: dto.active, createdAt: dto.created_on, conditions: dto.conditions.map(item => ({ attributeKey: item.attribute_key, filterOperator: item.filter_operator, queryOperator: item.query_operator || '', values: item.values || [] })), actions: dto.actions.map(item => { const params = item.action_params || []; if (item.action_name === 'send_webhook_event' && typeof params[0] === 'string' && params[0].trim().startsWith('{')) { try { return { actionName: item.action_name, actionParams: [JSON.parse(params[0])] }; } catch { /* Preserve malformed legacy values so they can be corrected in the editor. */ } } return { actionName: item.action_name, actionParams: params }; }) });
 
 export const inboxService = {
   async list(accountId: number): Promise<Inbox[]> {
@@ -48,7 +49,7 @@ export const inboxService = {
     const current = inbox.additionalAttributes;
     const declared = Array.isArray(current.whatsapp_transports) ? current.whatsapp_transports.filter((item): item is WhatsAppTransport => item === 'evolution' || item === 'waha' || item === 'meta_cloud') : [];
     const transports = [...new Set([...declared, ...(current.evolution_provider === 'evolution' ? ['evolution' as const] : []), ...(current.whatsapp_provider === 'meta_cloud' ? ['meta_cloud' as const] : []), transport])];
-    const mode = transports.length > 1 ? 'hybrid' : transports[0] === 'meta_cloud' ? 'official' : 'web';
+    const mode = transports.includes('meta_cloud') ? 'official' : 'web';
     const response = await chatwootApiClient.patch<ChatwootInboxDto>(`${root(accountId)}/inboxes/${inbox.id}`, {
       channel: { additional_attributes: { ...current, ...patch, whatsapp_mode: mode, whatsapp_transports: transports }, ...(webhookUrl ? { webhook_url: webhookUrl } : {}) },
     });
@@ -135,6 +136,17 @@ export const inboxService = {
     const response = await chatwootApiClient.get<ChatwootTeamDto[]>(`${root(accountId)}/teams`);
     return response.map(normalizeTeam);
   },
+
+  async listAutomationRules(accountId: number): Promise<AutomationRule[]> {
+    const response = await chatwootApiClient.get<ChatwootAutomationRulesResponse>(`${root(accountId)}/automation_rules`);
+    return response.payload.map(normalizeAutomationRule);
+  },
+  async saveAutomationRule(accountId: number, rule: Omit<AutomationRule, 'id' | 'createdAt'> & { id?: number }): Promise<AutomationRule> {
+    const payload = { name: rule.name, description: rule.description, event_name: rule.eventName, active: rule.active, conditions: rule.conditions.map((item: AutomationCondition) => ({ attribute_key: item.attributeKey, filter_operator: item.filterOperator, query_operator: item.queryOperator, values: item.values })), actions: rule.actions.map((item: AutomationAction) => ({ action_name: item.actionName, action_params: item.actionName === 'send_webhook_event' && typeof item.actionParams[0] === 'object' ? [JSON.stringify(item.actionParams[0])] : item.actionParams })) };
+    const response = rule.id ? await chatwootApiClient.patch<{ payload: ChatwootAutomationRuleDto }>(`${root(accountId)}/automation_rules/${rule.id}`, payload) : await chatwootApiClient.post<ChatwootAutomationRuleDto>(`${root(accountId)}/automation_rules`, payload);
+    return normalizeAutomationRule('payload' in response ? response.payload : response);
+  },
+  deleteAutomationRule(accountId: number, id: number): Promise<void> { return chatwootApiClient.delete(`${root(accountId)}/automation_rules/${id}`); },
 
   async listMembers(accountId: number, inboxId: number): Promise<AssignableAgent[]> {
     const response = await chatwootApiClient.get<{ payload: ChatwootAgentDto[] }>(`${root(accountId)}/inbox_members/${inboxId}`);

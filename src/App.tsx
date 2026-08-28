@@ -49,6 +49,7 @@ import { toContactListItem } from './features/contacts/toContactListItem';
 import { conversationService } from './integrations/chatwoot/conversations';
 import { messageService } from './integrations/chatwoot/messages';
 import { authService } from './integrations/chatwoot/auth';
+import { browserNotifications } from './features/notifications/browserNotifications';
 import type { ConversationMessage } from './domain/currentUser';
 import { appRouteFromUrl, urlForAppRoute, type AppRoute } from './routing/appRoute';
 
@@ -424,6 +425,9 @@ export default function App() {
     onMessage: (message: ConversationMessage, unreadCount?: number, lastActivityAt?: number) => {
       applyRealtimeMessage(message, unreadCount, lastActivityAt);
       messageHistory.upsertRealtimeMessage(message);
+      if (message.kind === 'incoming' && currentAccount) {
+        void browserNotifications.show({ title: message.senderName || 'Nova mensagem', body: message.content || (message.attachments.length ? 'Enviou um anexo' : 'Nova mensagem'), url: `/app/accounts/${currentAccount.id}/conversations/${message.conversationId}` });
+      }
     },
     // message.created already contains the new unread count. Reloading the
     // entire list here remounted the conversation and forced the "Minhas" tab.
@@ -432,13 +436,17 @@ export default function App() {
       void retryConversations();
       void messageHistory.retry();
     },
+    onAccessChanged: () => {
+      void retryBootstrap();
+      void retryConversations();
+    },
     onContact: (contact) => {
       contactDetails.applyRealtimeUpdate(contact);
       if (selectedConversation?.contactId === contact.id && selectedConversationId) {
         applyConversationUpdate(selectedConversationId, { contactName: contact.name, contactId: contact.id });
       }
     },
-  }), [applyConversationUpdate, applyRealtimeMessage, contactDetails.applyRealtimeUpdate, messageHistory.retry, messageHistory.upsertRealtimeMessage, retryConversations, selectedConversation?.contactId, selectedConversationId, upsertRealtimeConversation]);
+  }), [applyConversationUpdate, applyRealtimeMessage, contactDetails.applyRealtimeUpdate, currentAccount, messageHistory.retry, messageHistory.upsertRealtimeMessage, retryBootstrap, retryConversations, selectedConversation?.contactId, selectedConversationId, upsertRealtimeConversation]);
   const { connectionStatus: realtimeConnectionStatus, typing } = useChatwootRealtime(authenticatedUser, currentAccount, selectedConversationId, realtimeHandlers);
 
   useEffect(() => {
@@ -868,6 +876,7 @@ export default function App() {
           onLogout={() => void logout()}
           isSuperAdmin={authenticatedUser?.isSuperAdmin}
           onOpenSuperAdmin={() => window.location.assign(superAdminUrl)}
+          systemPermissions={currentAccount?.permissions}
           onNewChatClick={() => {
             setShowNewConversationModal(true);
             setIsSidebarCollapsed(false);

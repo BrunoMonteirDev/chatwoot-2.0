@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import { LoaderCircle, MessageCircle } from 'lucide-react';
+import { LoaderCircle } from 'lucide-react';
 import { errorMessageForUser } from '../../integrations/chatwoot/errors';
 import { useAuth } from '../../features/auth/AuthContext';
 
@@ -49,8 +49,8 @@ export const LoginScreen = () => {
     <main className="min-h-screen bg-[#0b141a] text-slate-100 flex items-center justify-center p-5">
       <section className="w-full max-w-md rounded-2xl border border-white/10 bg-[#111b21] p-7 shadow-2xl">
         <div className="mb-8 flex items-center gap-3">
-          <div className="rounded-full bg-[#25d366] p-3 text-[#0b141a]"><MessageCircle size={26} /></div>
-          <div><h1 className="text-xl font-semibold">Atendimento</h1><p className="text-sm text-slate-400">Entre com sua conta Chatwoot</p></div>
+          <img src="/icons/Captura%20de%20tela%20de%202026-08-28%2013-59-03.svg" alt="Kopla" className="h-14 w-14 rounded-xl object-cover" />
+          <div><h1 className="text-xl font-semibold">Kopla Chat</h1><p className="text-sm text-slate-400">Entre com sua conta Kopla</p></div>
         </div>
         {!mfaToken ? <form onSubmit={onSubmit} className="space-y-4">
           <label className="block text-sm text-slate-300">E-mail

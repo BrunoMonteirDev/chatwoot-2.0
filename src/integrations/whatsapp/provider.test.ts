@@ -10,10 +10,10 @@ describe('WhatsApp providers', () => {
     expect(whatsappConfigurationForInbox(legacy)).toMatchObject({ mode: 'web', transports: ['evolution'] });
   });
 
-  it('normaliza Evolution nova, Meta oficial e inbox híbrida', () => {
+  it('normaliza conexões não oficiais e oficiais na mesma inbox', () => {
     expect(whatsappConfigurationForInbox({ ...inbox, additionalAttributes: { whatsapp_provider: 'evolution', whatsapp_transports: ['evolution'], evolution_provider: 'evolution' } })).toMatchObject({ mode: 'web', transports: ['evolution'] });
     expect(whatsappConfigurationForInbox({ ...inbox, additionalAttributes: { whatsapp_provider: 'meta_cloud', meta_waba_id: 'waba', meta_phone_number_id: 'phone' } })).toMatchObject({ mode: 'official', transports: ['meta_cloud'] });
-    expect(whatsappConfigurationForInbox({ ...inbox, additionalAttributes: { whatsapp_transports: ['meta_cloud', 'evolution'], meta_waba_id: 'waba', meta_phone_number_id: 'phone', evolution_instance_name: 'cw-x' } })).toMatchObject({ mode: 'hybrid', transports: ['meta_cloud', 'evolution'], evolutionInstanceName: 'cw-x' });
+    expect(whatsappConfigurationForInbox({ ...inbox, additionalAttributes: { whatsapp_transports: ['meta_cloud', 'evolution'], meta_waba_id: 'waba', meta_phone_number_id: 'phone', evolution_instance_name: 'cw-x' } })).toMatchObject({ mode: 'official', transports: ['meta_cloud', 'evolution'], evolutionInstanceName: 'cw-x' });
     expect(whatsappConfigurationForInbox({ ...inbox, additionalAttributes: { whatsapp_transports: ['waha'], waha_session_name: 'empresa' } })).toMatchObject({ mode: 'web', transports: ['waha'], wahaSessionName: 'empresa' });
   });
 
@@ -38,9 +38,9 @@ describe('WhatsApp providers', () => {
     expect(transportStatusesForInbox(hybrid)).toEqual({ meta_cloud: 'connected', evolution: 'disconnected' });
   });
 
-  it('mantém coexistência Meta independente do modo híbrido de transports', () => {
+  it('mantém coexistência Meta independente de outras conexões vinculadas', () => {
     const hybridCoexistence = { ...inbox, additionalAttributes: { whatsapp_transports: ['meta_cloud', 'evolution'], meta_waba_id: 'waba', meta_phone_number_id: 'phone', meta_onboarding_mode: 'coexistence', meta_business_app_status: 'active', meta_history_status: 'waiting' } };
-    expect(whatsappConfigurationForInbox(hybridCoexistence)).toMatchObject({ mode: 'hybrid', transports: ['meta_cloud', 'evolution'] });
+    expect(whatsappConfigurationForInbox(hybridCoexistence)).toMatchObject({ mode: 'official', transports: ['meta_cloud', 'evolution'] });
     expect(metaCloudMetadataForInbox(hybridCoexistence)).toMatchObject({ meta_onboarding_mode: 'coexistence', meta_business_app_status: 'active', meta_history_status: 'waiting' });
   });
 });

@@ -60,6 +60,8 @@ import { EvolutionInboxesPanel } from './EvolutionInboxesPanel';
 import { QuickNotesView } from './QuickNotesView';
 import { PermissionProfilesPanel } from './PermissionProfilesPanel';
 import { AgentInboxPermissionsModal } from './AgentInboxPermissionsModal';
+import { browserNotifications, type BrowserNotificationState } from '../features/notifications/browserNotifications';
+import { AutomationRulesPanel } from './AutomationRulesPanel';
 
 export type SettingsTab =
   | 'perfil'
@@ -157,6 +159,8 @@ export const SettingsView: React.FC<Props> = ({
   const [passwordConfirmation, setPasswordConfirmation] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
   const [apiToken, setApiToken] = useState(profile?.apiAccessToken || '');
+  const [browserNotificationState, setBrowserNotificationState] = useState<BrowserNotificationState>(() => browserNotifications.state());
+  const [browserNotificationsEnabled, setBrowserNotificationsEnabled] = useState(() => browserNotifications.enabled());
 
   useEffect(() => {
     setProfileName(profile?.name || user.name);
@@ -183,6 +187,19 @@ export const SettingsView: React.FC<Props> = ({
   const resetToken = async () => {
     if (!onResetAccessToken || !window.confirm('Gerar um novo token invalida o token atual. Deseja continuar?')) return;
     try { await onResetAccessToken(); showToast('Novo token de API gerado.'); } catch { showToast('Não foi possível gerar um novo token.'); }
+  };
+
+  const toggleBrowserNotifications = async () => {
+    if (browserNotifications.enabled()) {
+      browserNotifications.disable();
+      setBrowserNotificationsEnabled(false);
+      return;
+    }
+    const state = await browserNotifications.enable();
+    setBrowserNotificationState(state);
+    setBrowserNotificationsEnabled(browserNotifications.enabled());
+    if (state === 'denied') showToast('As notificações estão bloqueadas pelo navegador. Libere-as nas configurações do site.');
+    if (state === 'unsupported') showToast('Este navegador não oferece suporte a notificações.');
   };
 
   // --- STATE FOR AGENTES ---
@@ -232,7 +249,7 @@ export const SettingsView: React.FC<Props> = ({
   const saveAgent = async () => {
     if (!accountId || !agentForm.name.trim() || (agentModal === 'create' && !agentForm.email.trim())) return;
     setAgentSaving(true); setAgentError(null);
-    const params = { name: agentForm.name.trim(), email: agentForm.email.trim(), role: agentForm.role, availability: agentForm.availability, customRoleId: agentForm.customRoleId ? Number(agentForm.customRoleId) : null };
+    const params = { name: agentForm.name.trim(), email: agentForm.email.trim(), role: agentModal === 'create' ? 'agent' as const : editingAgent?.role === 'administrator' ? 'administrator' as const : 'agent' as const, availability: agentForm.availability, customRoleId: null };
     try {
       const saved = agentModal === 'create'
         ? await inboxService.createAgent(accountId, params)
@@ -512,7 +529,7 @@ export const SettingsView: React.FC<Props> = ({
 
               <section className="space-y-3 border-t border-white/10 pt-5">
                 <h4 className="flex items-center gap-2 text-sm font-bold"><Bell className="h-4 w-4 text-[#00a884]" />Preferências</h4>
-                <div className={`flex items-center justify-between rounded-xl border px-4 py-3 text-sm ${isDarkMode ? 'border-[#2a3942] bg-[#182228]' : 'border-[#d1d7db] bg-[#f8f9fa]'}`}><span>Notificações no navegador</span><span className="text-xs text-[#8696a0]">Gerencie as permissões pelo navegador</span></div>
+                <div className={`flex items-center justify-between gap-4 rounded-xl border px-4 py-3 text-sm ${isDarkMode ? 'border-[#2a3942] bg-[#182228]' : 'border-[#d1d7db] bg-[#f8f9fa]'}`}><div><span className="block">Notificações no navegador</span><span className="mt-1 block text-xs text-[#8696a0]">Alertas de novas mensagens quando o Kopla estiver em segundo plano.</span></div><button type="button" disabled={browserNotificationState === 'unsupported' || browserNotificationState === 'denied'} onClick={() => void toggleBrowserNotifications()} className={`rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-50 ${browserNotificationsEnabled ? 'bg-[#00a884] text-white' : 'border border-[#00a884] text-[#00a884]'}`}>{browserNotificationsEnabled ? 'Ativadas' : browserNotificationState === 'denied' ? 'Bloqueadas' : 'Ativar'}</button></div>
                 <button type="button" onClick={onToggleDarkMode} className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-sm ${isDarkMode ? 'border-[#2a3942] bg-[#182228]' : 'border-[#d1d7db] bg-[#f8f9fa]'}`}><span className="flex items-center gap-2"><Palette className="h-4 w-4 text-[#00a884]" />Tema</span><span>{isDarkMode ? 'Escuro' : 'Claro'}</span></button>
               </section>
 
@@ -727,7 +744,7 @@ export const SettingsView: React.FC<Props> = ({
                 {agentsStatus === 'ready' && agents.length > 0 && !agents.some((agent) => `${agent.name} ${agent.email || ''}`.toLocaleLowerCase().includes(agentQuery.trim().toLocaleLowerCase())) && <p className="py-6 text-center text-xs text-[#8696a0]">Nenhum agente encontrado.</p>}
               </div>
 
-              {agentModal && <div className="fixed inset-0 z-[100] grid place-items-center bg-black/65 p-4" role="dialog" aria-modal="true"><div className={`w-full max-w-md rounded-2xl border p-5 shadow-2xl ${isDarkMode ? 'border-[#2a3942] bg-[#182228]' : 'border-[#d1d7db] bg-white'}`}><div className="flex items-center justify-between"><h3 className="text-base font-bold">{agentModal === 'create' ? 'Adicionar agente' : `Editar agente · ${editingAgent?.name}`}</h3><button type="button" onClick={() => setAgentModal(null)} className="text-[#8696a0]"><X className="h-4 w-4" /></button></div><p className="mt-1 text-xs text-[#8696a0]">Defina o acesso e a disponibilidade deste usuário na conta.</p>{agentError && <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">{agentError}</p>}<div className="mt-4 space-y-3"><label className="block text-xs font-semibold">Nome<input value={agentForm.name} onChange={(event) => setAgentForm(current => ({ ...current, name: event.target.value }))} className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`} /></label><label className="block text-xs font-semibold">E-mail<input type="email" disabled={agentModal === 'edit'} value={agentForm.email} onChange={(event) => setAgentForm(current => ({ ...current, email: event.target.value }))} className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none disabled:opacity-60 ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`} /></label><div className="grid grid-cols-2 gap-3"><label className="block text-xs font-semibold">Função<select value={agentForm.role} onChange={(event) => setAgentForm(current => ({ ...current, role: event.target.value as 'agent' | 'administrator', customRoleId: event.target.value === 'administrator' ? '' : current.customRoleId }))} className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`}><option value="agent">Atendente</option><option value="administrator">Administrador</option></select></label><label className="block text-xs font-semibold">Disponibilidade<select value={agentForm.availability} onChange={(event) => setAgentForm(current => ({ ...current, availability: event.target.value as 'online' | 'offline' | 'busy' }))} className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`}><option value="online">Disponível</option><option value="offline">Offline</option><option value="busy">Ocupado</option></select></label></div>{agentForm.role === 'agent' && customRolesStatus === 'ready' && <label className="block text-xs font-semibold">Permissões personalizadas<select value={agentForm.customRoleId} onChange={(event) => setAgentForm(current => ({ ...current, customRoleId: event.target.value }))} className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`}><option value="">Padrão de atendente</option>{customRoles.map(role => <option key={role.id} value={role.id}>{role.name}</option>)}</select></label>}</div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setAgentModal(null)} className="rounded-xl px-3 py-2 text-xs font-bold text-[#8696a0]">Cancelar</button><button type="button" disabled={agentSaving || !agentForm.name.trim() || (agentModal === 'create' && !agentForm.email.trim())} onClick={() => void saveAgent()} className="rounded-xl bg-[#00a884] px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{agentSaving ? 'Salvando…' : agentModal === 'create' ? 'Adicionar agente' : 'Salvar alterações'}</button></div></div></div>}
+              {agentModal && <div className="fixed inset-0 z-[100] grid place-items-center bg-black/65 p-4" role="dialog" aria-modal="true"><div className={`w-full max-w-md rounded-2xl border p-5 shadow-2xl ${isDarkMode ? 'border-[#2a3942] bg-[#182228]' : 'border-[#d1d7db] bg-white'}`}><div className="flex items-center justify-between"><h3 className="text-base font-bold">{agentModal === 'create' ? 'Adicionar agente' : `Editar agente · ${editingAgent?.name}`}</h3><button type="button" onClick={() => setAgentModal(null)} className="text-[#8696a0]"><X className="h-4 w-4" /></button></div><p className="mt-1 text-xs text-[#8696a0]">A disponibilidade é independente dos perfis de permissão.</p>{agentError && <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">{agentError}</p>}<div className="mt-4 space-y-3"><label className="block text-xs font-semibold">Nome<input value={agentForm.name} onChange={(event) => setAgentForm(current => ({ ...current, name: event.target.value }))} className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`} /></label><label className="block text-xs font-semibold">E-mail<input type="email" disabled={agentModal === 'edit'} value={agentForm.email} onChange={(event) => setAgentForm(current => ({ ...current, email: event.target.value }))} className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none disabled:opacity-60 ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`} /></label><label className="block text-xs font-semibold">Disponibilidade<select value={agentForm.availability} onChange={(event) => setAgentForm(current => ({ ...current, availability: event.target.value as 'online' | 'offline' | 'busy' }))} className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`}><option value="online">Disponível</option><option value="offline">Offline</option><option value="busy">Ocupado</option></select></label></div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setAgentModal(null)} className="rounded-xl px-3 py-2 text-xs font-bold text-[#8696a0]">Cancelar</button><button type="button" disabled={agentSaving || !agentForm.name.trim() || (agentModal === 'create' && !agentForm.email.trim())} onClick={() => void saveAgent()} className="rounded-xl bg-[#00a884] px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{agentSaving ? 'Salvando…' : agentModal === 'create' ? 'Adicionar agente' : 'Salvar alterações'}</button></div></div></div>}
               {permissionsAgent && accountId && <AgentInboxPermissionsModal accountId={accountId} agent={permissionsAgent} onClose={() => setPermissionsAgent(null)} isDarkMode={isDarkMode} />}
               {roleModal && <div className="fixed inset-0 z-[101] grid place-items-center bg-black/65 p-4" role="dialog" aria-modal="true"><div className={`w-full max-w-lg rounded-2xl border p-5 shadow-2xl ${isDarkMode ? 'border-[#2a3942] bg-[#182228]' : 'border-[#d1d7db] bg-white'}`}><div className="flex items-center justify-between"><h3 className="text-base font-bold">{roleModal === 'create' ? 'Nova função personalizada' : 'Editar função personalizada'}</h3><button type="button" onClick={() => setRoleModal(null)} className="text-[#8696a0]"><X className="h-4 w-4" /></button></div>{roleError && <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">{roleError}</p>}<div className="mt-4 space-y-3"><label className="block text-xs font-semibold">Nome<input value={roleForm.name} onChange={(event) => setRoleForm(current => ({ ...current, name: event.target.value }))} className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`} /></label><label className="block text-xs font-semibold">Descrição<textarea value={roleForm.description} onChange={(event) => setRoleForm(current => ({ ...current, description: event.target.value }))} className={`mt-1.5 min-h-20 w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-[#d1d7db] bg-gray-50'}`} /></label><fieldset><legend className="text-xs font-semibold">Permissões</legend><div className="mt-2 grid gap-2 sm:grid-cols-2">{CUSTOM_ROLE_PERMISSIONS.map(([key, label]) => <label key={key} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={roleForm.permissions.includes(key)} onChange={() => toggleRolePermission(key)} />{label}</label>)}</div></fieldset></div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setRoleModal(null)} className="rounded-xl px-3 py-2 text-xs font-bold text-[#8696a0]">Cancelar</button><button type="button" disabled={roleSaving || !roleForm.name.trim()} onClick={() => void saveRole()} className="rounded-xl bg-[#00a884] px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{roleSaving ? 'Salvando…' : 'Salvar função'}</button></div></div></div>}
             </div>
@@ -1216,11 +1233,10 @@ export const SettingsView: React.FC<Props> = ({
 
           {/* ==================== 7. AUTOMAÇÃO ==================== */}
           {activeTab === 'automacao' && (
-            <div
-              className={`p-6 rounded-2xl border shadow-xl space-y-6 ${
-                isDarkMode ? 'bg-[#111b21] border-[#222d34]' : 'bg-white border-[#d1d7db]'
-              }`}
-            >
+            <AutomationRulesPanel accountId={accountId} inboxes={chatwootInboxes} isDarkMode={isDarkMode} />
+          )}
+          {false && activeTab === 'automacao' && (
+            <div className={`p-6 rounded-2xl border shadow-xl space-y-6 ${isDarkMode ? 'bg-[#111b21] border-[#222d34]' : 'bg-white border-[#d1d7db]'}`}>
               <div className="flex items-center justify-between border-b pb-4 border-white/10">
                 <div>
                   <h3 className="text-lg font-bold">Regras de Automação</h3>

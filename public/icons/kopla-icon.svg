@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
   <title id="title">Kopla</title>
-  <rect width="512" height="512" rx="112" fill="#0f766e"/>
-  <path fill="#fff" d="M151 134h63v99l83-99h76L270 251l111 127h-80l-87-105v105h-63z"/>
-  <circle cx="384" cy="151" r="28" fill="#5eead4"/>
+  <rect width="512" height="512" fill="#0b246b"/>
+  <path fill="#8064f4" d="M132 103h62v103c0 39 19 66 53 80l-44 44c-46-23-71-63-71-119V103Zm0 198c0-45 25-85 71-108l44 44c-34 14-53 41-53 80v92h-62v-108Z"/>
+  <path fill="#8064f4" d="m256 113 29 29-61 61 61 61-29 29-90-90 90-90Z"/>
 </svg>

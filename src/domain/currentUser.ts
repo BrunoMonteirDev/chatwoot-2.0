@@ -117,6 +117,10 @@ export interface AgentPermissionAssignment {
   inboxes: Array<{ inboxId: number; inboxName: string; permissionProfileId: number | null }>;
 }
 
+export interface AutomationCondition { attributeKey: string; filterOperator: string; queryOperator: 'AND' | 'OR' | ''; values: string[]; }
+export interface AutomationAction { actionName: string; actionParams: Array<string | Record<string, unknown>>; }
+export interface AutomationRule { id: number; name: string; description: string | null; eventName: string; active: boolean; conditions: AutomationCondition[]; actions: AutomationAction[]; createdAt: number; }
+
 export interface ConversationTeam {
   id: number;
   name: string;
