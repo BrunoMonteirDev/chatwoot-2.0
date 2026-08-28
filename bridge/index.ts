@@ -361,6 +361,75 @@ type WahaHistoryProfiles = {
   syncedContacts: Set<number>;
 };
 
+type WahaLiveProfiles = {
+  names: Map<string, string>;
+  avatarUrls: Map<string, Promise<string | undefined>>;
+  expiresAt: number;
+  loading?: Promise<void>;
+};
+
+const wahaLiveProfiles = new Map<string, WahaLiveProfiles>();
+const wahaChatProfileCacheMs = 10 * 60 * 1000;
+
+const profileCacheForWahaSession = (session: string) => {
+  let profiles = wahaLiveProfiles.get(session);
+  if (!profiles) {
+    profiles = { names: new Map(), avatarUrls: new Map(), expiresAt: 0 };
+    wahaLiveProfiles.set(session, profiles);
+  }
+  return profiles;
+};
+
+const refreshWahaChatProfiles = async (session: string, profiles: WahaLiveProfiles) => {
+  if (profiles.expiresAt > Date.now()) return;
+  if (!profiles.loading) {
+    profiles.loading = (async () => {
+      const names = new Map<string, string>();
+      // WAHA does not include profile names in every realtime webhook. Fetch
+      // the chat index in pages and cache it rather than making one request
+      // per incoming message.
+      for (let offset = 0; ; offset += 500) {
+        const chats = await wahaTransport.listChats(session, { limit: 500, offset });
+        for (const chat of chats) if (chat.name) names.set(chat.id, chat.name);
+        if (chats.length < 500) break;
+      }
+      profiles.names = names;
+      profiles.expiresAt = Date.now() + wahaChatProfileCacheMs;
+    })().catch(error => {
+      // Names and photos enrich a conversation but cannot prevent messages
+      // from being delivered when WAHA's chat index is temporarily unavailable.
+      console.warn('[waha] chat profile lookup failed', { session, error: error instanceof Error ? error.message : 'unknown' });
+      profiles.expiresAt = Date.now() + 60_000;
+    }).finally(() => { profiles.loading = undefined; });
+  }
+  await profiles.loading;
+};
+
+const profileForLiveWahaMessage = async (message: IncomingWahaMessage): Promise<IncomingWahaMessage> => {
+  const profiles = profileCacheForWahaSession(message.session);
+  const needsName = message.chatType === 'group' ? !message.groupName : !message.contactName;
+  if (needsName) await refreshWahaChatProfiles(message.session, profiles);
+  const phone = message.phoneNumber?.replace(/\D/g, '');
+  const nameCandidates = [message.chatId, message.remoteJid, phone && `${phone}@c.us`, phone && `${phone}@s.whatsapp.net`].filter((value): value is string => Boolean(value));
+  const name = nameCandidates.map(candidate => profiles.names.get(candidate)).find((value): value is string => Boolean(value));
+  let avatarUrl = message.avatarUrl;
+  if (!avatarUrl) {
+    const avatarKey = nameCandidates.find(candidate => profiles.names.has(candidate)) || message.chatId;
+    let pending = profiles.avatarUrls.get(avatarKey);
+    if (!pending) {
+      pending = wahaTransport.getChatAvatarUrl(message.session, avatarKey).catch(() => undefined);
+      profiles.avatarUrls.set(avatarKey, pending);
+    }
+    avatarUrl = await pending;
+  }
+  return {
+    ...message,
+    ...(name && message.chatType === 'group' ? { name, groupName: name } : {}),
+    ...(name && message.chatType === 'private' ? { name, contactName: name } : {}),
+    ...(avatarUrl ? { avatarUrl } : {}),
+  };
+};
+
 const historyProfileFor = async (session: string, message: IncomingWahaMessage, profiles: WahaHistoryProfiles): Promise<IncomingWahaMessage> => {
   let phoneNumber = message.phoneNumber;
   if (!phoneNumber && message.lid) {
@@ -1096,7 +1165,8 @@ app.post('/webhooks/waha', (request, response) => {
       } catch (error) { dedup.release(key); console.error('[waha] group lifecycle processing failed', { trackId: groupLifecycle.trackId, event: groupLifecycle.event, error: error instanceof Error ? error.message : 'unknown' }); }
       return;
     }
-    const message = parseIncomingWahaMessage(request.body);
+    const parsedMessage = parseIncomingWahaMessage(request.body);
+    const message = parsedMessage && await profileForLiveWahaMessage(parsedMessage);
     if (message) {
       console.info('[waha] message normalized', {
         trackId: message.trackId,
