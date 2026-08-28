@@ -117,6 +117,8 @@ export interface CannedResponse {
   id: number;
   shortCode: string;
   content: string;
+  attachment?: File | null;
+  attachmentName?: string | null;
 }
 
 export type ConversationMessageKind = 'incoming' | 'outgoing' | 'private_note' | 'activity' | 'template';

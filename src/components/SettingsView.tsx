@@ -57,6 +57,7 @@ import {
   WallpaperId,
 } from './WhatsAppDoodleBg';
 import { EvolutionInboxesPanel } from './EvolutionInboxesPanel';
+import { QuickNotesView } from './QuickNotesView';
 
 export type SettingsTab =
   | 'perfil'
@@ -1325,107 +1326,7 @@ export const SettingsView: React.FC<Props> = ({
           )}
 
           {/* ==================== 9. RESPOSTAS PRONTAS ==================== */}
-          {activeTab === 'respostas' && (
-            <div
-              className={`p-6 rounded-2xl border shadow-xl space-y-6 ${
-                isDarkMode ? 'bg-[#111b21] border-[#222d34]' : 'bg-white border-[#d1d7db]'
-              }`}
-            >
-              <div className="flex items-center justify-between border-b pb-4 border-white/10">
-                <div>
-                  <h3 className="text-lg font-bold">Respostas Prontas</h3>
-                  <p className="text-xs text-[#8696a0]">Atalhos rápidos com barras (ex: /boasvindas, /pix) para agilizar conversas.</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowResponseModal(true)}
-                  className="px-3.5 py-2 bg-[#00a884] hover:bg-[#008069] text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Nova Resposta Pronta</span>
-                </button>
-              </div>
-
-              <div className="space-y-3">
-                {cannedResponses.map((cr) => (
-                  <div
-                    key={cr.id}
-                    className={`p-4 rounded-xl border flex items-center justify-between ${
-                      isDarkMode ? 'bg-[#182228] border-[#2a3942]' : 'bg-[#f0f2f5] border-[#d1d7db]'
-                    }`}
-                  >
-                    <div className="space-y-1">
-                      <span className="text-xs font-mono font-bold text-[#00a884] bg-[#00a884]/10 px-2 py-0.5 rounded-md border border-[#00a884]/20">
-                        {cr.shortcut}
-                      </span>
-                      <p className="text-xs text-gray-300 leading-relaxed pt-1">{cr.content}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteResponse(cr.id)}
-                      className="p-1.5 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer shrink-0 ml-3"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              {showResponseModal && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-                  <div
-                    className={`w-full max-w-md rounded-2xl p-5 border shadow-2xl space-y-4 ${
-                      isDarkMode ? 'bg-[#1f2c34] border-[#2a3942] text-white' : 'bg-white border-gray-200 text-[#111b21]'
-                    }`}
-                  >
-                    <h3 className="text-base font-bold">Nova Resposta Pronta</h3>
-                    <div className="space-y-3 text-xs">
-                      <div>
-                        <label className="text-[#8696a0] block mb-1 font-semibold">Atalho (Começa com /)</label>
-                        <input
-                          type="text"
-                          value={newShortcut}
-                          onChange={(e) => setNewShortcut(e.target.value)}
-                          placeholder="Ex: /pix ou /boasvindas"
-                          className={`w-full px-3 py-2 rounded-xl border outline-none ${
-                            isDarkMode ? 'bg-[#202c33] border-[#2a3942]' : 'bg-[#f0f2f5] border-[#d1d7db]'
-                          }`}
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[#8696a0] block mb-1 font-semibold">Mensagem Completa</label>
-                        <textarea
-                          rows={3}
-                          value={newContent}
-                          onChange={(e) => setNewContent(e.target.value)}
-                          placeholder="Digite o texto padronizado..."
-                          className={`w-full px-3 py-2 rounded-xl border outline-none ${
-                            isDarkMode ? 'bg-[#202c33] border-[#2a3942]' : 'bg-[#f0f2f5] border-[#d1d7db]'
-                          }`}
-                        />
-                      </div>
-                    </div>
-                    <div className="flex justify-end space-x-2 pt-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowResponseModal(false)}
-                        className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-gray-500/20 text-gray-300"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleAddResponse}
-                        className="px-4 py-1.5 rounded-xl text-xs font-bold bg-[#00a884] text-white"
-                      >
-                        Salvar Resposta
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          {activeTab === 'respostas' && <QuickNotesView isDarkMode={isDarkMode} embedded />}
 
           {/* ==================== 10. MENSAGENS AGENDADAS ==================== */}
           {activeTab === 'agendadas' && (

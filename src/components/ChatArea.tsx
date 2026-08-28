@@ -55,6 +55,7 @@ import type { RealtimeConnectionStatus } from '../integrations/chatwoot/realtime
 import type { ContactNote, ContactProfile } from '../domain/currentUser';
 import type { ContactUpdate } from '../integrations/chatwoot/contacts';
 import { useCannedResponses } from '../features/cannedResponses/useCannedResponses';
+import { quickNotesStorage, QUICK_NOTES_UPDATED_EVENT } from '../features/quickNotes/storage';
 import { MetaTemplatePicker } from './MetaTemplatePicker';
 import { metaCloudMetadataForInbox } from '../integrations/whatsapp/provider';
 
@@ -718,15 +719,19 @@ export const ChatArea: React.FC<Props> = ({
   const [localQuickResponses, setLocalQuickResponses] = useState<CannedResponse[]>([]);
   useEffect(() => {
     const load = () => {
-      try {
-        const raw = JSON.parse(localStorage.getItem('quick-notes') || '[]') as Array<{ id?: string; text?: string; shortcut?: string; attachmentName?: string }>;
-        setLocalQuickResponses(raw.filter((item) => (typeof item.text === 'string' && item.text.trim()) || item.attachmentName).map((item, index) => ({ id: -(index + 1), shortCode: item.shortcut?.trim() || `nota-${index + 1}`, content: item.text?.trim() || `Anexo: ${item.attachmentName}` })));
-      } catch { setLocalQuickResponses([]); }
+      const notes = quickNotesStorage.list();
+      void Promise.all(notes.map(async (note, index) => ({
+        id: -(index + 1),
+        shortCode: note.shortcut.trim() || `nota-${index + 1}`,
+        content: note.text.trim(),
+        attachmentName: note.attachmentName || null,
+        attachment: await quickNotesStorage.getAttachment(note),
+      }))).then(setLocalQuickResponses).catch(() => setLocalQuickResponses([]));
     };
     load();
     window.addEventListener('storage', load);
-    window.addEventListener('quick-notes-updated', load);
-    return () => { window.removeEventListener('storage', load); window.removeEventListener('quick-notes-updated', load); };
+    window.addEventListener(QUICK_NOTES_UPDATED_EVENT, load);
+    return () => { window.removeEventListener('storage', load); window.removeEventListener(QUICK_NOTES_UPDATED_EVENT, load); };
   }, []);
   const [replyTo, setReplyTo] = useState<ReplyTo | null>(null);
   const conversationInbox = conversation ? inboxes.find((inbox) => inbox.id === conversation.inboxId) : undefined;
@@ -1901,8 +1906,9 @@ export const ChatArea: React.FC<Props> = ({
           isOpen={showQuickResponsesPopup}
           onClose={() => setShowQuickResponsesPopup(false)}
           quickResponses={[...localQuickResponses, ...cannedResponses.responses]}
-          onSelectResponse={(selectedMsg) => {
-            setInputText(selectedMsg);
+          onSelectResponse={(response) => {
+            setInputText(response.content);
+            if (response.attachment) setSelectedFiles((current) => [...current, response.attachment as File]);
             setShowQuickResponsesPopup(false);
           }}
           filterQuery={inputText.startsWith('/') ? inputText.slice(1) : ''}

@@ -7,7 +7,7 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   quickResponses: CannedResponse[];
-  onSelectResponse: (text: string) => void;
+  onSelectResponse: (response: CannedResponse) => void;
   filterQuery?: string;
   onSearchQueryChange?: (query: string) => void;
   status?: CannedResponsesStatus;
@@ -93,7 +93,7 @@ export const QuickResponsesPopup: React.FC<Props> = ({
 
   const handlePickItem = (item: CannedResponse) => {
     // O dashboard original insere o conteúdo salvo sem transformar variáveis localmente.
-    onSelectResponse(item.content);
+    onSelectResponse(item);
     onClose();
   };
 
@@ -216,6 +216,7 @@ export const QuickResponsesPopup: React.FC<Props> = ({
                 <p className="text-xs text-[#8696a0] line-clamp-2 leading-relaxed">
                   {renderHighlighted(qr.content, activeQuery)}
                 </p>
+                {qr.attachmentName && <p className="mt-1 text-[11px] text-[#00a884] truncate">Anexo: {qr.attachmentName}</p>}
               </div>
             );
           })
