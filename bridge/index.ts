@@ -44,7 +44,10 @@ app.get('/ready', async (_request, response) => {
     const [chatwoot, redis, waha] = await Promise.all([
       // The Chatwoot root serves HTML and deliberately rejects an explicit
       // JSON Accept header. Readiness only needs to prove the service answers.
-      fetch(`${config.chatwootBaseUrl}/`),
+      // Rails is behind a TLS-terminating reverse proxy in production. The
+      // bridge reaches Puma over the private HTTP network, so preserve the
+      // original HTTPS scheme to avoid a FORCE_SSL redirect to `https://rails`.
+      fetch(`${config.chatwootBaseUrl}/`, { headers: { 'X-Forwarded-Proto': 'https', 'X-Forwarded-Ssl': 'on' } }),
       bridgeRedis.ping(),
       wahaTransport.health(),
     ]);
