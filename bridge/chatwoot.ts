@@ -103,7 +103,18 @@ const currentAccountId = () => {
 
 const request = async <T>(path: string, init: RequestInit = {}, apiToken = false): Promise<T> => {
   const token = apiToken ? await bridgeApiToken() : undefined;
-  const response = await fetch(`${config.chatwootBaseUrl}${path}`, { ...init, headers: { Accept: 'application/json', ...(init.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...(token ? { api_access_token: token } : {}), ...init.headers } });
+  // Rails receives this request over the private Docker HTTP network, while
+  // the public application is HTTPS. Preserve the original scheme for every
+  // API call so FORCE_SSL never redirects fetch to the non-existent
+  // https://rails:3000 endpoint.
+  const response = await fetch(`${config.chatwootBaseUrl}${path}`, { ...init, headers: {
+    Accept: 'application/json',
+    'X-Forwarded-Proto': 'https',
+    'X-Forwarded-Ssl': 'on',
+    ...(init.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
+    ...(token ? { api_access_token: token } : {}),
+    ...init.headers,
+  } });
   const raw = await response.text();
   // Rails may render an HTML error page in development. Preserve the HTTP
   // failure without turning a response parser error into a bridge crash.
