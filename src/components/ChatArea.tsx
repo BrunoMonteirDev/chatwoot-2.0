@@ -829,7 +829,6 @@ export const ChatArea: React.FC<Props> = ({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const backdropRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const closeEditModal = () => {
@@ -950,10 +949,6 @@ export const ChatArea: React.FC<Props> = ({
       textareaRef.current.style.height = 'auto';
       const newHeight = Math.min(textareaRef.current.scrollHeight, isExpandedInput ? 300 : 140);
       textareaRef.current.style.height = `${newHeight}px`;
-      if (backdropRef.current) {
-        backdropRef.current.style.height = `${newHeight}px`;
-        backdropRef.current.scrollTop = textareaRef.current.scrollTop;
-      }
     }
   }, [inputText, isExpandedInput]);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -2118,41 +2113,13 @@ export const ChatArea: React.FC<Props> = ({
             /* Middle Textarea Input */
             <div className="flex items-center gap-2 md:block">
             <div className={`w-full min-w-0 flex-1 rounded-[28px] px-4 py-1 relative md:rounded-none md:px-0 ${messageMode === 'privada' ? isDarkMode ? 'bg-[#1a1710] md:bg-transparent' : 'bg-[#fffbeb] md:bg-transparent' : isDarkMode ? 'bg-[#202c33] md:bg-transparent' : 'bg-[#f0f2f5] md:bg-transparent'}`}>
-              {/* Formatted live backdrop layer */}
-              <div
-                ref={backdropRef}
-                aria-hidden="true"
-                className={`absolute left-12 right-20 top-3 bottom-1 pointer-events-none whitespace-pre-wrap break-words font-sans text-[14px] leading-relaxed select-none overflow-hidden md:inset-x-0 md:top-1 ${
-                  isExpandedInput ? 'min-h-[180px] max-h-[300px]' : 'min-h-[44px] max-h-[112px]'
-                } ${
-                  messageMode === 'privada'
-                    ? isDarkMode
-                      ? 'text-[#fef08a]'
-                      : 'text-[#78350f]'
-                    : isDarkMode
-                    ? 'text-[#e9edef]'
-                    : 'text-[#111b21]'
-                }`}
-              >
-                {renderFormattedText(inputText, 0, true)}
-              </div>
-
               <textarea
                 ref={textareaRef}
                 rows={isExpandedInput ? 7 : 1}
                 value={inputText}
-                onScroll={(e) => {
-                  if (backdropRef.current) {
-                    backdropRef.current.scrollTop = e.currentTarget.scrollTop;
-                  }
-                }}
                 onChange={(e) => {
                   const val = e.target.value;
                   setInputText(val);
-
-                  if (backdropRef.current) {
-                    backdropRef.current.scrollTop = e.currentTarget.scrollTop;
-                  }
 
                   // Quick responses
                   if (val.startsWith('/')) {
@@ -2187,12 +2154,10 @@ export const ChatArea: React.FC<Props> = ({
                 className={`w-full relative z-10 bg-transparent pl-8 pr-20 pt-[11px] text-[14px] outline-none resize-none transition-all duration-200 md:px-0 md:pt-0 ${
                   isExpandedInput ? 'min-h-[180px] max-h-[300px]' : 'min-h-[44px] max-h-[112px]'
                 } overflow-y-auto leading-relaxed ${
-                  inputText.length > 0 ? 'text-transparent caret-black dark:caret-white' : ''
-                } ${
                   messageMode === 'privada'
                     ? isDarkMode
-                      ? 'placeholder-amber-400/50'
-                      : 'placeholder-amber-700/50'
+                      ? 'text-[#fef08a] placeholder-amber-400/50'
+                      : 'text-[#78350f] placeholder-amber-700/50'
                     : isDarkMode
                     ? 'text-[#e9edef] placeholder-[#8696a0]'
                     : 'text-[#111b21] placeholder-[#667781]'
