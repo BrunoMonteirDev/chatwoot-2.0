@@ -69,10 +69,11 @@ let serviceToken: string | undefined;
 let serviceTokenRequest: Promise<string> | undefined;
 
 const bridgeApiToken = async () => {
-  // Keep the explicit value as a backwards-compatible override. New
-  // production stacks obtain a dedicated server-side token from Rails using
-  // their shared Docker-only bridge secret.
-  if (config.chatwootApiAccessToken) return config.chatwootApiAccessToken;
+  // Local development retains the explicit token. Production obtains a
+  // dedicated server-side token from Rails by default, including when an old
+  // value remains in .env.production. An old installation can opt back in
+  // explicitly while it is being migrated.
+  if (config.chatwootApiAccessToken && (process.env.NODE_ENV !== 'production' || process.env.BRIDGE_USE_LEGACY_CHATWOOT_TOKEN === 'true')) return config.chatwootApiAccessToken;
   if (serviceToken) return serviceToken;
   if (!serviceTokenRequest) {
     serviceTokenRequest = fetch(`${config.chatwootBaseUrl}/api/v1/bridge/access_token`, {

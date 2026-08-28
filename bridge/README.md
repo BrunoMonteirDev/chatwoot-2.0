@@ -14,8 +14,8 @@ Copie os valores de `bridge` do `.env.example` para `.env`:
 CHATWOOT_BASE_URL=http://localhost:3000
 # Opcional, somente compatibilidade com instalações antigas de uma conta.
 CHATWOOT_ACCOUNT_ID=
-# Opcional em instalações antigas. Em produção deixe vazio: o bridge cria a
-# própria credencial técnica automaticamente dentro da rede Docker.
+# Opcional em instalações antigas. Em produção o bridge cria a própria
+# credencial técnica automaticamente dentro da rede Docker.
 CHATWOOT_API_ACCESS_TOKEN=
 EVOLUTION_BASE_URL=http://localhost:8080
 EVOLUTION_API_KEY=chave-server-side-da-evolution
@@ -28,10 +28,10 @@ operações novas, o bridge identifica a conta pelo webhook do Chatwoot e grava
 o vínculo **conta + inbox + sessão WAHA**. O valor, se informado, é apenas
 fallback de migração para sessões antigas.
 
-Em instalações antigas, `CHATWOOT_API_ACCESS_TOKEN` deve pertencer a um usuário técnico que esteja
-adicionado como **Administrador** em todas as contas atendidas pelo bridge.
-Ele é usado apenas no servidor para localizar e atualizar a inbox da conta
-correta; nunca é enviado ao navegador. A criação de contatos,
+Em produção o bridge ignora um `CHATWOOT_API_ACCESS_TOKEN` antigo e usa sua
+credencial interna automática. Para manter temporariamente o comportamento
+antigo, defina `BRIDGE_USE_LEGACY_CHATWOOT_TOKEN=true`; nesse caso o token deve
+pertencer a um usuário técnico administrador em todas as contas. A criação de contatos,
 conversas e mensagens usa o `inbox_identifier` público da `Channel::Api`.
 
 Inicie com:
