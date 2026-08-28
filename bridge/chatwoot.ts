@@ -65,6 +65,35 @@ export interface HistoricalWhatsAppImportInput {
 }
 
 const accountContext = new AsyncLocalStorage<number>();
+let serviceToken: string | undefined;
+let serviceTokenRequest: Promise<string> | undefined;
+
+const bridgeApiToken = async () => {
+  // Keep the explicit value as a backwards-compatible override. New
+  // production stacks obtain a dedicated server-side token from Rails using
+  // their shared Docker-only bridge secret.
+  if (config.chatwootApiAccessToken) return config.chatwootApiAccessToken;
+  if (serviceToken) return serviceToken;
+  if (!serviceTokenRequest) {
+    serviceTokenRequest = fetch(`${config.chatwootBaseUrl}/api/v1/bridge/access_token`, {
+      headers: {
+        Accept: 'application/json',
+        'X-Bridge-Secret': config.webhookSecret,
+        'X-Forwarded-Proto': 'https',
+        'X-Forwarded-Ssl': 'on',
+      },
+    }).then(async response => {
+      const body = await response.json().catch(() => ({})) as { api_access_token?: unknown };
+      if (!response.ok || typeof body.api_access_token !== 'string' || !body.api_access_token) {
+        throw new Error(`Chatwoot bridge credentials ${response.status}`);
+      }
+      serviceToken = body.api_access_token;
+      return serviceToken;
+    }).finally(() => { serviceTokenRequest = undefined; });
+  }
+  return serviceTokenRequest;
+};
+
 const currentAccountId = () => {
   const accountId = accountContext.getStore() ?? config.chatwootDefaultAccountId;
   if (!accountId) throw new Error('A conta Chatwoot não foi informada para esta operação.');
@@ -72,7 +101,8 @@ const currentAccountId = () => {
 };
 
 const request = async <T>(path: string, init: RequestInit = {}, apiToken = false): Promise<T> => {
-  const response = await fetch(`${config.chatwootBaseUrl}${path}`, { ...init, headers: { Accept: 'application/json', ...(init.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...(apiToken ? { api_access_token: config.chatwootApiAccessToken } : {}), ...init.headers } });
+  const token = apiToken ? await bridgeApiToken() : undefined;
+  const response = await fetch(`${config.chatwootBaseUrl}${path}`, { ...init, headers: { Accept: 'application/json', ...(init.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...(token ? { api_access_token: token } : {}), ...init.headers } });
   const raw = await response.text();
   // Rails may render an HTML error page in development. Preserve the HTTP
   // failure without turning a response parser error into a bridge crash.

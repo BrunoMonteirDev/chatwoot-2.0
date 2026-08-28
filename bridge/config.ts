@@ -20,7 +20,10 @@ export const config = {
   // New operations resolve the account from the authenticated request or
   // from the persisted WAHA session ownership.
   chatwootDefaultAccountId: process.env.CHATWOOT_ACCOUNT_ID ? Number(process.env.CHATWOOT_ACCOUNT_ID) : null,
-  chatwootApiAccessToken: required('CHATWOOT_API_ACCESS_TOKEN'),
+  // Older installations can continue supplying a user API token. Production
+  // deployments bootstrap a dedicated service account in Chatwoot instead,
+  // so adding an account never requires editing this environment file.
+  chatwootApiAccessToken: process.env.CHATWOOT_API_ACCESS_TOKEN || '',
   // Evolution is a legacy transport. New WAHA-only installations must be
   // able to boot without provisioning an Evolution API.
   evolutionBaseUrl: optionalUrl('EVOLUTION_BASE_URL'),

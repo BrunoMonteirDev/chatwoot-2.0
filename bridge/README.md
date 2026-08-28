@@ -14,7 +14,9 @@ Copie os valores de `bridge` do `.env.example` para `.env`:
 CHATWOOT_BASE_URL=http://localhost:3000
 # Opcional, somente compatibilidade com instalações antigas de uma conta.
 CHATWOOT_ACCOUNT_ID=
-CHATWOOT_API_ACCESS_TOKEN=token-de-um-usuario-tecnico-administrador
+# Opcional em instalações antigas. Em produção deixe vazio: o bridge cria a
+# própria credencial técnica automaticamente dentro da rede Docker.
+CHATWOOT_API_ACCESS_TOKEN=
 EVOLUTION_BASE_URL=http://localhost:8080
 EVOLUTION_API_KEY=chave-server-side-da-evolution
 BRIDGE_PORT=3100
@@ -26,7 +28,7 @@ operações novas, o bridge identifica a conta pelo webhook do Chatwoot e grava
 o vínculo **conta + inbox + sessão WAHA**. O valor, se informado, é apenas
 fallback de migração para sessões antigas.
 
-`CHATWOOT_API_ACCESS_TOKEN` deve pertencer a um usuário técnico que esteja
+Em instalações antigas, `CHATWOOT_API_ACCESS_TOKEN` deve pertencer a um usuário técnico que esteja
 adicionado como **Administrador** em todas as contas atendidas pelo bridge.
 Ele é usado apenas no servidor para localizar e atualizar a inbox da conta
 correta; nunca é enviado ao navegador. A criação de contatos,
@@ -64,9 +66,11 @@ o segredo: operações administrativas passam pela sessão autenticada do
 Chatwoot e o bridge guarda `BRIDGE_WEBHOOK_SECRET` exclusivamente no servidor.
 
 O Chatwoot assina esse endpoint com `X-Chatwoot-Timestamp` e
-`X-Chatwoot-Signature`. O bridge consulta as secrets das API inboxes usando o
-`CHATWOOT_API_ACCESS_TOKEN` server-side e valida o HMAC antes de aceitar o
-payload. Mensagens, anexos e replies são roteados pelo transport da mensagem.
+`X-Chatwoot-Signature`. Em produção o bridge consulta as secrets das API
+inboxes com uma conta técnica criada automaticamente dentro da rede Docker e
+valida o HMAC antes de aceitar o payload. `CHATWOOT_API_ACCESS_TOKEN` só é
+necessário como compatibilidade com instalações antigas. Mensagens, anexos e
+replies são roteados pelo transport da mensagem.
 Na Evolution v2, editar usa `POST /chat/updateMessage/:instance` e apagar para
 todos usa `DELETE /chat/deleteMessageForEveryone/:instance`; o Chatwoot só é
 atualizado após a confirmação do provider. Meta Cloud não anuncia essas duas

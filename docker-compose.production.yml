@@ -31,7 +31,7 @@ services:
     restart: "no"
     env_file: ${PRODUCTION_ENV_FILE:-.env.production}
     environment: { RAILS_ENV: production, NODE_ENV: production, INSTALLATION_ENV: docker }
-    command: ["bundle", "exec", "rails", "db:chatwoot_prepare"]
+    command: ["sh", "-ec", "bundle exec rails db:chatwoot_prepare && bundle exec rails bridge:ensure_service_account"]
     depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_healthy } }
 
   rails:
