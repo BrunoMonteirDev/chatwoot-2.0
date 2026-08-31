@@ -708,6 +708,7 @@ export const ChatArea: React.FC<Props> = ({
   const [isReviewPlaying, setIsReviewPlaying] = useState(false);
   const [reviewCurrentTime, setReviewCurrentTime] = useState(0);
   const [recordingError, setRecordingError] = useState<string | null>(null);
+  const [recordingLevels, setRecordingLevels] = useState<number[]>(() => Array(28).fill(0));
   const sendingDraftsRef = useRef(new Set<string>());
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingStreamRef = useRef<MediaStream | null>(null);
@@ -715,6 +716,8 @@ export const ChatArea: React.FC<Props> = ({
   const recordingCancelledRef = useRef(false);
   const recordingSessionRef = useRef(0);
   const recordingUrlRef = useRef<string | null>(null);
+  const recordingAudioContextRef = useRef<AudioContext | null>(null);
+  const recordingAnimationFrameRef = useRef<number | null>(null);
   const reviewAudioRef = useRef<HTMLAudioElement>(null);
   const dragDepthRef = useRef(0);
   const isRecordingVoice = recordingPhase !== 'idle';
@@ -1084,6 +1087,39 @@ export const ChatArea: React.FC<Props> = ({
     setReviewCurrentTime(0);
   };
 
+  const stopRecordingMeter = () => {
+    if (recordingAnimationFrameRef.current !== null) cancelAnimationFrame(recordingAnimationFrameRef.current);
+    recordingAnimationFrameRef.current = null;
+    void recordingAudioContextRef.current?.close();
+    recordingAudioContextRef.current = null;
+    setRecordingLevels(Array(28).fill(0));
+  };
+
+  const startRecordingMeter = (stream: MediaStream) => {
+    const AudioContextConstructor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextConstructor) return;
+    const context = new AudioContextConstructor();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.78;
+    context.createMediaStreamSource(stream).connect(analyser);
+    const samples = new Uint8Array(analyser.frequencyBinCount);
+    const render = () => {
+      analyser.getByteTimeDomainData(samples);
+      const levels = Array.from({ length: 28 }, (_, index) => {
+        const start = Math.floor(index * samples.length / 28);
+        const end = Math.floor((index + 1) * samples.length / 28);
+        let total = 0;
+        for (let sample = start; sample < end; sample += 1) total += Math.abs(samples[sample] - 128);
+        return Math.min(1, (total / Math.max(1, end - start)) / 32);
+      });
+      setRecordingLevels(levels);
+      recordingAnimationFrameRef.current = requestAnimationFrame(render);
+    };
+    recordingAudioContextRef.current = context;
+    void context.resume().then(render).catch(stopRecordingMeter);
+  };
+
   useEffect(() => {
     setRecordingPhase('idle');
     setRecordingTime(0);
@@ -1094,6 +1130,7 @@ export const ChatArea: React.FC<Props> = ({
       recordingCancelledRef.current = true;
       recordingSessionRef.current += 1;
       mediaRecorderRef.current?.stop();
+      stopRecordingMeter();
       releaseRecordingResources(recordingStreamRef.current, recordingUrlRef.current);
       recordingStreamRef.current = null;
       recordingUrlRef.current = null;
@@ -1105,6 +1142,7 @@ export const ChatArea: React.FC<Props> = ({
     recordingCancelledRef.current = true;
     recordingSessionRef.current += 1;
     mediaRecorderRef.current?.stop();
+    stopRecordingMeter();
     releaseRecordingResources(recordingStreamRef.current, recordingUrlRef.current);
     recordingStreamRef.current = null;
     recordingUrlRef.current = null;
@@ -1145,8 +1183,10 @@ export const ChatArea: React.FC<Props> = ({
       recordingChunksRef.current = [];
       recordingStreamRef.current = stream;
       mediaRecorderRef.current = recorder;
+      startRecordingMeter(stream);
       recorder.ondataavailable = event => { if (event.data.size) recordingChunksRef.current.push(event.data); };
       recorder.onstop = () => {
+        stopRecordingMeter();
         releaseRecordingResources(stream, null);
         recordingStreamRef.current = null;
         mediaRecorderRef.current = null;
@@ -1224,6 +1264,12 @@ export const ChatArea: React.FC<Props> = ({
     setSelectedFiles([]);
     setShowEmojiPicker(false);
     setReplyTo(null);
+  };
+
+  const handleFinishRecording = () => {
+    if (recordingPhase !== 'recording' && recordingPhase !== 'paused') return;
+    setRecordingPhase('review');
+    mediaRecorderRef.current?.stop();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -2111,17 +2157,15 @@ export const ChatArea: React.FC<Props> = ({
                     </span>
                   </div>
 
-                  {/* Dotted audio wave line */}
-                  <div className="flex-1 min-w-0 mx-2 overflow-hidden flex items-center">
-                    <div className="w-full tracking-[3px] text-[#8696a0]/60 text-xs font-mono select-none truncate">
-                      ...............................................................................
-                    </div>
+                  <div className="mx-2 flex h-8 flex-1 min-w-0 items-center justify-between gap-0.5 overflow-hidden" aria-label="Nível do microfone">
+                    {recordingLevels.map((level, index) => <span key={index} className="w-1 rounded-full bg-[#f15c6d] transition-[height] duration-75" style={{ height: `${Math.max(3, Math.round(3 + level * 25))}px` }} />)}
                   </div>
 
                   {/* Pause icon button */}
                   <button
                     onClick={() => {
                       mediaRecorderRef.current?.pause();
+                      stopRecordingMeter();
                       setRecordingPhase('paused');
                     }}
                     title="Pausar gravação"
@@ -2141,6 +2185,7 @@ export const ChatArea: React.FC<Props> = ({
                   <button
                     onClick={() => {
                       mediaRecorderRef.current?.resume();
+                      if (recordingStreamRef.current) startRecordingMeter(recordingStreamRef.current);
                       setRecordingPhase('recording');
                     }}
                     title="Continuar gravação"
@@ -2192,8 +2237,14 @@ export const ChatArea: React.FC<Props> = ({
                         ref={reviewAudioRef}
                         src={recordedAudio.url}
                         preload="metadata"
-                        onLoadedMetadata={(event) => setRecordedAudio((current) => current ? { ...current, duration: finiteAudioDuration(event.currentTarget.duration) } : current)}
-                        onDurationChange={(event) => setRecordedAudio((current) => current ? { ...current, duration: finiteAudioDuration(event.currentTarget.duration) } : current)}
+                        onLoadedMetadata={(event) => {
+                          const duration = finiteAudioDuration(event.currentTarget.duration);
+                          setRecordedAudio((current) => current ? { ...current, duration } : current);
+                        }}
+                        onDurationChange={(event) => {
+                          const duration = finiteAudioDuration(event.currentTarget.duration);
+                          setRecordedAudio((current) => current ? { ...current, duration } : current);
+                        }}
                         onTimeUpdate={(event) => setReviewCurrentTime(event.currentTarget.currentTime)}
                         onPlay={() => setIsReviewPlaying(true)}
                         onPause={() => setIsReviewPlaying(false)}
@@ -2210,12 +2261,12 @@ export const ChatArea: React.FC<Props> = ({
               )}
 
               <button
-                onClick={handleSend}
+                onClick={recordingPhase === 'review' ? handleSend : handleFinishRecording}
                 disabled={isSendingMessage || (recordingPhase === 'review' && !recordedAudio)}
-                title={recordingPhase === 'review' ? 'Enviar áudio' : 'Finalizar gravação e revisar'}
+                title={recordingPhase === 'review' ? 'Enviar áudio' : 'Finalizar gravação e ouvir prévia'}
                 className="w-8 h-8 rounded-full bg-white hover:bg-gray-100 text-black flex items-center justify-center shadow-xs transition-transform active:scale-95 shrink-0 cursor-pointer ml-1 disabled:opacity-40"
               >
-                <SendHorizontal className="w-4 h-4 text-[#111b21] stroke-[2.2]" />
+                {recordingPhase === 'review' ? <SendHorizontal className="w-4 h-4 text-[#111b21] stroke-[2.2]" /> : <Check className="w-4 h-4 text-[#111b21] stroke-[2.8]" />}
               </button>
             </div>
           ) : (

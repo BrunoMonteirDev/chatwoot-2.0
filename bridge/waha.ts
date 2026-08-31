@@ -109,6 +109,18 @@ const sent = (payload: unknown): SentWahaMessage => {
   if (!messageId) throw new WahaApiError('invalid_response');
   return { messageId, chatId, fromMe: data?.fromMe !== false };
 };
+const filenameFromDisposition = (value: string | null) => {
+  const match = value?.match(/filename\*?=(?:UTF-8''|"?)([^";]+)/i);
+  if (!match?.[1]) return undefined;
+  try { return decodeURIComponent(match[1].trim()); } catch { return match[1].trim(); }
+};
+const filenameFor = (attachment: OutgoingAttachment, contentType: string, disposition: string | null) => {
+  if (attachment.fileName?.trim()) return attachment.fileName.trim();
+  const fromHeader = filenameFromDisposition(disposition);
+  if (fromHeader) return fromHeader;
+  const extension = contentType.includes('ogg') ? 'ogg' : contentType.includes('mp4') ? 'm4a' : contentType.includes('webm') ? 'webm' : 'bin';
+  return `audio.${extension}`;
+};
 const fileData = async (attachment: OutgoingAttachment) => {
   const assetUrl = chatwootAssetUrl(attachment.url);
   const base = new URL(config.chatwootBaseUrl);
@@ -117,7 +129,8 @@ const fileData = async (attachment: OutgoingAttachment) => {
   if (!response.ok) throw new Error(`Não foi possível baixar o anexo do Chatwoot (${response.status}).`);
   const buffer = Buffer.from(await response.arrayBuffer());
   if (buffer.length > config.maxMediaBytes) throw new Error('O anexo do Chatwoot excede o tamanho permitido.');
-  return { data: buffer.toString('base64'), mimetype: attachment.contentType || 'application/octet-stream', ...(attachment.fileName ? { filename: attachment.fileName } : {}) };
+  const mimetype = attachment.contentType || response.headers.get('content-type')?.split(';')[0] || 'application/octet-stream';
+  return { data: buffer.toString('base64'), mimetype, filename: filenameFor(attachment, mimetype, response.headers.get('content-disposition')) };
 };
 
 export const wahaTransport = {
@@ -165,12 +178,14 @@ export const wahaTransport = {
   },
   async sendMedia(session: string, chatId: string, attachment: OutgoingAttachment, caption = '', replyTo?: string) {
     const file = await fileData(attachment);
-    // WAHA's voice endpoint expects an OGG/Opus WhatsApp voice note. Browser
-    // recordings can be WebM, which must be sent as a regular file instead of
-    // being mislabeled as a voice note and rejected by WhatsApp clients.
-    const voiceNote = attachment.fileType === 'audio' && /^audio\/ogg(?:\s*;\s*codecs?=opus)?$/i.test(file.mimetype);
+    // WhatsApp voice notes are OGG/Opus. WAHA/GOWS can accept browser-recorded
+    // WebM and MP4 on sendVoice, but those payloads are not reliably delivered
+    // as playable voice notes by WhatsApp clients. Convert only non-Opus input;
+    // OGG/Opus is already in the target format and keeps its original bytes.
+    const voiceNote = attachment.fileType === 'audio';
     const kind = attachment.fileType === 'image' ? 'sendImage' : voiceNote ? 'sendVoice' : attachment.fileType === 'video' ? 'sendVideo' : 'sendFile';
-    return sent(await request(`/api/${kind}`, { method: 'POST', body: JSON.stringify({ session, chatId: normalizeWahaChatId(chatId), file, ...(caption ? { caption } : {}), ...(replyTo ? { reply_to: replyTo } : {}) }) }));
+    const opus = /^audio\/ogg(?:\s*;\s*codecs?=opus)?$/i.test(file.mimetype);
+    return sent(await request(`/api/${kind}`, { method: 'POST', body: JSON.stringify({ session, chatId: normalizeWahaChatId(chatId), file, ...(voiceNote && !opus ? { convert: true } : {}), ...(caption ? { caption } : {}), ...(replyTo ? { reply_to: replyTo } : {}) }) }));
   },
   async sendReaction(session: string, chatId: string, messageId: string, emoji: string) {
     await request('/api/reaction', { method: 'PUT', body: JSON.stringify({ session, chatId: normalizeWahaChatId(chatId), messageId, reaction: emoji }) });

@@ -82,7 +82,9 @@ describe('WAHA session transport', () => {
 
     expect(fetchMock.mock.calls[1][0]).toBe('http://waha.test/api/sendVoice');
     expect(fetchMock.mock.calls[3][0]).toBe('http://waha.test/api/sendFile');
-    expect(fetchMock.mock.calls[5][0]).toBe('http://waha.test/api/sendFile');
+    expect(fetchMock.mock.calls[5][0]).toBe('http://waha.test/api/sendVoice');
+    expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).not.toHaveProperty('convert');
+    expect(JSON.parse((fetchMock.mock.calls[5][1] as RequestInit).body as string)).toMatchObject({ convert: true });
   });
 
   it('lists GOWS history with all chats, bounded pagination and media disabled', async () => {
