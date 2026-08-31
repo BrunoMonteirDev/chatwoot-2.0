@@ -1258,23 +1258,25 @@ app.post('/webhooks/waha', (request, response) => {
           console.info('[waha] platform echo ignored', { session: message.session, messageId: message.externalId });
           return;
         }
+        let conversationId: number | undefined;
         await chatwootBridge.withAccount(inbox.accountId, async () => {
-        const { contact, conversation } = await conversationForWahaIdentity(inbox, message);
-        if (message.chatType === 'group') await chatwootBridge.saveEvolutionGroup(contact.id, message.remoteJid, message.name, { participants: message.participantJid ? [{ jid: message.participantJid, name: message.participantName }] : undefined });
-        // The public API message endpoint does not infer a Chatwoot internal
-        // reply id from provider metadata reliably. Resolve the namespaced
-        // WAHA key first and send both the internal and external identity.
-        const inReplyTo = await replyTargetId(conversation.id, 'waha', message.quotedMessageId);
-        const context = { chatType: message.chatType, participantJid: message.participantJid, participantName: message.participantName };
-        if (message.media) {
-          const media = await wahaTransport.downloadMedia(message.media);
-          if (message.fromMe) await chatwootBridge.createMobileOutgoingTransportMediaMessage(conversation.id, 'waha', message.content, message.externalId, media, message.quotedMessageId, message.remoteJid, inReplyTo, context);
-          else await chatwootBridge.createIncomingTransportMediaMessage(conversation.id, 'waha', message.content, message.externalId, media, message.quotedMessageId, message.remoteJid, inReplyTo, context);
-        } else if (message.fromMe) await chatwootBridge.createMobileOutgoingTransportMessage(conversation.id, 'waha', message.content, message.externalId, message.quotedMessageId, message.remoteJid, inReplyTo, context);
-        else await chatwootBridge.createIncomingTransportMessage(inbox.identifier, contact.source_id, conversation.id, 'waha', message.content, message.externalId, message.quotedMessageId, message.remoteJid, inReplyTo, context);
+          const { contact, conversation } = await conversationForWahaIdentity(inbox, message);
+          conversationId = conversation.id;
+          if (message.chatType === 'group') await chatwootBridge.saveEvolutionGroup(contact.id, message.remoteJid, message.name, { participants: message.participantJid ? [{ jid: message.participantJid, name: message.participantName }] : undefined });
+          // The public API message endpoint does not infer a Chatwoot internal
+          // reply id from provider metadata reliably. Resolve the namespaced
+          // WAHA key first and send both the internal and external identity.
+          const inReplyTo = await replyTargetId(conversation.id, 'waha', message.quotedMessageId);
+          const context = { chatType: message.chatType, participantJid: message.participantJid, participantName: message.participantName };
+          if (message.media) {
+            const media = await wahaTransport.downloadMedia(message.media);
+            if (message.fromMe) await chatwootBridge.createMobileOutgoingTransportMediaMessage(conversation.id, 'waha', message.content, message.externalId, media, message.quotedMessageId, message.remoteJid, inReplyTo, context);
+            else await chatwootBridge.createIncomingTransportMediaMessage(conversation.id, 'waha', message.content, message.externalId, media, message.quotedMessageId, message.remoteJid, inReplyTo, context);
+          } else if (message.fromMe) await chatwootBridge.createMobileOutgoingTransportMessage(conversation.id, 'waha', message.content, message.externalId, message.quotedMessageId, message.remoteJid, inReplyTo, context);
+          else await chatwootBridge.createIncomingTransportMessage(inbox.identifier, contact.source_id, conversation.id, 'waha', message.content, message.externalId, message.quotedMessageId, message.remoteJid, inReplyTo, context);
         });
         await dedup.commit(key); bridgeMetrics.increment('whatsapp_messages_received_total', { transport: 'waha', media: Boolean(message.media) });
-        console.info('[waha] message created', { trackId: message.trackId, messageId: message.externalId, conversationId: conversation.id, media: Boolean(message.media) });
+        console.info('[waha] message created', { trackId: message.trackId, messageId: message.externalId, conversationId, media: Boolean(message.media) });
       } catch (error) { dedup.release(key); console.error('[waha] message processing failed', { trackId: message.trackId, event: message.event, error: error instanceof Error ? error.message : 'unknown' }); }
       return;
     }
