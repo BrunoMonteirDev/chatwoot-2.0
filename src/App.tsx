@@ -205,7 +205,7 @@ export default function App() {
   const [selectedInbox, setSelectedInbox] = useState<string>(() => initialRoute.inbox || 'todas');
   const [routeAccountId, setRouteAccountId] = useState<string>(() => initialRoute.accountId || '');
   const [conversationServerFilters, setConversationServerFilters] = useState<ConversationServerFilters>({ teamId: null, labels: [] });
-  const { conversations, status: conversationsStatus, error: conversationsError, hasNextPage, isLoadingMore, retry: retryConversations, loadMore, applyOutgoingMessage, applyConversationUpdate, removeConversation, replaceConversation, upsertRealtimeConversation, addCreatedConversation, applyRealtimeMessage, refreshRecentConversations } = useConversations(currentAccount?.id ?? null, selectedInbox, conversationServerFilters);
+  const { conversations, status: conversationsStatus, error: conversationsError, hasNextPage, isLoadingMore, isRefreshing: conversationsRefreshing, retry: retryConversations, loadMore, applyOutgoingMessage, applyConversationUpdate, removeConversation, replaceConversation, upsertRealtimeConversation, addCreatedConversation, applyRealtimeMessage, refreshRecentConversations } = useConversations(currentAccount?.id ?? null, selectedInbox, conversationServerFilters);
   const [activeFilter, setActiveFilter] = useState<FilterCategory>('minhas');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [user, setUser] = useState<UserProfile>(emptyUser);
@@ -1126,15 +1126,16 @@ export default function App() {
                   onTeamFilterChange={(teamId) => setConversationServerFilters((current) => ({ ...current, teamId }))}
                   onLabelFiltersChange={(labels) => setConversationServerFilters((current) => ({ ...current, labels }))}
                 />
+                {conversationsRefreshing && <div className="h-0.5 overflow-hidden bg-transparent" aria-label="Atualizando conversas"><div className="h-full w-1/3 animate-pulse bg-[#00a884]" /></div>}
 
                 {/* Scrollable Chat List */}
                 <div className="flex-1 overflow-y-auto pb-24 md:pb-0 transition-colors" onScroll={(event) => {
                   const element = event.currentTarget;
                   if (hasNextPage && element.scrollTop + element.clientHeight >= element.scrollHeight - 120) loadMore();
                 }}>
-                  {conversationsStatus === 'loading' ? (
+                  {conversationsStatus === 'loading' && conversations.length === 0 ? (
                     <div className={`p-8 text-center text-sm ${isDarkMode ? 'text-[#8696a0]' : 'text-[#667781]'}`}>Carregando conversas…</div>
-                  ) : conversationsStatus === 'error' ? (
+                  ) : conversationsStatus === 'error' && conversations.length === 0 ? (
                     <div className={`p-8 text-center text-sm ${isDarkMode ? 'text-[#8696a0]' : 'text-[#667781]'}`}><p>{conversationsError || 'Não foi possível carregar as conversas.'}</p><button type="button" onClick={() => void retryConversations()} className="mt-3 text-[#00a884] hover:underline">Tentar novamente</button></div>
                   ) : filteredAndSortedChats.length > 0 ? (
                     filteredAndSortedChats.map((c) => (

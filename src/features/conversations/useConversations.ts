@@ -34,11 +34,13 @@ export const useConversations = (accountId: number | null, selectedInbox: string
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasNextPage, setHasNextPage] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
   const pageRef = useRef(1);
+  const loadedAccountRef = useRef<number | null>(null);
 
   const inboxId = /^\d+$/.test(selectedInbox) ? Number(selectedInbox) : undefined;
   const filterKey = `${filters.teamId || ''}:${(filters.labels || []).join('|')}`;
@@ -48,7 +50,10 @@ export const useConversations = (accountId: number | null, selectedInbox: string
     const controller = new AbortController();
     abortRef.current = controller;
     const requestId = ++requestIdRef.current;
-    append ? setIsLoadingMore(true) : setStatus('loading');
+    const isInitialLoad = !append && loadedAccountRef.current !== accountId;
+    if (append) setIsLoadingMore(true);
+    else if (isInitialLoad) setStatus('loading');
+    else setIsRefreshing(true);
     setError(null);
     try {
       const result = await conversationService.list({ accountId, inboxId, ...filters, page, signal: controller.signal });
@@ -56,18 +61,24 @@ export const useConversations = (accountId: number | null, selectedInbox: string
       setConversations((current) => append ? [...current, ...result.conversations.filter((item) => !current.some((existing) => existing.id === item.id))] : result.conversations);
       pageRef.current = page;
       setHasNextPage(result.hasNextPage);
+      loadedAccountRef.current = accountId;
       setStatus('ready');
     } catch (cause) {
       if (controller.signal.aborted || requestId !== requestIdRef.current) return;
       setError(errorMessageForUser(cause));
-      setStatus('error');
+      // A background refresh is advisory. Retain the list already rendered
+      // instead of replacing it with an error state on a transient failure.
+      if (isInitialLoad) setStatus('error');
     } finally {
-      if (!controller.signal.aborted && requestId === requestIdRef.current) setIsLoadingMore(false);
+      if (!controller.signal.aborted && requestId === requestIdRef.current) {
+        setIsLoadingMore(false);
+        setIsRefreshing(false);
+      }
     }
   }, [accountId, inboxId, filterKey]);
 
   useEffect(() => {
-    if (!accountId) { setConversations([]); setStatus('idle'); return; }
+    if (!accountId) { loadedAccountRef.current = null; setConversations([]); setStatus('idle'); setIsRefreshing(false); return; }
     void load(1, false);
     return () => abortRef.current?.abort();
   }, [accountId, inboxId, filterKey, load]);
@@ -140,5 +151,5 @@ export const useConversations = (accountId: number | null, selectedInbox: string
     });
   }, []);
 
-  return { conversations, status, error, hasNextPage, isLoadingMore, retry: () => load(1, false), loadMore, applyOutgoingMessage, applyConversationUpdate, removeConversation, replaceConversation, upsertRealtimeConversation, addCreatedConversation, applyRealtimeMessage, refreshRecentConversations };
+  return { conversations, status, error, hasNextPage, isLoadingMore, isRefreshing, retry: () => load(1, false), loadMore, applyOutgoingMessage, applyConversationUpdate, removeConversation, replaceConversation, upsertRealtimeConversation, addCreatedConversation, applyRealtimeMessage, refreshRecentConversations };
 };
