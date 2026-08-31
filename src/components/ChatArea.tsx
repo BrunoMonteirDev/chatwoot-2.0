@@ -2171,7 +2171,7 @@ export const ChatArea: React.FC<Props> = ({
                       <div
                         onClick={(event) => {
                           const audio = reviewAudioRef.current;
-                          const duration = recordedAudio.duration;
+                          const duration = recordedAudio?.duration;
                           if (!audio || !duration) return;
                           const rect = event.currentTarget.getBoundingClientRect();
                           const next = Math.max(0, Math.min(duration, ((event.clientX - rect.left) / rect.width) * duration));
@@ -2182,11 +2182,11 @@ export const ChatArea: React.FC<Props> = ({
                         title="Navegar na prévia"
                       >
                         <div className="h-1 w-full overflow-hidden rounded-full bg-[#8696a0]/40">
-                          <div className="h-full bg-[#00a884]" style={{ width: `${recordedAudio.duration ? Math.min(100, reviewCurrentTime / recordedAudio.duration * 100) : 0}%` }} />
+                          <div className="h-full bg-[#00a884]" style={{ width: `${recordedAudio?.duration ? Math.min(100, reviewCurrentTime / recordedAudio.duration * 100) : 0}%` }} />
                         </div>
                       </div>
                       <span className={`mr-1 shrink-0 text-sm font-semibold font-mono ${isDarkMode ? 'text-[#e9edef]' : 'text-[#111b21]'}`}>
-                        {recordedAudio.duration ? `${formatRecordingTime(Math.floor(reviewCurrentTime))} / ${formatRecordingTime(Math.floor(recordedAudio.duration))}` : 'Carregando…'}
+                        {recordedAudio?.duration ? `${formatRecordingTime(Math.floor(reviewCurrentTime))} / ${formatRecordingTime(Math.floor(recordedAudio.duration))}` : 'Carregando…'}
                       </span>
                       <audio
                         ref={reviewAudioRef}

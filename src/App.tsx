@@ -16,6 +16,7 @@ import { NavRail } from './components/NavRail';
 import { ChatListHeader } from './components/ChatListHeader';
 import { ChatListItem } from './components/ChatListItem';
 import { ChatArea } from './components/ChatArea';
+import { ConversationErrorBoundary } from './components/ConversationErrorBoundary';
 import { ImagePreviewModal } from './components/ImagePreviewModal';
 import { StatusView } from './components/StatusView';
 import { CallsView } from './components/CallsView';
@@ -1172,7 +1173,7 @@ export default function App() {
                   showMobileChat ? 'flex' : 'hidden md:flex'
                 }`}
               >
-                {activeChatWithHistory ? <ChatArea
+                {activeChatWithHistory ? <ConversationErrorBoundary key={activeChatWithHistory.id} isDarkMode={isDarkMode}><ChatArea
                   chat={activeChatWithHistory}
                   allChats={listChats}
                   onSelectChat={(selected) => {
@@ -1250,7 +1251,7 @@ export default function App() {
                   isSidebarCollapsed={isSidebarCollapsed}
                   onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
                   onMobileBack={() => navigateToTab('chats')}
-                /> : (
+                /></ConversationErrorBoundary> : (
                   <div className={`h-full flex items-center justify-center text-center p-8 ${isDarkMode ? 'bg-[#0b141a] text-[#8696a0]' : 'bg-[#f0f2f5] text-[#667781]'}`}>
                     <div>
                       <MessageSquare className="w-10 h-10 mx-auto mb-3 opacity-60" />
