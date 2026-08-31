@@ -41,7 +41,7 @@ export const MetaCloudSetup = ({ accountId, webhookUrl, isDarkMode, inbox: exist
       setEmbeddedStage('configuring_webhook');
       const finalized = await metaCloudSetup.finalizeEmbeddedSignup(onboardingSession, targetInbox.id);
       const saved = await inboxService.saveWhatsAppTransport(accountId, targetInbox, 'meta_cloud', {
-        whatsapp_provider: 'meta_cloud', meta_connection_status: finalized.webhookReady ? 'connected' : 'pending', meta_onboarding_status: finalized.webhookReady ? 'connected' : 'webhook_pending', meta_onboarding_mode: completion.onboardingMode, meta_business_app_status: completion.onboardingMode === 'coexistence' ? 'active' : 'not_applicable', meta_history_authorized: false, meta_history_status: completion.onboardingMode === 'coexistence' ? 'waiting' : 'not_available', meta_waba_id: completion.connection.wabaId, meta_phone_number_id: completion.connection.phoneNumberId, meta_display_phone_number: completion.connection.displayPhoneNumber,
+        whatsapp_provider: 'meta_cloud', meta_connection_status: finalized.webhookReady ? 'connected' : 'pending', meta_connection_updated_at: new Date().toISOString(), meta_onboarding_status: finalized.webhookReady ? 'connected' : 'webhook_pending', meta_onboarding_mode: completion.onboardingMode, meta_business_app_status: completion.onboardingMode === 'coexistence' ? 'active' : 'not_applicable', meta_history_authorized: false, meta_history_status: completion.onboardingMode === 'coexistence' ? 'waiting' : 'not_available', meta_waba_id: completion.connection.wabaId, meta_phone_number_id: completion.connection.phoneNumberId, meta_display_phone_number: completion.connection.displayPhoneNumber,
       }, webhookUrl);
       setEmbeddedStage('connected'); setSaving(false); resetEmbedded(); await onSaved(saved);
     } catch (cause) {
@@ -102,7 +102,7 @@ export const MetaCloudSetup = ({ accountId, webhookUrl, isDarkMode, inbox: exist
       const targetInbox = existingInbox || await inboxService.createWhatsAppApiInbox(accountId, { name: name.trim(), webhookUrl });
       const connection = await metaCloudSetup.validate({ inboxId: targetInbox.id, wabaId: wabaId.trim(), phoneNumberId: phoneNumberId.trim(), accessToken: accessToken.trim() });
       const saved = await inboxService.saveWhatsAppTransport(accountId, targetInbox, 'meta_cloud', {
-        whatsapp_provider: 'meta_cloud', meta_connection_status: 'connected', meta_onboarding_status: 'manual', meta_onboarding_mode: 'standard', meta_business_app_status: 'not_applicable', meta_history_authorized: false, meta_history_status: 'not_available', meta_waba_id: connection.wabaId, meta_phone_number_id: connection.phoneNumberId, meta_display_phone_number: connection.displayPhoneNumber,
+        whatsapp_provider: 'meta_cloud', meta_connection_status: 'connected', meta_connection_updated_at: new Date().toISOString(), meta_onboarding_status: 'manual', meta_onboarding_mode: 'standard', meta_business_app_status: 'not_applicable', meta_history_authorized: false, meta_history_status: 'not_available', meta_waba_id: connection.wabaId, meta_phone_number_id: connection.phoneNumberId, meta_display_phone_number: connection.displayPhoneNumber,
       }, webhookUrl);
       setAccessToken(''); await onSaved(saved);
     } catch (cause) { setError(errorMessageForUser(cause)); }

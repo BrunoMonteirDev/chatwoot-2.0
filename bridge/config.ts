@@ -50,10 +50,10 @@ export const config = {
   historyMediaConcurrency: Number(process.env.HISTORY_MEDIA_CONCURRENCY || 3),
   maxMediaBytes: Number(process.env.BRIDGE_MAX_MEDIA_BYTES || 32 * 1024 * 1024),
   // Vite picks the first free development port. Rails owns :3000 in this
-  // workspace, so the custom frontend normally runs on :3002. Keep this
+  // workspace, so the custom frontend may move to a nearby port. Keep this
   // explicit development allow-list; production still requires configured
   // origins and never falls back to a wildcard.
-  allowedOrigins: (process.env.BRIDGE_ALLOWED_ORIGINS || (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3000,http://localhost:3002')).split(',').map(value => value.trim()).filter(Boolean),
+  allowedOrigins: (process.env.BRIDGE_ALLOWED_ORIGINS || (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003')).split(',').map(value => value.trim()).filter(Boolean),
   redisUrl: process.env.BRIDGE_REDIS_URL || '',
   encryptionKey: process.env.BRIDGE_ENCRYPTION_KEY || '',
   // App ID and Embedded Signup configuration ID are public browser inputs,

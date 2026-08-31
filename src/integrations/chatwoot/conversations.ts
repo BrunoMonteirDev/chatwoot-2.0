@@ -3,14 +3,17 @@ import { chatwootApiClient } from './client';
 import { normalizeConversation } from './normalizers';
 import type { ChatwootContactConversationsResponse, ChatwootConversationDto, ChatwootConversationsResponse } from './types';
 
-export interface ListConversationsParams { accountId: number; inboxId?: number; page: number; signal?: AbortSignal; }
+export interface ConversationServerFilters { teamId?: number | null; labels?: string[]; }
+export interface ListConversationsParams extends ConversationServerFilters { accountId: number; inboxId?: number; page: number; signal?: AbortSignal; }
 export interface ConversationPage { conversations: ConversationSummary[]; hasNextPage: boolean; }
 export interface CreateConversationParams { accountId: number; contactId: number; inboxId: number; }
 
 export const conversationService = {
-  async list({ accountId, inboxId, page, signal }: ListConversationsParams): Promise<ConversationPage> {
+  async list({ accountId, inboxId, teamId, labels = [], page, signal }: ListConversationsParams): Promise<ConversationPage> {
     const query = new URLSearchParams({ page: String(page), status: 'all', sort_by: 'last_activity_at_desc' });
     if (inboxId) query.set('inbox_id', String(inboxId));
+    if (teamId) query.set('team_id', String(teamId));
+    labels.forEach((label) => query.append('labels[]', label));
     const response = await chatwootApiClient.get<ChatwootConversationsResponse>(`/api/v1/accounts/${accountId}/conversations?${query}`, { signal });
     const conversations = response.data.payload.map(normalizeConversation);
     return { conversations, hasNextPage: conversations.length === 25 };
@@ -19,7 +22,7 @@ export const conversationService = {
   async create({ accountId, contactId, inboxId }: CreateConversationParams): Promise<ConversationSummary> {
     const response = await chatwootApiClient.post<ChatwootConversationDto>(
       `/api/v1/accounts/${accountId}/conversations`,
-      { contact_id: contactId, inbox_id: inboxId }
+      { contact_id: contactId, inbox_id: inboxId, idempotent: true }
     );
     return normalizeConversation(response);
   },

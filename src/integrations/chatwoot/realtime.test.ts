@@ -56,4 +56,19 @@ describe('ChatwootRealtimeClient', () => {
     expect(JSON.parse(sockets[2].sent[0]).identifier).toContain('"account_id":3');
     client.disconnect();
   });
+
+  it('preserva envelopes incrementais de inbox, exclusão e mudanças de conversa', () => {
+    const sockets: FakeSocket[] = [];
+    const client = new ChatwootRealtimeClient({ websocketUrl: 'ws://chatwoot.test/cable', webSocketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    const received = vi.fn(); client.onEvent = received;
+    client.connect({ accountId: 2, userId: 7, pubsubToken: 'pubsub' }); sockets[0].open();
+    for (const event of ['inbox.updated', 'conversation.deleted', 'team.changed', 'conversation.contact_changed', 'contact.created', 'contact.merged', 'contact.deleted']) {
+      sockets[0].receive({ message: { event, data: { id: 10, account_id: 2 } } });
+    }
+    expect(received).toHaveBeenCalledTimes(7);
+    expect(received).toHaveBeenLastCalledWith({ event: 'contact.deleted', data: { id: 10, account_id: 2 } });
+    client.disconnect();
+  });
 });

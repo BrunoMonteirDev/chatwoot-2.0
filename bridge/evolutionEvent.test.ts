@@ -4,7 +4,7 @@ import { parseIncomingEvolutionEdit, parseIncomingEvolutionGroupLifecycle, parse
 describe('parseIncomingEvolutionMessage', () => {
   it('normaliza texto incoming do evento messages.upsert', () => {
     expect(parseIncomingEvolutionMessage({ event: 'messages.upsert', instance: 'cw-1-vendas', data: { key: { remoteJid: '5511999999999@s.whatsapp.net', id: 'BAE5', fromMe: false }, pushName: 'Ana', message: { conversation: 'Olá' } } }))
-      .toEqual({ instance: 'cw-1-vendas', messageId: 'BAE5', sourceId: 'whatsapp:5511999999999', remoteJid: '5511999999999@s.whatsapp.net', phoneNumber: '+5511999999999', fromMe: false, name: 'Ana', contactName: 'Ana', content: 'Olá' });
+      .toEqual({ instance: 'cw-1-vendas', messageId: 'BAE5', sourceId: 'whatsapp:551199999999', remoteJid: '5511999999999@s.whatsapp.net', phoneNumber: '+551199999999', fromMe: false, name: 'Ana', contactName: 'Ana', content: 'Olá' });
   });
 
   it('usa extendedTextMessage e identifica mensagens enviadas pelo próprio número', () => {
@@ -16,7 +16,7 @@ describe('parseIncomingEvolutionMessage', () => {
     expect(parseIncomingEvolutionMessage({
       event: 'messages.upsert', instance: 'cw-1',
       data: { key: { remoteJid: '5511988887777@s.whatsapp.net', senderPn: '5511977776666@s.whatsapp.net', id: 'mobile-id', fromMe: true }, message: { conversation: 'Enviado pelo celular' } },
-    })).toMatchObject({ sourceId: 'whatsapp:5511988887777', phoneNumber: '+5511988887777', fromMe: true });
+    })).toMatchObject({ sourceId: 'whatsapp:551188887777', phoneNumber: '+551188887777', fromMe: true });
   });
 
   it('usa senderPn como telefone canônico e mantém o LID como alias', () => {
@@ -24,7 +24,7 @@ describe('parseIncomingEvolutionMessage', () => {
       event: 'messages.upsert', instance: 'cw-1',
       data: { key: { remoteJid: '58497538457613@lid', senderPn: '5511999999999@s.whatsapp.net', id: 'lid-message', fromMe: false }, message: { conversation: 'Oi' } },
     })).toEqual({
-      instance: 'cw-1', messageId: 'lid-message', sourceId: 'whatsapp:5511999999999', remoteJid: '58497538457613@lid', phoneNumber: '+5511999999999', lid: '58497538457613', fromMe: false, name: '5511999999999', content: 'Oi',
+      instance: 'cw-1', messageId: 'lid-message', sourceId: 'whatsapp:551199999999', remoteJid: '58497538457613@lid', phoneNumber: '+551199999999', lid: '58497538457613', fromMe: false, name: '551199999999', content: 'Oi',
     });
   });
 
@@ -77,7 +77,7 @@ describe('parseIncomingEvolutionMessage', () => {
     expect(parseIncomingEvolutionMessage({
       event: 'messages.upsert', instance: 'cw-1',
       data: { key: { remoteJid: '5511988887777@s.whatsapp.net', id: 'mobile-image', fromMe: true }, message: { imageMessage: { mimetype: 'image/jpeg' } } },
-    })).toMatchObject({ fromMe: true, sourceId: 'whatsapp:5511988887777', media: { kind: 'image' } });
+    })).toMatchObject({ fromMe: true, sourceId: 'whatsapp:551188887777', media: { kind: 'image' } });
   });
 
   it('aceita grupo Evolution e preserva grupo e participante sem criar contato individual', () => {
@@ -101,7 +101,7 @@ describe('parseIncomingEvolutionReaction', () => {
       },
     })).toEqual({
       instance: 'cw-1', eventId: 'reaction-event-1', targetMessageId: 'original-1', targetFromMe: true,
-      sourceId: 'whatsapp:5511999999999', remoteJid: '5511999999999@s.whatsapp.net', phoneNumber: '+5511999999999',
+      sourceId: 'whatsapp:551199999999', remoteJid: '5511999999999@s.whatsapp.net', phoneNumber: '+551199999999',
       fromMe: false, name: 'Ana', contactName: 'Ana', senderId: 'contact:5511999999999', emoji: '😂',
     });
   });

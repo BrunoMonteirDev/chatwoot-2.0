@@ -10,7 +10,7 @@ const webhook = (message: Record<string, unknown>) => ({
 describe('parseMetaWebhook', () => {
   it('normaliza texto, reply e o namespace Meta', () => {
     const parsed = parseMetaWebhook(webhook({ id: 'wamid.in-1', from: '5511999999999', timestamp: '1710000000', type: 'text', text: { body: 'Olá' }, context: { id: 'wamid.original' } }));
-    expect(parsed.messages).toEqual([expect.objectContaining({ phoneNumberId: 'phone-1', messageId: 'wamid.in-1', sourceId: 'whatsapp:5511999999999', content: 'Olá', quotedMessageId: 'wamid.original' })]);
+    expect(parsed.messages).toEqual([expect.objectContaining({ phoneNumberId: 'phone-1', messageId: 'wamid.in-1', sourceId: 'whatsapp:551199999999', content: 'Olá', quotedMessageId: 'wamid.original' })]);
   });
 
   it.each([

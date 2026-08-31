@@ -1,3 +1,5 @@
+import { normalizeBrazilianPhone } from '../phone.js';
+
 export type MetaMediaKind = 'image' | 'audio' | 'video' | 'document';
 
 export interface IncomingMetaMedia {
@@ -125,11 +127,11 @@ export const parseMetaWebhook = (payload: unknown): { messages: IncomingMetaMess
       }
       if (field === 'smb_message_echoes') {
         for (const item of Array.isArray(value.message_echoes) ? value.message_echoes : []) {
-          const message = record(item); const messageId = text(message.id); const to = text(message.to)?.replace(/\D/g, ''); const type = text(message.type);
-          if (!messageId || !to || !/^\d{8,15}$/.test(to) || !type) continue;
+          const message = record(item); const messageId = text(message.id); const to = text(message.to)?.replace(/\D/g, ''); const normalizedTo = to ? normalizeBrazilianPhone(to) : undefined; const type = text(message.type);
+          if (!messageId || !normalizedTo || !/^\d{8,15}$/.test(normalizedTo) || !type) continue;
           const media = mediaFor(message); if (type !== 'text' && !media) continue;
           const quotedMessageId = text(record(message.context).id);
-          businessAppEchoes.push({ transport: 'meta_cloud', origin: 'business_app', phoneNumberId, messageId, sourceId: `whatsapp:${to}`, phoneNumber: `+${to}`, name: to, content: contentFor(message, type), ...(media ? { media } : {}), ...(quotedMessageId ? { quotedMessageId } : {}), timestamp: timestamp(message.timestamp) });
+          businessAppEchoes.push({ transport: 'meta_cloud', origin: 'business_app', phoneNumberId, messageId, sourceId: `whatsapp:${normalizedTo}`, phoneNumber: `+${normalizedTo}`, name: normalizedTo, content: contentFor(message, type), ...(media ? { media } : {}), ...(quotedMessageId ? { quotedMessageId } : {}), timestamp: timestamp(message.timestamp) });
         }
         continue;
       }
@@ -139,7 +141,8 @@ export const parseMetaWebhook = (payload: unknown): { messages: IncomingMetaMess
         const message = record(item);
         const messageId = text(message.id);
         const from = text(message.from)?.replace(/\D/g, '');
-        if (!messageId || !from || !/^\d{8,15}$/.test(from)) continue;
+        const normalizedFrom = from ? normalizeBrazilianPhone(from) : undefined;
+        if (!messageId || !normalizedFrom || !/^\d{8,15}$/.test(normalizedFrom)) continue;
         const contact = contacts.find((candidate) => candidate.wa_id === from) || {};
         const type = text(message.type);
         if (type === 'reaction') {
@@ -155,8 +158,8 @@ export const parseMetaWebhook = (payload: unknown): { messages: IncomingMetaMess
         const quotedMessageId = text(record(message.context).id);
         const contactName = text(record(contact.profile).name);
         messages.push({
-          transport: 'meta_cloud', phoneNumberId, messageId, sourceId: `whatsapp:${from}`, phoneNumber: `+${from}`,
-          name: contactName || from, ...(contactName ? { contactName } : {}), content, ...(media ? { media } : {}),
+          transport: 'meta_cloud', phoneNumberId, messageId, sourceId: `whatsapp:${normalizedFrom}`, phoneNumber: `+${normalizedFrom}`,
+          name: contactName || normalizedFrom, ...(contactName ? { contactName } : {}), content, ...(media ? { media } : {}),
           ...(quotedMessageId ? { quotedMessageId } : {}), timestamp: timestamp(message.timestamp),
         });
       }

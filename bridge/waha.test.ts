@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./config.js', () => ({
-  config: { publicUrl: 'https://bridge.test', wahaBaseUrl: 'http://waha.test', wahaApiKey: 'server-only-key', wahaWebhookSecret: 'webhook-secret', wahaDefaultEngine: 'GOWS', wahaRequestTimeoutMs: 20 },
+  config: { publicUrl: 'https://bridge.test', chatwootBaseUrl: 'http://chatwoot.test', maxMediaBytes: 1_000_000, wahaBaseUrl: 'http://waha.test', wahaApiKey: 'server-only-key', wahaWebhookSecret: 'webhook-secret', wahaDefaultEngine: 'GOWS', wahaRequestTimeoutMs: 20 },
 }));
 
 import { WahaApiError, wahaTransport } from './waha';
@@ -64,6 +64,25 @@ describe('WAHA session transport', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('http://waha.test/api/reaction');
     expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('PUT');
     expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({ session: 'empresa', chatId: '5511999999999@c.us', messageId: 'message-id', reaction: '👍' });
+  });
+
+  it('sends each attachment independently and only marks OGG/Opus as a voice note', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(Buffer.from('first-file')))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'first-id', to: '5511999999999@c.us' })))
+      .mockResolvedValueOnce(new Response(Buffer.from('second-file')))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'second-id', to: '5511999999999@c.us' })))
+      .mockResolvedValueOnce(new Response(Buffer.from('webm-file')))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'webm-id', to: '5511999999999@c.us' })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await wahaTransport.sendMedia('empresa', '5511999999999', { url: '/rails/a.ogg', fileType: 'audio', contentType: 'audio/ogg; codecs=opus', fileName: 'a.ogg' });
+    await wahaTransport.sendMedia('empresa', '5511999999999', { url: '/rails/b.pdf', fileType: 'file', contentType: 'application/pdf', fileName: 'b.pdf' });
+    await wahaTransport.sendMedia('empresa', '5511999999999', { url: '/rails/c.webm', fileType: 'audio', contentType: 'audio/webm', fileName: 'c.webm' });
+
+    expect(fetchMock.mock.calls[1][0]).toBe('http://waha.test/api/sendVoice');
+    expect(fetchMock.mock.calls[3][0]).toBe('http://waha.test/api/sendFile');
+    expect(fetchMock.mock.calls[5][0]).toBe('http://waha.test/api/sendFile');
   });
 
   it('lists GOWS history with all chats, bounded pagination and media disabled', async () => {

@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, ZoomIn, ZoomOut, Download, CornerUpRight } from 'lucide-react';
+import { isBackdropClick, isEscapeKey, triggerAttachmentDownload } from '../features/attachments/fileUtils';
 
 interface Props {
   imageUrl: string;
@@ -15,11 +16,14 @@ export const ImagePreviewModal: React.FC<Props> = ({ imageUrl, title, subtitle, 
   const handleZoomOut = () => setZoom((prev) => Math.max(prev - 0.3, 0.5));
 
   const handleDownload = () => {
-    const link = document.createElement('a');
-    link.href = imageUrl;
-    link.download = title ? `${title}.svg` : 'whatsapp-image.png';
-    link.click();
+    triggerAttachmentDownload(imageUrl, title, 'imagem');
   };
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => { if (isEscapeKey(event.key)) onClose(); };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [onClose]);
 
   return (
     <div className="fixed inset-0 z-50 bg-[#0b141a]/90 backdrop-blur-xs flex flex-col animate-in fade-in duration-200">
@@ -75,7 +79,7 @@ export const ImagePreviewModal: React.FC<Props> = ({ imageUrl, title, subtitle, 
       </div>
 
       {/* Main Image Display Area */}
-      <div className="flex-1 flex items-center justify-center p-8 overflow-auto relative">
+      <div className="flex-1 flex items-center justify-center p-8 overflow-auto relative" onMouseDown={(event) => { if (isBackdropClick(event.target, event.currentTarget)) onClose(); }}>
         <img
           src={imageUrl}
           alt={title || 'Preview'}

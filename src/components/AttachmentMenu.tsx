@@ -1,7 +1,7 @@
 import React from 'react';
-import { BarChart2, Camera, FileText, Image, Mic, User, X } from 'lucide-react';
+import { Camera, FileText, Image, Mic, X } from 'lucide-react';
 
-type AttachmentOption = 'image' | 'document' | 'audio' | 'camera' | 'contact' | 'poll';
+type AttachmentOption = 'image' | 'document' | 'audio' | 'camera';
 
 interface Props {
   onSelectOption: (type: AttachmentOption) => void;
@@ -13,8 +13,6 @@ const options: Array<{ id: AttachmentOption; label: string; icon: typeof FileTex
   { id: 'image', label: 'Fotos e vídeos', icon: Image, color: 'text-[#00a884]' },
   { id: 'camera', label: 'Câmera', icon: Camera, color: 'text-[#ec4899]' },
   { id: 'audio', label: 'Áudio', icon: Mic, color: 'text-[#38bdf8]' },
-  { id: 'contact', label: 'Contato', icon: User, color: 'text-[#3b82f6]' },
-  { id: 'poll', label: 'Enquete', icon: BarChart2, color: 'text-[#f59e0b]' },
 ];
 
 const mobileOptions: Array<{ id: AttachmentOption; label: string; icon: typeof FileText; color: string }> = [
@@ -31,6 +29,7 @@ export const AttachmentMenu: React.FC<Props> = ({ onSelectOption, onClose }) => 
 
   return (
     <>
+      <button type="button" aria-label="Fechar anexos" className="fixed inset-0 z-40 hidden cursor-default md:block" onMouseDown={onClose} />
       <div className="absolute bottom-16 left-2 z-50 hidden min-w-[180px] flex-col space-y-1 rounded-2xl border border-[#d1d7db] bg-white p-2 shadow-xl md:flex" onClick={(event) => event.stopPropagation()}>
         {options.map((option) => {
           const Icon = option.icon;

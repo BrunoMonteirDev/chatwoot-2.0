@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ContactProfile, ConversationMessage, ConversationSummary, CurrentAccount, CurrentUser } from '../../domain/currentUser';
-import { normalizeContact, normalizeMessage, normalizeRealtimeConversation } from '../../integrations/chatwoot/normalizers';
+import type { ContactProfile, ConversationMessage, ConversationSummary, CurrentAccount, CurrentUser, Inbox } from '../../domain/currentUser';
+import { normalizeContact, normalizeInbox, normalizeMessage, normalizeRealtimeConversation } from '../../integrations/chatwoot/normalizers';
 import { ChatwootRealtimeClient, type RealtimeConnectionStatus, type RealtimeEvent } from '../../integrations/chatwoot/realtime';
-import type { ChatwootContactDto, ChatwootConversationDto, ChatwootMessageDto } from '../../integrations/chatwoot/types';
+import type { ChatwootContactDto, ChatwootConversationDto, ChatwootInboxDto, ChatwootMessageDto } from '../../integrations/chatwoot/types';
 
 interface RealtimeHandlers {
   onConversation: (conversation: ConversationSummary) => void;
@@ -11,6 +11,9 @@ interface RealtimeHandlers {
   onReconnect: () => void;
   onContact: (contact: ContactProfile) => void;
   onAccessChanged: () => void;
+  onConversationDeleted: (conversationId: number) => void;
+  onInbox: (inbox: Inbox) => void;
+  onContactRemoved: (contactId: number) => void;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -50,7 +53,7 @@ export const useChatwootRealtime = (
         handlersRef.current.onMessage(message, numberValue(conversation.unread_count), numberValue(conversation.last_activity_at));
         return;
       }
-      if (event === 'conversation.created' || event === 'conversation.updated' || event === 'conversation.status_changed' || event === 'conversation.read' || event === 'assignee.changed') {
+      if (event === 'conversation.created' || event === 'conversation.updated' || event === 'conversation.status_changed' || event === 'conversation.read' || event === 'assignee.changed' || event === 'team.changed' || event === 'conversation.contact_changed') {
         if (numberValue(data.id) === undefined || numberValue(data.inbox_id) === undefined || !isRecord(data.meta)) return;
         handlersRef.current.onConversation(normalizeRealtimeConversation(data as unknown as ChatwootConversationDto & { channel?: string | null }));
         return;
@@ -59,8 +62,20 @@ export const useChatwootRealtime = (
         handlersRef.current.onUnreadInvalidated();
         return;
       }
-      if (event === 'contact.updated' && numberValue(data.id) !== undefined) {
+      if (event === 'conversation.deleted' && numberValue(data.id) !== undefined) {
+        handlersRef.current.onConversationDeleted(numberValue(data.id)!);
+        return;
+      }
+      if ((event === 'contact.created' || event === 'contact.updated' || event === 'contact.merged') && numberValue(data.id) !== undefined) {
         handlersRef.current.onContact(normalizeContact(data as unknown as ChatwootContactDto));
+        return;
+      }
+      if (event === 'contact.deleted' && numberValue(data.id) !== undefined) {
+        handlersRef.current.onContactRemoved(numberValue(data.id)!);
+        return;
+      }
+      if ((event === 'inbox.created' || event === 'inbox.updated') && numberValue(data.id) !== undefined) {
+        handlersRef.current.onInbox(normalizeInbox(data as unknown as ChatwootInboxDto));
         return;
       }
       if ((event === 'conversation.typing_on' || event === 'conversation.typing_off') && isRecord(data.conversation)) {

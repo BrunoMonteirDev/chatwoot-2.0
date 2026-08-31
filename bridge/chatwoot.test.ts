@@ -23,6 +23,7 @@ describe('chatwootBridge media messages', () => {
 
     await expect(chatwootBridge.findOrCreateConversation('inbox-token', 'whatsapp:554484532595', 4, 106)).resolves.toMatchObject({ id: 87 });
     expect(vi.mocked(fetch).mock.calls[1][0]).toContain('/contacts/whatsapp%3A554484532595/conversations');
+    expect(JSON.parse((vi.mocked(fetch).mock.calls[1][1] as RequestInit).body as string)).toEqual({ idempotent: true });
     expect(vi.mocked(fetch).mock.calls[2][0]).toContain('/contacts/4/conversations');
   });
 
@@ -50,6 +51,16 @@ describe('chatwootBridge media messages', () => {
       .resolves.toBe('source-inbox-whatsapp');
   });
 
+  it('busca o contato brasileiro pelo número canônico mesmo quando recebe o nono dígito', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ payload: [{
+      id: 4, phone_number: '+554484532595', contact_inboxes: [{ source_id: 'source-inbox-whatsapp', inbox: { id: 106 } }],
+    }] }), { status: 200 })));
+
+    await expect(chatwootBridge.findContactSourceByPhone(106, '+5544984532595'))
+      .resolves.toBe('source-inbox-whatsapp');
+    expect(vi.mocked(fetch).mock.calls[0][0]).toContain('q=%2B5544');
+  });
+
   it('atualiza perfil WAHA existente sem perder a codificação de JID de grupo', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 4 }), { status: 200 })));
     await chatwootBridge.updatePublicContact('inbox-token', 'whatsapp:group:120@g.us', { name: 'Equipe', avatarUrl: 'https://pps.whatsapp.net/avatar.jpg' });
@@ -64,6 +75,7 @@ describe('chatwootBridge media messages', () => {
     const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
     expect(body).toMatchObject({
       source_id: 'evolution:reply-42', echo_id: 'evolution:reply-42',
+      idempotent: true,
       content_attributes: { whatsapp_transport: 'evolution', in_reply_to: 19, in_reply_to_external_id: 'evolution:original-41', evolution_quoted_message_id: 'original-41' },
     });
   });
@@ -89,6 +101,7 @@ describe('chatwootBridge media messages', () => {
     expect(form.get('content')).toBe('Legenda');
     expect(form.get('message_type')).toBe('incoming');
     expect(form.get('source_id')).toBe('evolution:media-42');
+    expect(form.get('idempotent')).toBe('true');
     expect((form.get('attachments[]') as File).name).toBe('foto.jpg');
     expect((form.get('attachments[]') as File).type).toBe('image/jpeg');
   });
@@ -113,6 +126,7 @@ describe('chatwootBridge media messages', () => {
     expect(form.get('message_type')).toBe('outgoing');
     expect(form.get('source_id')).toBe('waha:mobile-waha-media');
     expect(form.get('content_attributes')).toBe(JSON.stringify({ whatsapp_transport: 'waha', whatsapp_origin: 'mobile' }));
+    expect(form.get('idempotent')).toBe('true');
   });
 
   it('mantém o reply quando a mensagem recebida é mídia', async () => {

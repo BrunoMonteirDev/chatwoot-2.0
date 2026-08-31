@@ -15,6 +15,8 @@ import {
   Play,
   Pause,
   FileText,
+  FileArchive,
+  FileSpreadsheet,
   Download,
   Trash2,
   PanelLeftClose,
@@ -58,6 +60,9 @@ import { useCannedResponses } from '../features/cannedResponses/useCannedRespons
 import { quickNotesStorage, QUICK_NOTES_UPDATED_EVENT } from '../features/quickNotes/storage';
 import { MetaTemplatePicker } from './MetaTemplatePicker';
 import { metaCloudMetadataForInbox } from '../integrations/whatsapp/provider';
+import { canSendWhatsAppMessage, type OperationalWhatsAppConnection } from '../integrations/whatsapp/connection';
+import { finiteAudioDuration, recordingFile, recordingMimeType, releaseRecordingResources, type AudioRecordingPhase } from '../features/audio/recording';
+import { documentPresentation, filesFromTransfer, hasFilesInTransfer, triggerAttachmentDownload } from '../features/attachments/fileUtils';
 
 
 // Helper to format WhatsApp Markdown, URLs, Mentions, Bold (*), Italic (_), Strikethrough (~), Code (`)
@@ -293,6 +298,9 @@ const LinkPreviewBox: React.FC<{
 const DocumentAttachmentCard: React.FC<{
   attachment: Attachment;
 }> = ({ attachment }) => {
+  const presentation = documentPresentation(attachment.title, attachment.subtitle);
+  const Icon = presentation.kind === 'spreadsheet' ? FileSpreadsheet : presentation.kind === 'archive' ? FileArchive : FileText;
+  const iconColor = presentation.kind === 'pdf' ? 'bg-[#ef4444]' : presentation.kind === 'spreadsheet' ? 'bg-[#16a34a]' : presentation.kind === 'archive' ? 'bg-[#f59e0b]' : 'bg-[#64748b]';
   return (
     <div className="my-1.5 rounded-xl overflow-hidden border border-black/10 dark:border-white/10 bg-black/20 dark:bg-black/35 shadow-xs transition-all hover:border-[#00a884]">
       {attachment.previewUrl && (
@@ -305,20 +313,20 @@ const DocumentAttachmentCard: React.FC<{
         </div>
       )}
       <div className="p-3 flex items-center space-x-3 bg-black/10 dark:bg-black/20">
-        <div className="w-10 h-11 bg-[#ef4444] text-white rounded-lg flex flex-col items-center justify-center font-black shadow-xs shrink-0">
-          <FileText className="w-5 h-5 mb-0.5" />
-          <span className="text-[9px] uppercase tracking-tighter leading-none">PDF</span>
+        <div className={`w-10 h-11 ${iconColor} text-white rounded-lg flex flex-col items-center justify-center font-black shadow-xs shrink-0`}>
+          <Icon className="w-5 h-5 mb-0.5" />
+          <span className="text-[9px] uppercase tracking-tighter leading-none">{presentation.kind === 'archive' ? 'ZIP' : presentation.label}</span>
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold truncate text-[#e9edef] leading-snug">
             {attachment.title || 'documento.pdf'}
           </p>
           <p className="text-xs text-[#8696a0] truncate mt-0.5">
-            {attachment.subtitle || `${attachment.pages || '3 páginas'} • PDF • ${attachment.size || '1 MB'}`}
+            {presentation.label}{attachment.size ? ` • ${attachment.size}` : ''}
           </p>
         </div>
         <button
-          onClick={(e) => e.stopPropagation()}
+          onClick={(event) => { event.stopPropagation(); triggerAttachmentDownload(attachment.url, attachment.title, 'anexo'); }}
           className="w-8 h-8 rounded-full bg-black/20 hover:bg-black/40 text-white flex items-center justify-center transition-colors shrink-0"
           title="Baixar arquivo"
         >
@@ -342,7 +350,7 @@ const AudioNoteCard: React.FC<{
 }> = ({
   audioAuthor,
   audioPhone,
-  audioDuration = '0:25',
+  audioDuration = '—:—',
   audioAvatar,
   audioUrl,
   isDarkMode,
@@ -372,7 +380,7 @@ const AudioNoteCard: React.FC<{
   useEffect(() => () => { audioRef.current?.pause(); }, []);
 
   const formatDuration = (seconds: number) => {
-    if (!Number.isFinite(seconds) || seconds <= 0) return audioDuration;
+    if (!Number.isFinite(seconds) || seconds < 0) return audioDuration;
     const minutes = Math.floor(seconds / 60);
     return `${minutes}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
   };
@@ -523,11 +531,13 @@ const AudioNoteCard: React.FC<{
           ref={audioRef}
           preload="metadata"
           src={audioUrl}
-          onLoadedMetadata={(event) => setDurationSeconds(event.currentTarget.duration)}
+          onLoadedMetadata={(event) => setDurationSeconds(finiteAudioDuration(event.currentTarget.duration) || 0)}
+          onDurationChange={(event) => setDurationSeconds(finiteAudioDuration(event.currentTarget.duration) || 0)}
           onTimeUpdate={(event) => {
             const audio = event.currentTarget;
             setCurrentSeconds(audio.currentTime);
-            setProgress(audio.duration ? (audio.currentTime / audio.duration) * 100 : 0);
+            const duration = finiteAudioDuration(audio.duration);
+            setProgress(duration ? (audio.currentTime / duration) * 100 : 0);
           }}
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
@@ -603,6 +613,7 @@ interface Props {
   onCreateContactNote?: (content: string) => Promise<ContactNote | null>;
   accountId?: number | null;
   inboxes?: Inbox[];
+  whatsappConnection?: OperationalWhatsAppConnection | null;
 }
 
 export const ChatArea: React.FC<Props> = ({
@@ -655,6 +666,7 @@ export const ChatArea: React.FC<Props> = ({
   onCreateContactNote,
   accountId = null,
   inboxes = [],
+  whatsappConnection = null,
 }) => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isContactPanelOpen, setIsContactPanelOpen] = useState(false);
@@ -688,18 +700,24 @@ export const ChatArea: React.FC<Props> = ({
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [isSendingMessage, setIsSendingMessage] = useState(false);
-  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
-  const [isRecordingPaused, setIsRecordingPaused] = useState(false);
-  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
-  const [previewProgress, setPreviewProgress] = useState(0);
+  const [recordingPhase, setRecordingPhase] = useState<AudioRecordingPhase>('idle');
   const [recordingTime, setRecordingTime] = useState(0);
+  const [recordedAudio, setRecordedAudio] = useState<{ file: File; url: string; duration: number | null } | null>(null);
+  const [isReviewPlaying, setIsReviewPlaying] = useState(false);
+  const [reviewCurrentTime, setReviewCurrentTime] = useState(0);
   const [recordingError, setRecordingError] = useState<string | null>(null);
   const sendingDraftsRef = useRef(new Set<string>());
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingStreamRef = useRef<MediaStream | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
   const recordingCancelledRef = useRef(false);
+  const recordingSessionRef = useRef(0);
+  const recordingUrlRef = useRef<string | null>(null);
+  const reviewAudioRef = useRef<HTMLAudioElement>(null);
+  const dragDepthRef = useRef(0);
+  const isRecordingVoice = recordingPhase !== 'idle';
   const currentStatus = conversation?.status || (ticketStatus === 'resolver' ? 'open' : ticketStatus === 'resolvido' ? 'resolved' : ticketStatus === 'adiado' ? 'snoozed' : 'pending');
   const isManagingConversation = managementPendingAction !== null;
   const setConversationStatus = (status: ConversationStatus) => {
@@ -735,7 +753,8 @@ export const ChatArea: React.FC<Props> = ({
   }, []);
   const [replyTo, setReplyTo] = useState<ReplyTo | null>(null);
   const conversationInbox = conversation ? inboxes.find((inbox) => inbox.id === conversation.inboxId) : undefined;
-  const canUseMetaTemplates = Boolean(conversationInbox && metaCloudMetadataForInbox(conversationInbox));
+  const externalSendBlocked = !canSendWhatsAppMessage(whatsappConnection, messageMode === 'privada');
+  const canUseMetaTemplates = !externalSendBlocked && Boolean(conversationInbox && metaCloudMetadataForInbox(conversationInbox));
 
   // Context Menu State
   const { menuState, openContextMenu, closeContextMenu } = useContextMenu();
@@ -958,7 +977,6 @@ export const ChatArea: React.FC<Props> = ({
   }, [inputText, isExpandedInput]);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<any>(null);
-  const playbackTimerRef = useRef<any>(null);
   const prevMessagesLength = useRef(chat.messages.length);
   const previousChatId = useRef(chat.id);
   const previousScrollHeight = useRef<number | null>(null);
@@ -1045,7 +1063,7 @@ export const ChatArea: React.FC<Props> = ({
 
   // Voice recording timer
   useEffect(() => {
-    if (isRecordingVoice && !isRecordingPaused) {
+    if (recordingPhase === 'recording') {
       timerRef.current = setInterval(() => {
         setRecordingTime((prev) => prev + 1);
       }, 1000);
@@ -1055,41 +1073,53 @@ export const ChatArea: React.FC<Props> = ({
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isRecordingVoice, isRecordingPaused]);
+  }, [recordingPhase]);
 
-  // Audio preview playback animation timer (when recording is paused)
+  const discardRecordedAudio = () => {
+    reviewAudioRef.current?.pause();
+    releaseRecordingResources(null, recordingUrlRef.current);
+    recordingUrlRef.current = null;
+    setRecordedAudio(null);
+    setIsReviewPlaying(false);
+    setReviewCurrentTime(0);
+  };
+
   useEffect(() => {
-    if (isPreviewPlaying) {
-      const totalDuration = recordingTime || 1;
-      const intervalMs = 100;
-      const step = 100 / (totalDuration * 10);
-      playbackTimerRef.current = setInterval(() => {
-        setPreviewProgress((prev) => {
-          if (prev >= 100) {
-            setIsPreviewPlaying(false);
-            return 0;
-          }
-          return prev + step;
-        });
-      }, intervalMs);
-    } else {
-      if (playbackTimerRef.current) clearInterval(playbackTimerRef.current);
-    }
+    setRecordingPhase('idle');
+    setRecordingTime(0);
+    setRecordedAudio(null);
+    setIsReviewPlaying(false);
+    setReviewCurrentTime(0);
     return () => {
-      if (playbackTimerRef.current) clearInterval(playbackTimerRef.current);
+      recordingCancelledRef.current = true;
+      recordingSessionRef.current += 1;
+      mediaRecorderRef.current?.stop();
+      releaseRecordingResources(recordingStreamRef.current, recordingUrlRef.current);
+      recordingStreamRef.current = null;
+      recordingUrlRef.current = null;
+      reviewAudioRef.current?.pause();
     };
-  }, [isPreviewPlaying, recordingTime]);
+  }, [chat.id]);
 
   const handleCancelRecording = () => {
     recordingCancelledRef.current = true;
+    recordingSessionRef.current += 1;
     mediaRecorderRef.current?.stop();
-    recordingStreamRef.current?.getTracks().forEach(track => track.stop());
+    releaseRecordingResources(recordingStreamRef.current, recordingUrlRef.current);
     recordingStreamRef.current = null;
-    setIsRecordingVoice(false);
-    setIsRecordingPaused(false);
-    setIsPreviewPlaying(false);
-    setPreviewProgress(0);
+    recordingUrlRef.current = null;
+    setRecordingPhase('idle');
+    setRecordedAudio(null);
+    setIsReviewPlaying(false);
+    setReviewCurrentTime(0);
     setRecordingTime(0);
+  };
+
+  const handleRerecord = () => {
+    discardRecordedAudio();
+    setRecordingPhase('idle');
+    setRecordingTime(0);
+    void handleStartRecording();
   };
 
   const sendRecordedAudio = (file: File) => {
@@ -1100,6 +1130,7 @@ export const ChatArea: React.FC<Props> = ({
   };
 
   const handleStartRecording = async () => {
+    if (externalSendBlocked) return;
     setRecordingError(null);
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
       setRecordingError('Este navegador não oferece gravação. Envie um arquivo de áudio pelo clipe.');
@@ -1107,27 +1138,30 @@ export const ChatArea: React.FC<Props> = ({
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType = ['audio/ogg;codecs=opus', 'audio/webm;codecs=opus', 'audio/webm'].find(type => MediaRecorder.isTypeSupported(type));
+      const mimeType = recordingMimeType((type) => MediaRecorder.isTypeSupported(type));
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const session = ++recordingSessionRef.current;
       recordingCancelledRef.current = false;
       recordingChunksRef.current = [];
       recordingStreamRef.current = stream;
       mediaRecorderRef.current = recorder;
       recorder.ondataavailable = event => { if (event.data.size) recordingChunksRef.current.push(event.data); };
       recorder.onstop = () => {
-        stream.getTracks().forEach(track => track.stop());
+        releaseRecordingResources(stream, null);
         recordingStreamRef.current = null;
         mediaRecorderRef.current = null;
-        if (recordingCancelledRef.current || recordingChunksRef.current.length === 0) return;
-        const type = recorder.mimeType || 'audio/webm';
-        const extension = type.includes('ogg') ? 'ogg' : 'webm';
-        sendRecordedAudio(new File([new Blob(recordingChunksRef.current, { type })], `audio-${Date.now()}.${extension}`, { type }));
+        if (recordingCancelledRef.current || session !== recordingSessionRef.current || recordingChunksRef.current.length === 0) return;
+        const type = recorder.mimeType || mimeType || 'audio/webm';
+        const file = recordingFile(recordingChunksRef.current, type);
+        const url = URL.createObjectURL(file);
+        recordingUrlRef.current = url;
+        setRecordedAudio({ file, url, duration: null });
+        setReviewCurrentTime(0);
+        setIsReviewPlaying(false);
+        setRecordingPhase('review');
       };
       recorder.start();
-      setIsRecordingVoice(true);
-      setIsRecordingPaused(false);
-      setIsPreviewPlaying(false);
-      setPreviewProgress(0);
+      setRecordingPhase('recording');
       setRecordingTime(0);
     } catch (cause) {
       const name = cause instanceof DOMException ? cause.name : '';
@@ -1144,18 +1178,26 @@ export const ChatArea: React.FC<Props> = ({
   };
 
   const handleSend = () => {
-    if ((!inputText.trim() && selectedFiles.length === 0) && !isRecordingVoice || isSendingMessage) return;
+    if (externalSendBlocked) return;
+    if (isSendingMessage) return;
 
-    if (isRecordingVoice) {
-      setIsRecordingVoice(false);
-      setIsRecordingPaused(false);
-      setIsPreviewPlaying(false);
-      setPreviewProgress(0);
-
+    if (recordingPhase === 'recording' || recordingPhase === 'paused') {
+      setRecordingPhase('review');
       mediaRecorderRef.current?.stop();
-      setRecordingTime(0);
       return;
     }
+
+    if (recordingPhase === 'review') {
+      if (!recordedAudio) return;
+      const file = recordedAudio.file;
+      discardRecordedAudio();
+      setRecordingPhase('idle');
+      setRecordingTime(0);
+      sendRecordedAudio(file);
+      return;
+    }
+
+    if (!inputText.trim() && selectedFiles.length === 0) return;
 
     const content = inputText.trim();
     const files = selectedFiles;
@@ -1227,10 +1269,49 @@ export const ChatArea: React.FC<Props> = ({
     setInputText((prev) => prev + emoji);
   };
 
+  const addFiles = (files: Iterable<File>) => {
+    if (externalSendBlocked) return;
+    const incoming = Array.from(files).filter((file) => file instanceof File);
+    if (incoming.length) setSelectedFiles((current) => [...current, ...incoming]);
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length) setSelectedFiles((current) => [...current, ...files]);
+    addFiles(Array.from(e.target.files || []));
     e.target.value = '';
+  };
+
+  const handlePasteFiles = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = filesFromTransfer(event.clipboardData);
+    if (!files.length) return;
+    event.preventDefault();
+    addFiles(files);
+  };
+
+  const handleDragEnter = (event: React.DragEvent) => {
+    if (!hasFilesInTransfer(event.dataTransfer)) return;
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    setIsDraggingFiles(true);
+  };
+
+  const handleDragOver = (event: React.DragEvent) => {
+    if (!hasFilesInTransfer(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDragLeave = (event: React.DragEvent) => {
+    if (!hasFilesInTransfer(event.dataTransfer)) return;
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (!dragDepthRef.current) setIsDraggingFiles(false);
+  };
+
+  const handleDropFiles = (event: React.DragEvent) => {
+    if (!hasFilesInTransfer(event.dataTransfer)) return;
+    event.preventDefault();
+    dragDepthRef.current = 0;
+    setIsDraggingFiles(false);
+    addFiles(filesFromTransfer(event.dataTransfer));
   };
 
   const formatRecordingTime = (seconds: number) => {
@@ -1242,7 +1323,12 @@ export const ChatArea: React.FC<Props> = ({
   return (
     <div className="flex-1 flex flex-row h-full relative overflow-hidden">
       {/* Main Active Chat Area */}
-      <div className="flex-1 flex flex-col h-full relative overflow-hidden">
+      <div className="flex-1 flex flex-col h-full relative overflow-hidden" onDragEnter={handleDragEnter} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDropFiles}>
+        {isDraggingFiles && (
+          <div className="pointer-events-none absolute inset-0 z-[80] grid place-items-center border-2 border-dashed border-[#00a884] bg-[#00a884]/15 p-6 text-center backdrop-blur-[1px]">
+            <div className="rounded-2xl bg-[#111b21] px-5 py-4 text-sm font-bold text-white shadow-2xl">Solte os arquivos para anexar</div>
+          </div>
+        )}
         {/* Hidden File Input for uploading custom media */}
       <input
         type="file"
@@ -1360,8 +1446,9 @@ export const ChatArea: React.FC<Props> = ({
                 isDarkMode ? 'text-[#8696a0]' : 'text-[#667781]'
               }`}
             >
-              {typingName ? `${typingName} está digitando…` : chat.about || (chat.isGroup ? 'Clique para dados do grupo' : realtimeConnectionStatus === 'connected' ? 'online' : 'reconectando…')}
+              {externalSendBlocked ? `WhatsApp ${whatsappConnection?.transport || ''} desconectado — envio bloqueado` : typingName ? `${typingName} está digitando…` : chat.about || (chat.isGroup ? 'Clique para dados do grupo' : realtimeConnectionStatus === 'connected' ? 'online' : 'reconectando…')}
             </span>
+            {externalSendBlocked && <span className="mt-1 inline-flex w-fit rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-500">Sessão WhatsApp desconectada</span>}
           </div>
         </div>
 
@@ -1700,7 +1787,7 @@ export const ChatArea: React.FC<Props> = ({
                     <AudioNoteCard
                       audioAuthor={msg.audioAuthor || (msg.sender === 'them' ? msg.senderName : undefined)}
                       audioPhone={msg.audioPhone || (msg.sender === 'them' ? '+55 44 9937-6314' : undefined)}
-                      audioDuration={msg.audioDuration || '0:25'}
+                      audioDuration={msg.audioDuration}
                       audioAvatar={msg.audioAvatar || (msg.sender === 'them' ? chat.avatar : undefined)}
                       audioUrl={msg.attachments?.find((attachment) => attachment.type === 'audio')?.url}
                       isDarkMode={isDarkMode}
@@ -1885,9 +1972,6 @@ export const ChatArea: React.FC<Props> = ({
               if (type === 'image') imageInputRef.current?.click();
               else if (type === 'camera') cameraInputRef.current?.click();
               else if (type === 'document' || type === 'audio') fileInputRef.current?.click();
-              else {
-                alert(`Função ${type} ativada!`);
-              }
             }}
             onClose={() => setShowAttachmentMenu(false)}
           />
@@ -2016,7 +2100,7 @@ export const ChatArea: React.FC<Props> = ({
                 <Trash2 className="w-5 h-5" />
               </button>
 
-              {!isRecordingPaused ? (
+              {recordingPhase === 'recording' ? (
                 /* Actively Recording State */
                 <>
                   {/* Red recording dot + time */}
@@ -2038,9 +2122,7 @@ export const ChatArea: React.FC<Props> = ({
                   <button
                     onClick={() => {
                       mediaRecorderRef.current?.pause();
-                      setIsRecordingPaused(true);
-                      setIsPreviewPlaying(false);
-                      setPreviewProgress(0);
+                      setRecordingPhase('paused');
                     }}
                     title="Pausar gravação"
                     className="text-[#f15c6d] hover:opacity-80 p-1.5 shrink-0 cursor-pointer"
@@ -2048,47 +2130,10 @@ export const ChatArea: React.FC<Props> = ({
                     <Pause className="w-5 h-5 fill-current" />
                   </button>
                 </>
-              ) : (
-                /* Paused / Audio Preview State */
+              ) : recordingPhase === 'paused' ? (
+                /* Paused recording: it may continue, but is not yet a playable file. */
                 <>
-                  <button
-                    onClick={() => {
-                      if (isPreviewPlaying) {
-                        setIsPreviewPlaying(false);
-                      } else {
-                        if (previewProgress >= 99) setPreviewProgress(0);
-                        setIsPreviewPlaying(true);
-                      }
-                    }}
-                    title={isPreviewPlaying ? 'Pausar reprodução' : 'Ouvir áudio gravado'}
-                    className={`p-1.5 shrink-0 cursor-pointer transition-colors ${
-                      isDarkMode ? 'text-white hover:text-gray-300' : 'text-[#111b21] hover:text-gray-700'
-                    }`}
-                  >
-                    {isPreviewPlaying ? (
-                      <Pause className="w-5 h-5 fill-current" />
-                    ) : (
-                      <Play className="w-5 h-5 fill-current ml-0.5" />
-                    )}
-                  </button>
-
-                  <div
-                    onClick={(e) => {
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      const clickX = e.clientX - rect.left;
-                      const pct = Math.max(0, Math.min(100, (clickX / rect.width) * 100));
-                      setPreviewProgress(pct);
-                    }}
-                    className="flex-1 min-w-0 mx-2 relative h-6 flex items-center cursor-pointer group"
-                  >
-                    <div className="w-full h-0 border-b-2 border-dotted border-[#8696a0]/60 relative">
-                      <div
-                        style={{ left: `${previewProgress}%` }}
-                        className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-white shadow-xs transition-all group-hover:scale-125"
-                      />
-                    </div>
-                  </div>
-
+                  <span className="mx-2 flex-1 text-xs text-[#8696a0]">Gravação pausada</span>
                   <span className={`text-sm font-semibold font-mono shrink-0 mr-1 ${isDarkMode ? 'text-[#e9edef]' : 'text-[#111b21]'}`}>
                     {formatRecordingTime(recordingTime)}
                   </span>
@@ -2096,8 +2141,7 @@ export const ChatArea: React.FC<Props> = ({
                   <button
                     onClick={() => {
                       mediaRecorderRef.current?.resume();
-                      setIsRecordingPaused(false);
-                      setIsPreviewPlaying(false);
+                      setRecordingPhase('recording');
                     }}
                     title="Continuar gravação"
                     className="p-1.5 rounded-full text-[#f15c6d] hover:bg-[#f15c6d]/10 transition-colors shrink-0 cursor-pointer"
@@ -2105,12 +2149,68 @@ export const ChatArea: React.FC<Props> = ({
                     <Mic className="w-5 h-5" />
                   </button>
                 </>
+              ) : (
+                <>
+                  {recordedAudio ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const audio = reviewAudioRef.current;
+                          if (!audio) return;
+                          if (audio.paused) {
+                            if (audio.ended) audio.currentTime = 0;
+                            void audio.play().catch(() => setIsReviewPlaying(false));
+                          } else audio.pause();
+                        }}
+                        title={isReviewPlaying ? 'Pausar prévia' : 'Ouvir prévia'}
+                        className={`p-1.5 shrink-0 ${isDarkMode ? 'text-white' : 'text-[#111b21]'}`}
+                      >
+                        {isReviewPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}
+                      </button>
+                      <div
+                        onClick={(event) => {
+                          const audio = reviewAudioRef.current;
+                          const duration = recordedAudio.duration;
+                          if (!audio || !duration) return;
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          const next = Math.max(0, Math.min(duration, ((event.clientX - rect.left) / rect.width) * duration));
+                          audio.currentTime = next;
+                          setReviewCurrentTime(next);
+                        }}
+                        className="mx-2 flex h-6 flex-1 cursor-pointer items-center"
+                        title="Navegar na prévia"
+                      >
+                        <div className="h-1 w-full overflow-hidden rounded-full bg-[#8696a0]/40">
+                          <div className="h-full bg-[#00a884]" style={{ width: `${recordedAudio.duration ? Math.min(100, reviewCurrentTime / recordedAudio.duration * 100) : 0}%` }} />
+                        </div>
+                      </div>
+                      <span className={`mr-1 shrink-0 text-sm font-semibold font-mono ${isDarkMode ? 'text-[#e9edef]' : 'text-[#111b21]'}`}>
+                        {recordedAudio.duration ? `${formatRecordingTime(Math.floor(reviewCurrentTime))} / ${formatRecordingTime(Math.floor(recordedAudio.duration))}` : 'Carregando…'}
+                      </span>
+                      <audio
+                        ref={reviewAudioRef}
+                        src={recordedAudio.url}
+                        preload="metadata"
+                        onLoadedMetadata={(event) => setRecordedAudio((current) => current ? { ...current, duration: finiteAudioDuration(event.currentTarget.duration) } : current)}
+                        onDurationChange={(event) => setRecordedAudio((current) => current ? { ...current, duration: finiteAudioDuration(event.currentTarget.duration) } : current)}
+                        onTimeUpdate={(event) => setReviewCurrentTime(event.currentTarget.currentTime)}
+                        onPlay={() => setIsReviewPlaying(true)}
+                        onPause={() => setIsReviewPlaying(false)}
+                        onEnded={() => { setIsReviewPlaying(false); setReviewCurrentTime(recordedAudio.duration || 0); }}
+                        className="hidden"
+                      />
+                    </>
+                  ) : <span className="mx-2 flex-1 text-xs text-[#8696a0]">Preparando prévia…</span>}
+                  <button type="button" onClick={handleRerecord} title="Descartar e regravar" className="p-1.5 text-[#f15c6d] hover:bg-[#f15c6d]/10"><Mic className="h-5 w-5" /></button>
+                </>
               )}
 
               <button
                 onClick={handleSend}
-                title="Enviar áudio"
-                className="w-8 h-8 rounded-full bg-white hover:bg-gray-100 text-black flex items-center justify-center shadow-xs transition-transform active:scale-95 shrink-0 cursor-pointer ml-1"
+                disabled={isSendingMessage || (recordingPhase === 'review' && !recordedAudio)}
+                title={recordingPhase === 'review' ? 'Enviar áudio' : 'Finalizar gravação e revisar'}
+                className="w-8 h-8 rounded-full bg-white hover:bg-gray-100 text-black flex items-center justify-center shadow-xs transition-transform active:scale-95 shrink-0 cursor-pointer ml-1 disabled:opacity-40"
               >
                 <SendHorizontal className="w-4 h-4 text-[#111b21] stroke-[2.2]" />
               </button>
@@ -2121,6 +2221,7 @@ export const ChatArea: React.FC<Props> = ({
             <div className={`w-full min-w-0 flex-1 rounded-[28px] px-4 py-1 relative md:rounded-none md:px-0 ${messageMode === 'privada' ? isDarkMode ? 'bg-[#1a1710] md:bg-transparent' : 'bg-[#fffbeb] md:bg-transparent' : isDarkMode ? 'bg-[#202c33] md:bg-transparent' : 'bg-[#f0f2f5] md:bg-transparent'}`}>
               <textarea
                 ref={textareaRef}
+                disabled={externalSendBlocked}
                 rows={isExpandedInput ? 7 : 1}
                 value={inputText}
                 onChange={(e) => {
@@ -2148,6 +2249,7 @@ export const ChatArea: React.FC<Props> = ({
                     setShowMentionsPopup(false);
                   }
                 }}
+                onPaste={handlePasteFiles}
                 onKeyDown={(e) => {
                   if ((showQuickResponsesPopup || showMentionsPopup) && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Enter')) {
                     return;
@@ -2180,7 +2282,7 @@ export const ChatArea: React.FC<Props> = ({
               <div className="absolute right-3 top-1/2 z-20 flex -translate-y-1/2 items-center gap-1 md:hidden">
                 <button
                   type="button"
-                  disabled={isSendingMessage}
+                  disabled={isSendingMessage || externalSendBlocked}
                   onClick={() => {
                     setShowAttachmentMenu((current) => !current);
                     setShowQuickResponsesPopup(false);
@@ -2199,7 +2301,7 @@ export const ChatArea: React.FC<Props> = ({
             </div>
             <button
               type="button"
-              disabled={isSendingMessage}
+              disabled={isSendingMessage || externalSendBlocked}
               onClick={() => {
                 if (!inputText.trim() && selectedFiles.length === 0) void handleStartRecording();
                 else handleSend();
@@ -2219,7 +2321,7 @@ export const ChatArea: React.FC<Props> = ({
               <div className="flex items-center space-x-0.5 sm:space-x-1 overflow-x-auto no-scrollbar shrink min-w-0 pr-1">
                 <button
                   type="button"
-                  disabled={isSendingMessage}
+                  disabled={isSendingMessage || externalSendBlocked}
                   onClick={() => {
                     setShowAttachmentMenu((prev) => !prev);
                     setShowEmojiPicker(false);
@@ -2259,7 +2361,7 @@ export const ChatArea: React.FC<Props> = ({
 
                 <button
                   type="button"
-                  disabled={isSendingMessage || selectedFiles.length > 0}
+                  disabled={isSendingMessage || selectedFiles.length > 0 || externalSendBlocked}
                   onClick={handleStartRecording}
                   title="Gravar áudio"
                   className={`hidden md:inline-flex p-1.5 rounded-lg transition-colors cursor-pointer shrink-0 ${
@@ -2362,7 +2464,7 @@ export const ChatArea: React.FC<Props> = ({
                     if (!inputText.trim() && selectedFiles.length === 0) void handleStartRecording();
                     else handleSend();
                   }}
-                  disabled={isSendingMessage}
+                  disabled={isSendingMessage || externalSendBlocked}
                   title={!inputText.trim() && selectedFiles.length === 0 ? 'Gravar áudio' : messageMode === 'privada' ? 'Criar nota privada' : 'Enviar mensagem'}
                   className={`h-11 w-11 rounded-full text-xs font-semibold shadow-md transition-all active:scale-95 flex items-center justify-center cursor-pointer shrink-0 disabled:opacity-40 md:h-auto md:w-auto md:px-4 md:py-2 md:rounded-xl ${
                     messageMode === 'privada'

@@ -30,8 +30,6 @@ const AVAILABLE_INBOXES = [
   'grupo.kopla',
 ];
 
-const AVAILABLE_TEAMS = ['Comercial', 'Suporte', 'Financeiro', 'Técnico', 'Dev'];
-
 interface FilterModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -79,7 +77,6 @@ export const ChatFilterModal: React.FC<FilterModalProps> = ({
             else if (updates.field === 'priority') updated.value = 'alta';
             else if (updates.field === 'assignedAgent') updated.value = AVAILABLE_AGENTS[0];
             else if (updates.field === 'inbox') updated.value = AVAILABLE_INBOXES[0];
-            else if (updates.field === 'team') updated.value = AVAILABLE_TEAMS[0];
             else updated.value = '';
           }
           return updated;
@@ -167,7 +164,6 @@ export const ChatFilterModal: React.FC<FilterModalProps> = ({
                   <option value="priority">Prioridade</option>
                   <option value="assignedAgent">Agente atribuído</option>
                   <option value="inbox">Caixa de Entrada</option>
-                  <option value="team">Nome do Time</option>
                   <option value="identifier">Identificador da conversa</option>
                   <option value="campaign">Nome da campanha</option>
                 </select>
@@ -270,26 +266,6 @@ export const ChatFilterModal: React.FC<FilterModalProps> = ({
                       {AVAILABLE_INBOXES.map((inbox) => (
                         <option key={inbox} value={inbox}>
                           {inbox}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-
-                  {rule.field === 'team' && (
-                    <select
-                      value={rule.value}
-                      onChange={(e) =>
-                        handleUpdateRule(rule.id, { value: e.target.value })
-                      }
-                      className={`w-full text-xs font-medium rounded-lg px-2.5 py-2 border outline-none cursor-pointer ${
-                        isDarkMode
-                          ? 'bg-[#202c33] border-[#2a3942] text-white'
-                          : 'bg-white border-gray-300 text-[#111b21]'
-                      }`}
-                    >
-                      {AVAILABLE_TEAMS.map((team) => (
-                        <option key={team} value={team}>
-                          {team}
                         </option>
                       ))}
                     </select>

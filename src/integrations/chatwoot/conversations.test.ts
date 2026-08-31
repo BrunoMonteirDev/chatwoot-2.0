@@ -28,6 +28,23 @@ describe('conversationService', () => {
     expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/v1/accounts/2/conversations?page=1&status=all&sort_by=last_activity_at_desc&inbox_id=7');
   });
 
+  it('mantém team_id e todas as etiquetas ao paginar e troca a consulta ao mudar o filtro', async () => {
+    vi.mocked(fetch).mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ data: { meta: {}, payload: [] } }), { status: 200 })));
+
+    await conversationService.list({ accountId: 2, inboxId: 7, teamId: 11, labels: ['vip', 'urgente'], page: 1 });
+    await conversationService.list({ accountId: 2, inboxId: 7, teamId: 11, labels: ['vip', 'urgente'], page: 2 });
+    await conversationService.list({ accountId: 2, inboxId: 7, teamId: 12, labels: ['vip', 'urgente'], page: 1 });
+
+    const urls = vi.mocked(fetch).mock.calls.map(([url]) => new URL(String(url), 'https://chatwoot.test').searchParams);
+    expect(urls[0].get('page')).toBe('1');
+    expect(urls[1].get('page')).toBe('2');
+    expect(urls[0].get('team_id')).toBe('11');
+    expect(urls[1].get('team_id')).toBe('11');
+    expect(urls[2].get('team_id')).toBe('12');
+    expect(urls[0].getAll('labels[]')).toEqual(['vip', 'urgente']);
+    expect(urls[1].getAll('labels[]')).toEqual(['vip', 'urgente']);
+  });
+
   it('cria uma conversa com contact_id e inbox_id reais', async () => {
     const payload = {
       id: 32, inbox_id: 7, status: 'open', priority: null, unread_count: 0, last_activity_at: 100,
@@ -37,7 +54,7 @@ describe('conversationService', () => {
 
     await expect(conversationService.create({ accountId: 2, contactId: 9, inboxId: 7 })).resolves.toMatchObject({ id: 32, contactId: 9, inboxId: 7 });
     expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/v1/accounts/2/conversations');
-    expect(JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string)).toEqual({ contact_id: 9, inbox_id: 7 });
+    expect(JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string)).toEqual({ contact_id: 9, inbox_id: 7, idempotent: true });
   });
 
   it('abre uma conversa diretamente pelo ID para links e recarregamentos', async () => {

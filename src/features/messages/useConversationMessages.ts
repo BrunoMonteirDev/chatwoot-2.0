@@ -39,6 +39,17 @@ export const optimisticReactionList = (current: unknown, transport: WhatsAppReac
   return own?.emoji === emoji || !emoji ? withoutOwn : [...withoutOwn, { sender_id: 'self', emoji, transport, origin: 'platform' }];
 };
 
+// Files cannot be reconstructed from the normalized Chatwoot response. Keep
+// them only while a local send is retryable, keyed by its stable echo id.
+export class PendingMessageFiles {
+  private readonly files = new Map<string, File[]>();
+
+  save(echoId: string, files: File[]) { if (files.length) this.files.set(echoId, files); }
+  get(echoId: string) { return this.files.get(echoId) || []; }
+  delete(echoId: string) { this.files.delete(echoId); }
+  clear() { this.files.clear(); }
+}
+
 export const useConversationMessages = (accountId: number | null, conversationId: number | null, inboxId: number | null, fallbackPhoneNumber?: string | null) => {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
@@ -48,6 +59,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
   const abortRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
   const inFlightEchoIds = useRef(new Set<string>());
+  const pendingMessageFiles = useRef(new PendingMessageFiles());
   const reactionInFlight = useRef(new Set<string>());
 
   const load = useCallback(async (before?: number, prepend = false) => {
@@ -77,6 +89,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
   }, [accountId, conversationId]);
 
   useEffect(() => {
+    pendingMessageFiles.current.clear();
     setMessages([]);
     setHasOlderMessages(false);
     if (!accountId || !conversationId) { setStatus('idle'); return; }
@@ -112,11 +125,13 @@ export const useConversationMessages = (accountId: number | null, conversationId
       contentAttributes: inReplyTo ? { in_reply_to: inReplyTo } : {},
     };
     inFlightEchoIds.current.add(echoId);
+    pendingMessageFiles.current.save(echoId, files);
     setMessages(current => [...current, optimistic]);
     setStatus('ready');
     try {
       const created = await messageService.create({ accountId, conversationId, content: optimistic.content, private: isPrivate, echoId, files, inReplyTo });
       setMessages(current => current.map(message => message.echoId === echoId || message.id === optimistic.id ? created : message));
+      pendingMessageFiles.current.delete(echoId);
       return created;
     } catch (cause) {
       const error = errorMessageForUser(cause);
@@ -133,8 +148,10 @@ export const useConversationMessages = (accountId: number | null, conversationId
     inFlightEchoIds.current.add(pending.echoId);
     setMessages(current => current.map(message => message.id === messageId ? { ...message, status: 'sending', error: null } : message));
     try {
-      const created = await messageService.create({ accountId, conversationId, content: pending.content, private: pending.kind === 'private_note', echoId: pending.echoId });
+      const files = pendingMessageFiles.current.get(pending.echoId);
+      const created = await messageService.create({ accountId, conversationId, content: pending.content, private: pending.kind === 'private_note', echoId: pending.echoId, files });
       setMessages(current => current.map(message => message.id === messageId || message.echoId === pending.echoId ? created : message));
+      pendingMessageFiles.current.delete(pending.echoId);
       return created;
     } catch (cause) {
       const error = errorMessageForUser(cause);

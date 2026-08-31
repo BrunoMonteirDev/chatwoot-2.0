@@ -31,4 +31,18 @@ describe('PersistentDedupStore', () => {
     const restored = new PersistentDedupStore(file);
     await expect(restored.hasOrLock('waha:19')).resolves.toBe(true);
   });
+
+  it('suprime os ecos de todos os anexos já enviados pela plataforma', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'outgoing-echo-dedup-'));
+    directories.push(directory);
+    const store = new PersistentDedupStore(join(directory, 'outgoing.json'));
+
+    await Promise.all(['meta:wamid-first', 'meta:wamid-second'].map(async (sourceId) => {
+      expect(await store.hasOrLock(sourceId)).toBe(false);
+      await store.commit(sourceId);
+    }));
+
+    await expect(store.hasOrLock('meta:wamid-first')).resolves.toBe(true);
+    await expect(store.hasOrLock('meta:wamid-second')).resolves.toBe(true);
+  });
 });

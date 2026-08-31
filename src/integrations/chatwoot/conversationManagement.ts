@@ -13,10 +13,12 @@ const conversationPath = (accountId: number, conversationId: number) =>
   `/api/v1/accounts/${accountId}/conversations/${conversationId}`;
 
 export const conversationManagementService = {
-  async listCatalogs(accountId: number, inboxId: number): Promise<ConversationManagementCatalogs> {
+  async listCatalogs(accountId: number, inboxId?: number | null): Promise<ConversationManagementCatalogs> {
     const root = `/api/v1/accounts/${accountId}`;
     const [agents, teams, labels] = await Promise.all([
-      chatwootApiClient.get<ChatwootAssignableAgentsResponse>(`${root}/assignable_agents?inbox_ids[]=${inboxId}`),
+      inboxId
+        ? chatwootApiClient.get<ChatwootAssignableAgentsResponse>(`${root}/assignable_agents?inbox_ids[]=${inboxId}`)
+        : Promise.resolve({ payload: [] } as ChatwootAssignableAgentsResponse),
       chatwootApiClient.get<ChatwootTeamDto[]>(`${root}/teams`),
       chatwootApiClient.get<ChatwootLabelsResponse>(`${root}/labels`),
     ]);

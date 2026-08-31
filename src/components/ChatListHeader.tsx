@@ -14,7 +14,7 @@ import {
   ChevronDown,
   Check,
 } from 'lucide-react';
-import type { Inbox } from '../domain/currentUser';
+import type { AccountLabel, ConversationTeam, Inbox } from '../domain/currentUser';
 import {
   FilterCategory,
   ChatStatusFilter,
@@ -49,6 +49,12 @@ interface Props {
   onSortChange?: (sort: ChatSortOption) => void;
   filterRules?: ChatFilterRule[];
   onFilterRulesChange?: (rules: ChatFilterRule[]) => void;
+  teams?: ConversationTeam[];
+  labels?: AccountLabel[];
+  teamFilterId?: number | null;
+  labelFilters?: string[];
+  onTeamFilterChange?: (teamId: number | null) => void;
+  onLabelFiltersChange?: (labels: string[]) => void;
 }
 
 export const ChatListHeader: React.FC<Props> = ({
@@ -73,6 +79,12 @@ export const ChatListHeader: React.FC<Props> = ({
   onSortChange = (_s: ChatSortOption) => {},
   filterRules = [],
   onFilterRulesChange = (_r: ChatFilterRule[]) => {},
+  teams = [],
+  labels = [],
+  teamFilterId = null,
+  labelFilters = [],
+  onTeamFilterChange = (_teamId: number | null) => {},
+  onLabelFiltersChange = (_labels: string[]) => {},
 }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isSortOpen, setIsSortOpen] = useState(false);
@@ -122,6 +134,7 @@ export const ChatListHeader: React.FC<Props> = ({
   const activeRulesCount = filterRules.length;
   const isStatusCustom = selectedStatus !== 'todas';
   const isSortCustom = selectedSort !== 'last_activity_desc';
+  const hasServerFilters = Boolean(teamFilterId) || labelFilters.length > 0;
   const selectedInboxLabel = selectedInbox === 'todas'
     ? 'Todas'
     : inboxes.find((inbox) => String(inbox.id) === selectedInbox)?.name || 'Todas';
@@ -346,8 +359,46 @@ export const ChatListHeader: React.FC<Props> = ({
         isDarkMode={isDarkMode}
       />
 
+      <div className="flex items-center gap-2 px-3 pb-2">
+        <select
+          aria-label="Filtrar por time"
+          value={teamFilterId ?? ''}
+          onChange={(event) => onTeamFilterChange(event.target.value ? Number(event.target.value) : null)}
+          className={`h-8 max-w-[155px] rounded-lg border px-2 text-xs font-medium outline-none ${
+            isDarkMode ? 'border-[#2a3942] bg-[#1e1f1f] text-[#e9edef]' : 'border-[#d1d7db] bg-white text-[#54656f]'
+          }`}
+        >
+          <option value="">Todos os times</option>
+          {teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+        </select>
+        <details className="relative">
+          <summary className={`flex h-8 cursor-pointer list-none items-center gap-1 rounded-lg border px-2 text-xs font-medium ${
+            labelFilters.length > 0 ? 'border-[#2563eb] bg-[#2563eb]/10 text-[#2563eb]' : isDarkMode ? 'border-[#2a3942] text-[#aebac1]' : 'border-[#d1d7db] text-[#54656f]'
+          }`}>
+            Etiquetas{labelFilters.length > 0 ? ` (${labelFilters.length})` : ''}
+            <ChevronDown className="h-3.5 w-3.5" />
+          </summary>
+          <div className={`absolute left-0 z-[60] mt-2 max-h-64 w-60 overflow-y-auto rounded-xl border p-2 shadow-2xl ${
+            isDarkMode ? 'border-[#2a3942] bg-[#202c33] text-[#e9edef]' : 'border-gray-200 bg-white text-[#111b21]'
+          }`}>
+            {labels.length === 0 ? <p className="p-2 text-xs text-[#8696a0]">Nenhuma etiqueta disponível.</p> : labels.map((label) => {
+              const selected = labelFilters.includes(label.title);
+              return <label key={label.id} className={`flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs ${isDarkMode ? 'hover:bg-[#2a3942]' : 'hover:bg-gray-100'}`}>
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  onChange={() => onLabelFiltersChange(selected ? labelFilters.filter((title) => title !== label.title) : [...labelFilters, label.title])}
+                />
+                {label.color && <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: label.color }} />}
+                <span className="truncate">{label.title}</span>
+              </label>;
+            })}
+          </div>
+        </details>
+      </div>
+
       {/* Active Filters Pill Bar Indicator */}
-      {(activeRulesCount > 0 || isStatusCustom) && (
+      {(activeRulesCount > 0 || isStatusCustom || hasServerFilters) && (
         <div className="px-3 pb-1.5 pt-0 flex items-center flex-wrap gap-1 text-[11px]">
           <span className="text-[#8696a0] font-semibold flex items-center">
             <Filter className="w-3 h-3 mr-1 text-[#2563eb]" /> Filtros:
@@ -362,10 +413,22 @@ export const ChatListHeader: React.FC<Props> = ({
               {activeRulesCount} regra(s) ativa(s)
             </span>
           )}
+          {teamFilterId && (
+            <button type="button" onClick={() => onTeamFilterChange(null)} className="bg-[#2563eb]/20 text-[#2563eb] px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+              Time: {teams.find((team) => team.id === teamFilterId)?.name || teamFilterId}<X className="h-3 w-3" />
+            </button>
+          )}
+          {labelFilters.map((title) => (
+            <button key={title} type="button" onClick={() => onLabelFiltersChange(labelFilters.filter((label) => label !== title))} className="bg-[#7c3aed]/15 text-[#6d28d9] px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+              Etiqueta: {title}<X className="h-3 w-3" />
+            </button>
+          ))}
           <button
             onClick={() => {
               onStatusChange('todas');
               onFilterRulesChange([]);
+              onTeamFilterChange(null);
+              onLabelFiltersChange([]);
             }}
             className="text-rose-500 hover:underline font-bold text-[10px] ml-auto cursor-pointer"
           >

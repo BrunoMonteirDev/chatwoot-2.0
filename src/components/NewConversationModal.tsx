@@ -4,6 +4,7 @@ import type { Chat } from '../types';
 import type { Inbox } from '../domain/currentUser';
 import type { ContactsStatus } from '../features/contacts/useContacts';
 import { errorMessageForUser } from '../integrations/chatwoot/errors';
+import { normalizeBrazilianPhone } from '../../phone';
 
 const COUNTRY_CODES = [
   { code: '55', label: 'Brasil +55' }, { code: '1', label: 'EUA/Canadá +1' },
@@ -58,10 +59,10 @@ export const NewConversationModal: React.FC<Props> = ({
 
   const normalizedPhone = (value: string) => {
     const trimmed = value.trim();
-    if (trimmed.startsWith('+')) return `+${trimmed.slice(1).replace(/\D/g, '')}`;
+    if (trimmed.startsWith('+')) return normalizeBrazilianPhone(`+${trimmed.slice(1).replace(/\D/g, '')}`);
     const digits = trimmed.replace(/\D/g, '');
     if (!digits) return '';
-    return `+${digits.startsWith('55') ? digits : `${countryCode}${digits}`}`;
+    return normalizeBrazilianPhone(`+${digits.startsWith('55') ? digits : `${countryCode}${digits}`}`);
   };
 
   const matchingContacts = useMemo(() => {

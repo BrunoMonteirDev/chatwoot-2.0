@@ -93,5 +93,17 @@ export const useContacts = (accountId: number | null) => {
     }
   }, [accountId, contacts, isMutating]);
 
-  return { contacts, status, error, totalCount, retry: load, create, isCreating, update, remove, isMutating };
+  const upsertRealtimeContact = useCallback((updated: ContactProfile, created = false) => {
+    setContacts((current) => [updated, ...current.filter((contact) => contact.id !== updated.id)]);
+    if (created) setTotalCount((count) => count + 1);
+  }, []);
+  const removeRealtimeContact = useCallback((contactId: number) => {
+    setContacts((current) => {
+      const exists = current.some((contact) => contact.id === contactId);
+      if (exists) setTotalCount((count) => Math.max(0, count - 1));
+      return current.filter((contact) => contact.id !== contactId);
+    });
+  }, []);
+
+  return { contacts, status, error, totalCount, retry: load, create, isCreating, update, remove, isMutating, upsertRealtimeContact, removeRealtimeContact };
 };

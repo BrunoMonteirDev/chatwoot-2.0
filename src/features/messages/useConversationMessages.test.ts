@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ConversationMessage } from '../../domain/currentUser';
-import { mergeRealtimeMessage, optimisticReactionList } from './useConversationMessages';
+import { mergeRealtimeMessage, optimisticReactionList, PendingMessageFiles } from './useConversationMessages';
 
 const message = (overrides: Partial<ConversationMessage> = {}): ConversationMessage => ({
   id: 10, conversationId: 31, kind: 'outgoing', contentType: 'text', content: 'Olá', createdAt: 100,
@@ -31,5 +31,15 @@ describe('mergeRealtimeMessage', () => {
     expect(optimisticReactionList(initial, 'evolution', '❤️')).toEqual([
       { sender_id: 'contact:5511', emoji: '👍', transport: 'evolution', origin: 'contact' },
     ]);
+  });
+
+  it('mantém anexos originais disponíveis para o retry pelo echo_id', () => {
+    const pending = new PendingMessageFiles();
+    const audio = new File(['audio'], 'nota.ogg', { type: 'audio/ogg; codecs=opus' });
+
+    pending.save('echo-audio', [audio]);
+    expect(pending.get('echo-audio')).toEqual([audio]);
+    pending.delete('echo-audio');
+    expect(pending.get('echo-audio')).toEqual([]);
   });
 });

@@ -13,7 +13,7 @@ export const useConversationManagement = (accountId: number | null, inboxId: num
   const inFlight = useRef(false);
 
   const loadCatalogs = useCallback(async () => {
-    if (!accountId || !inboxId) return;
+    if (!accountId) return;
     setCatalogStatus('loading');
     setCatalogError(null);
     try {
@@ -26,7 +26,7 @@ export const useConversationManagement = (accountId: number | null, inboxId: num
   }, [accountId, inboxId]);
 
   useEffect(() => {
-    if (!accountId || !inboxId) { setCatalogs(emptyCatalogs); setCatalogStatus('idle'); return; }
+    if (!accountId) { setCatalogs(emptyCatalogs); setCatalogStatus('idle'); return; }
     void loadCatalogs();
   }, [accountId, loadCatalogs]);
 

@@ -1,3 +1,5 @@
+import { normalizeBrazilianPhone } from '../phone.js';
+
 export type EvolutionMediaKind = 'image' | 'audio' | 'video' | 'document';
 
 export interface IncomingEvolutionMedia {
@@ -131,7 +133,8 @@ const identityFor = (key: RecordValue, data: RecordValue, remoteJid: string): Ev
   const senderPn = text(key.senderPn, data.senderPn, key.participantPn)?.replace(/@.+$/, '').replace(/\D/g, '') || '';
   // For a mobile echo, remoteJid is the recipient while senderPn identifies
   // our own account. Contact lookup must remain anchored to the recipient.
-  const phone = (fromMe ? [jidNumber, senderPn] : [senderPn, jidNumber]).find(value => /^\d{8,15}$/.test(value));
+  const rawPhone = (fromMe ? [jidNumber, senderPn] : [senderPn, jidNumber]).find(value => /^\d{8,15}$/.test(value));
+  const phone = rawPhone ? normalizeBrazilianPhone(rawPhone) : undefined;
   const lid = remoteJid.endsWith('@lid') ? remoteJid.replace(/@.+$/, '') : undefined;
   if (!phone && !lid) return null;
   const contactName = text(data.pushName, data.verifiedBizName, data.notifyName);

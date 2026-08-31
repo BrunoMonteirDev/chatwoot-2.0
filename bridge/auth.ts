@@ -10,7 +10,10 @@ const requestedAccountId = (request: express.Request) => {
   return Number.isInteger(accountId) && accountId! > 0 ? accountId : null;
 };
 
-const sessionHeaders = (request: express.Request) => {
+// Reuse the exact browser session only after the route has authenticated it.
+// This is useful for account-scoped administrative checks in development too,
+// where a service-account token may not have been bootstrapped yet.
+export const chatwootSessionHeaders = (request: express.Request) => {
   // The bridge reaches Rails through Docker HTTP while the public request is
   // HTTPS through Caddy. Preserve that scheme so FORCE_SSL does not redirect
   // the token validation request to an unavailable internal TLS endpoint.
@@ -26,7 +29,7 @@ const sessionHeaders = (request: express.Request) => {
 // Administrative browser calls are authenticated against Chatwoot on every
 // sensitive operation. The bridge never accepts a shared browser secret.
 export const requireChatwootSession = async (request: express.Request, administrator = false) => {
-  const headers = sessionHeaders(request);
+  const headers = chatwootSessionHeaders(request);
   if (!headers) return false;
   try {
     const response = await fetch(`${config.chatwootBaseUrl}/api/v1/profile`, { headers });

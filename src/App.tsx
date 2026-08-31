@@ -46,8 +46,9 @@ import { useChatwootRealtime } from './features/realtime/useChatwootRealtime';
 import { useContactDetails } from './features/contacts/useContactDetails';
 import { useContacts } from './features/contacts/useContacts';
 import { toContactListItem } from './features/contacts/toContactListItem';
-import { conversationService } from './integrations/chatwoot/conversations';
+import { conversationService, type ConversationServerFilters } from './integrations/chatwoot/conversations';
 import { messageService } from './integrations/chatwoot/messages';
+import { canSendWhatsAppMessage, whatsappConnectionService, type OperationalWhatsAppConnection } from './integrations/whatsapp/connection';
 import { authService } from './integrations/chatwoot/auth';
 import { browserNotifications } from './features/notifications/browserNotifications';
 import type { ConversationMessage } from './domain/currentUser';
@@ -64,7 +65,8 @@ export default function App() {
   const { user: authenticatedUser, currentAccount, selectAccount, logout, retryBootstrap } = useAuth();
   const initialRoute = appRouteFromUrl(new URL(window.location.href));
   const superAdminUrl = import.meta.env.VITE_SUPER_ADMIN_URL || '/super_admin';
-  const { inboxes, status: inboxesStatus, error: inboxesError, retry: retryInboxes } = useInboxes(currentAccount?.id ?? null);
+  const { inboxes, status: inboxesStatus, error: inboxesError, retry: retryInboxes, upsertRealtimeInbox } = useInboxes(currentAccount?.id ?? null);
+  const [whatsappConnection, setWhatsappConnection] = useState<OperationalWhatsAppConnection | null>(null);
   const contactDirectory = useContacts(currentAccount?.id ?? null);
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeChatId, setActiveChatId] = useState<string>(() => initialRoute.conversationId || '');
@@ -202,7 +204,8 @@ export default function App() {
   const [showMobileChat, setShowMobileChat] = useState<boolean>(() => Boolean(initialRoute.conversationId));
   const [selectedInbox, setSelectedInbox] = useState<string>(() => initialRoute.inbox || 'todas');
   const [routeAccountId, setRouteAccountId] = useState<string>(() => initialRoute.accountId || '');
-  const { conversations, status: conversationsStatus, error: conversationsError, hasNextPage, isLoadingMore, retry: retryConversations, loadMore, applyOutgoingMessage, applyConversationUpdate, removeConversation, replaceConversation, upsertRealtimeConversation, addCreatedConversation, applyRealtimeMessage } = useConversations(currentAccount?.id ?? null, selectedInbox);
+  const [conversationServerFilters, setConversationServerFilters] = useState<ConversationServerFilters>({ teamId: null, labels: [] });
+  const { conversations, status: conversationsStatus, error: conversationsError, hasNextPage, isLoadingMore, retry: retryConversations, loadMore, applyOutgoingMessage, applyConversationUpdate, removeConversation, replaceConversation, upsertRealtimeConversation, addCreatedConversation, applyRealtimeMessage, refreshRecentConversations } = useConversations(currentAccount?.id ?? null, selectedInbox, conversationServerFilters);
   const [activeFilter, setActiveFilter] = useState<FilterCategory>('minhas');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [user, setUser] = useState<UserProfile>(emptyUser);
@@ -404,6 +407,19 @@ export default function App() {
   const activeChat = listChats.find((c) => c.id === activeChatId);
   const selectedConversationId = useMemo(() => conversations.some((conversation) => String(conversation.id) === activeChatId) ? Number(activeChatId) : null, [activeChatId, conversations]);
   const selectedConversation = useMemo(() => conversations.find((conversation) => conversation.id === selectedConversationId) || null, [conversations, selectedConversationId]);
+  useEffect(() => {
+    const inboxId = selectedConversation?.inboxId;
+    if (!currentAccount || !inboxId) { setWhatsappConnection(null); return; }
+    let active = true;
+    const refresh = () => whatsappConnectionService.get(currentAccount.id, inboxId, selectedConversation.isGroup ? 'group' : 'private')
+      .then((status) => { if (active) setWhatsappConnection(status); })
+      .catch(() => { if (active) setWhatsappConnection(null); });
+    void refresh();
+    // Inbox updates arrive over ActionCable. This is only a slow recovery
+    // check for proxies/providers that drop a callback while reconnecting.
+    const interval = window.setInterval(() => void refresh(), 120_000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [currentAccount?.id, selectedConversation?.id, selectedConversation?.inboxId, selectedConversation?.isGroup]);
   const contactDetails = useContactDetails(currentAccount?.id ?? null, selectedConversation?.contactId ?? null);
   const messageHistory = useConversationMessages(currentAccount?.id ?? null, selectedConversationId, selectedConversation?.inboxId ?? null, contactDetails.contact?.phoneNumber);
   const activeChatWithHistory = useMemo(() => selectedConversationId
@@ -417,6 +433,9 @@ export default function App() {
     return updated;
   };
   const unreadRefreshTimer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (unreadRefreshTimer.current !== null) window.clearTimeout(unreadRefreshTimer.current);
+  }, []);
   const openedReadConversationRef = useRef<number | null>(null);
   const markSelectedConversationRead = useCallback(() => {
     if (!selectedConversationId || !selectedConversation || selectedConversation.unreadCount <= 0) return;
@@ -432,9 +451,16 @@ export default function App() {
         void browserNotifications.show({ title: message.senderName || 'Nova mensagem', body: message.content || (message.attachments.length ? 'Enviou um anexo' : 'Nova mensagem'), url: `/app/accounts/${currentAccount.id}/conversations/${message.conversationId}` });
       }
     },
-    // message.created already contains the new unread count. Reloading the
-    // entire list here remounted the conversation and forced the "Minhas" tab.
-    onUnreadInvalidated: () => undefined,
+    // message.created usually has the count. The invalidation covers bulk
+    // changes, so refresh only the first page after a short debounce without
+    // resetting filters, pagination or the selected conversation.
+    onUnreadInvalidated: () => {
+      if (unreadRefreshTimer.current !== null) window.clearTimeout(unreadRefreshTimer.current);
+      unreadRefreshTimer.current = window.setTimeout(() => {
+        unreadRefreshTimer.current = null;
+        void refreshRecentConversations();
+      }, 400);
+    },
     onReconnect: () => {
       void retryConversations();
       void messageHistory.retry();
@@ -444,12 +470,31 @@ export default function App() {
       void retryConversations();
     },
     onContact: (contact) => {
+      contactDirectory.upsertRealtimeContact(contact);
       contactDetails.applyRealtimeUpdate(contact);
       if (selectedConversation?.contactId === contact.id && selectedConversationId) {
         applyConversationUpdate(selectedConversationId, { contactName: contact.name, contactId: contact.id });
       }
     },
-  }), [applyConversationUpdate, applyRealtimeMessage, contactDetails.applyRealtimeUpdate, currentAccount, messageHistory.retry, messageHistory.upsertRealtimeMessage, retryBootstrap, retryConversations, selectedConversation?.contactId, selectedConversationId, upsertRealtimeConversation]);
+    onContactRemoved: (contactId) => {
+      contactDirectory.removeRealtimeContact(contactId);
+      if (selectedConversation?.contactId === contactId && selectedConversationId) applyConversationUpdate(selectedConversationId, { contactName: 'Contato removido', contactId: null });
+    },
+    onConversationDeleted: (conversationId) => {
+      removeConversation(conversationId);
+      if (selectedConversationId === conversationId) navigate({ tab: 'chats', ...(selectedInbox !== 'todas' ? { inbox: selectedInbox } : {}) }, true);
+    },
+    onInbox: (inbox) => {
+      upsertRealtimeInbox(inbox);
+      if (selectedConversation?.inboxId !== inbox.id) return;
+      setWhatsappConnection((current) => {
+        if (!current?.applicable || !current.transport) return current;
+        const value = inbox.additionalAttributes[`${current.transport}_connection_status`];
+        const status = value === 'connected' || value === 'connecting' || value === 'disconnected' || value === 'error' || value === 'pending' ? value : current.status;
+        return { ...current, status, sendAllowed: status === 'connected' };
+      });
+    },
+  }), [applyConversationUpdate, applyRealtimeMessage, contactDetails.applyRealtimeUpdate, contactDirectory, currentAccount, messageHistory.retry, messageHistory.upsertRealtimeMessage, navigate, refreshRecentConversations, removeConversation, retryBootstrap, retryConversations, selectedConversation?.contactId, selectedConversation?.inboxId, selectedConversationId, selectedInbox, upsertRealtimeConversation, upsertRealtimeInbox]);
   const { connectionStatus: realtimeConnectionStatus, typing } = useChatwootRealtime(authenticatedUser, currentAccount, selectedConversationId, realtimeHandlers);
 
   useEffect(() => {
@@ -616,7 +661,7 @@ export default function App() {
         else if (rule.field === 'priority') targetVal = c.priority || 'media';
         else if (rule.field === 'assignedAgent') targetVal = c.assignedAgent || 'Não Atribuído';
         else if (rule.field === 'inbox') targetVal = c.channelName || '';
-        else if (rule.field === 'team') targetVal = c.teamName || 'Comercial';
+        else if (rule.field === 'team') targetVal = c.teamName || '';
         else if (rule.field === 'identifier') targetVal = c.identifier || c.phone || '';
         else if (rule.field === 'campaign') targetVal = c.campaignName || '';
 
@@ -683,6 +728,10 @@ export default function App() {
 
   // Handle sending message
   const handleSendMessage = (chatId: string, text: string, attachments?: File[], isPrivate?: boolean, replyTo?: import('./types').ReplyTo | null) => {
+    if (!canSendWhatsAppMessage(whatsappConnection, Boolean(isPrivate))) {
+      addToast('O WhatsApp desta inbox está desconectado. Reconecte a sessão para enviar mensagens.', 'error');
+      return Promise.resolve(false);
+    }
     if (selectedConversationId && chatId === String(selectedConversationId)) {
       const inReplyTo = replyTo?.id && /^\d+$/.test(replyTo.id) ? Number(replyTo.id) : undefined;
       return messageHistory.send(text, Boolean(isPrivate), attachments, inReplyTo).then((message) => {
@@ -1062,6 +1111,12 @@ export default function App() {
                   onSortChange={setSelectedSort}
                   filterRules={filterRules}
                   onFilterRulesChange={setFilterRules}
+                  teams={conversationManagement.catalogs.teams}
+                  labels={conversationManagement.catalogs.labels}
+                  teamFilterId={conversationServerFilters.teamId}
+                  labelFilters={conversationServerFilters.labels || []}
+                  onTeamFilterChange={(teamId) => setConversationServerFilters((current) => ({ ...current, teamId }))}
+                  onLabelFiltersChange={(labels) => setConversationServerFilters((current) => ({ ...current, labels }))}
                 />
 
                 {/* Scrollable Chat List */}
@@ -1131,6 +1186,7 @@ export default function App() {
                   onRevokeMessage={(messageId) => messageHistory.revoke(Number(messageId))}
                   conversation={selectedConversation}
                   inboxes={inboxes}
+                  whatsappConnection={whatsappConnection}
                   managementCatalogs={conversationManagement.catalogs}
                   managementCatalogStatus={conversationManagement.catalogStatus}
                   managementCatalogError={conversationManagement.catalogError}

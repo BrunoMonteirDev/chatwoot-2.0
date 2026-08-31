@@ -1,4 +1,5 @@
 import type { AccountLabel, ContactNote, ContactProfile } from '../../domain/currentUser';
+import { normalizeBrazilianPhone } from '../../../phone';
 import { chatwootApiClient } from './client';
 import { normalizeContact, normalizeContactNote, normalizeLabel } from './normalizers';
 import type { ChatwootContactDto, ChatwootContactLabelsResponse, ChatwootContactNoteDto, ChatwootContactResponse, ChatwootContactsResponse, ChatwootLabelsResponse } from './types';
@@ -66,7 +67,7 @@ export const contactService = {
       `/api/v1/accounts/${accountId}/contacts`,
       {
         name,
-        ...(phoneNumber ? { phone_number: phoneNumber } : {}),
+        ...(phoneNumber ? { phone_number: normalizeBrazilianPhone(phoneNumber) } : {}),
         ...(email ? { email } : {}),
         ...(inboxId ? { inbox_id: inboxId } : {}),
       }
@@ -83,7 +84,7 @@ export const contactService = {
     const response = await chatwootApiClient.patch<ChatwootContactResponse>(path(accountId, contact.id), {
       ...(update.name === undefined ? {} : { name: update.name }),
       ...(update.email === undefined ? {} : { email: update.email }),
-      ...(update.phoneNumber === undefined ? {} : { phone_number: update.phoneNumber }),
+      ...(update.phoneNumber === undefined ? {} : { phone_number: update.phoneNumber === null ? null : normalizeBrazilianPhone(update.phoneNumber) }),
       ...(update.identifier === undefined ? {} : { identifier: update.identifier }),
       ...(update.blocked === undefined ? {} : { blocked: update.blocked }),
       additional_attributes: additionalAttributes,

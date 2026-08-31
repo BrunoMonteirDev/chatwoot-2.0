@@ -165,7 +165,11 @@ export const wahaTransport = {
   },
   async sendMedia(session: string, chatId: string, attachment: OutgoingAttachment, caption = '', replyTo?: string) {
     const file = await fileData(attachment);
-    const kind = attachment.fileType === 'image' ? 'sendImage' : attachment.fileType === 'audio' ? 'sendVoice' : attachment.fileType === 'video' ? 'sendVideo' : 'sendFile';
+    // WAHA's voice endpoint expects an OGG/Opus WhatsApp voice note. Browser
+    // recordings can be WebM, which must be sent as a regular file instead of
+    // being mislabeled as a voice note and rejected by WhatsApp clients.
+    const voiceNote = attachment.fileType === 'audio' && /^audio\/ogg(?:\s*;\s*codecs?=opus)?$/i.test(file.mimetype);
+    const kind = attachment.fileType === 'image' ? 'sendImage' : voiceNote ? 'sendVoice' : attachment.fileType === 'video' ? 'sendVideo' : 'sendFile';
     return sent(await request(`/api/${kind}`, { method: 'POST', body: JSON.stringify({ session, chatId: normalizeWahaChatId(chatId), file, ...(caption ? { caption } : {}), ...(replyTo ? { reply_to: replyTo } : {}) }) }));
   },
   async sendReaction(session: string, chatId: string, messageId: string, emoji: string) {

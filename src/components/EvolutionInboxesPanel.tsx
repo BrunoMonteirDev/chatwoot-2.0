@@ -127,16 +127,16 @@ export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inb
       const instance = createInstanceForExistingInbox
         ? await evolutionService.createInstance(existingInstanceName.trim())
         : { instanceName: existingInstanceName.trim(), instanceId: null };
-      if (!createInstanceForExistingInbox) await evolutionService.getConnection(instance.instanceName);
+      const connection = await evolutionService.getConnection(instance.instanceName);
       await evolutionService.configureWebhook(instance.instanceName);
       const saved = await inboxService.saveWhatsAppTransport(accountId, selectedInbox, 'evolution', {
-        evolution_provider: 'evolution', whatsapp_provider: 'evolution', evolution_instance_name: instance.instanceName, evolution_instance_id: instance.instanceId,
+        evolution_provider: 'evolution', whatsapp_provider: 'evolution', evolution_instance_name: instance.instanceName, evolution_instance_id: instance.instanceId, evolution_connection_status: connection.status, evolution_connection_updated_at: new Date().toISOString(),
       }, chatwootWebhookUrl);
       await onRefresh(); setSelectedInbox(saved); setScreen('configure');
     } catch (cause) { setError(errorMessageForUser(cause)); }
     finally { setCreating(false); }
   };
-  const disconnect = async () => { if (!selectedInstance) return; setLoadingConnection(true); setError(null); try { await evolutionService.disconnect(selectedInstance); await loadConnection(false); } catch (cause) { setError(errorMessageForUser(cause)); } finally { setLoadingConnection(false); } };
+  const disconnect = async () => { if (!selectedInstance) return; setLoadingConnection(true); setError(null); try { await evolutionService.disconnect(selectedInstance); if (accountId && selectedInbox) await inboxService.saveWhatsAppTransport(accountId, selectedInbox, 'evolution', { evolution_connection_status: 'disconnected', evolution_connection_updated_at: new Date().toISOString() }, chatwootWebhookUrl); await loadConnection(false); } catch (cause) { setError(errorMessageForUser(cause)); } finally { setLoadingConnection(false); } };
   // Evolution API v2 does not provide /instance/restart. Requesting a fresh
   // QR from /instance/connect is the supported way to start or renew a
   // Baileys pairing session.

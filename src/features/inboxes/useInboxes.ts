@@ -5,6 +5,9 @@ import { errorMessageForUser } from '../../integrations/chatwoot/errors';
 
 export type InboxesStatus = 'idle' | 'loading' | 'ready' | 'error';
 
+export const mergeRealtimeInbox = (current: Inbox[], updated: Inbox): Inbox[] =>
+  [...current.filter((inbox) => inbox.id !== updated.id), updated].sort((left, right) => left.name.localeCompare(right.name));
+
 export const useInboxes = (accountId: number | null) => {
   const [inboxes, setInboxes] = useState<Inbox[]>([]);
   const [status, setStatus] = useState<InboxesStatus>('idle');
@@ -30,5 +33,10 @@ export const useInboxes = (accountId: number | null) => {
 
   useEffect(() => { void load(); }, [load]);
 
-  return { inboxes, status, error, retry: load };
+  const upsertRealtimeInbox = useCallback((updated: Inbox) => {
+    setInboxes((current) => mergeRealtimeInbox(current, updated));
+    setStatus('ready');
+  }, []);
+
+  return { inboxes, status, error, retry: load, upsertRealtimeInbox };
 };
