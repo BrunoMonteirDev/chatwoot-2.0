@@ -1,6 +1,6 @@
 import { config } from './config.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { normalizeBrazilianPhone } from '../phone.js';
+import { normalizeBrazilianPhone } from '../phone.ts';
 import type { DownloadedEvolutionMedia } from './evolution.js';
 import { externalMessageId, transportConfigurationForInbox, type WhatsAppTransport, type WhatsAppTransportConfiguration } from './providers.js';
 import type { StagedMetaHistoryMessage } from './metaHistoryStore.js';

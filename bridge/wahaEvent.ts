@@ -1,5 +1,5 @@
 import { createTrackId, type UnifiedWhatsAppEvent } from './track.js';
-import { normalizeBrazilianPhone } from '../phone.js';
+import { normalizeBrazilianPhone } from '../phone.ts';
 
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' ? value as Record<string, unknown> : {};
 const string = (value: unknown) => typeof value === 'string' && value ? value : undefined;

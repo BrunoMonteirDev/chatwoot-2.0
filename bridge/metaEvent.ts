@@ -1,4 +1,4 @@
-import { normalizeBrazilianPhone } from '../phone.js';
+import { normalizeBrazilianPhone } from '../phone.ts';
 
 export type MetaMediaKind = 'image' | 'audio' | 'video' | 'document';
 

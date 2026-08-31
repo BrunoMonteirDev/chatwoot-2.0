@@ -3,5 +3,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY bridge ./bridge
+COPY phone.ts ./phone.ts
 EXPOSE 3100
 CMD ["node", "--import", "tsx", "bridge/index.ts"]

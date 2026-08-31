@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
-import { normalizeBrazilianPhone } from '../phone.js';
+import { normalizeBrazilianPhone } from '../phone.ts';
 import { chatwootBridge } from './chatwoot.js';
 import { config } from './config.js';
 import { PersistentDedupStore } from './dedupStore.js';
