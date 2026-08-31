@@ -43,26 +43,31 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setStatus('unauthenticated');
   }, []);
 
-  const bootstrap = useCallback(async () => {
+  const bootstrap = useCallback(async (showLoading: boolean) => {
     if (!authSession.get()) {
       clearAuthentication();
       return;
     }
-    setStatus('loading');
+    if (showLoading) setStatus('loading');
     try {
       await authService.validateSession();
       await loadProfile();
     } catch (cause) {
       if (cause instanceof ChatwootApiError && cause.status !== 401) {
-        setError(cause.message);
-        setStatus('error');
+        // Refreshes triggered by realtime cache invalidation must not replace
+        // a working chat with the full-screen session checker on a transient
+        // network/API failure.
+        if (showLoading) {
+          setError(cause.message);
+          setStatus('error');
+        }
         return;
       }
       clearAuthentication();
     }
   }, [clearAuthentication, loadProfile]);
 
-  useEffect(() => { void bootstrap(); }, [bootstrap]);
+  useEffect(() => { void bootstrap(true); }, [bootstrap]);
 
   const login = useCallback(async (credentials: AuthCredentials): Promise<MfaRequiredResponse | null> => {
     setError(null);
@@ -115,8 +120,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setSelectedAccountId(accountId);
   }, [selectedAccountId, user]);
 
-  const value = useMemo(() => ({ status, user, currentAccount, selectAccount, error, login, verifyMfa, logout, retryBootstrap: bootstrap }),
-    [status, user, currentAccount, selectAccount, error, login, verifyMfa, logout, bootstrap]);
+  const retryBootstrap = useCallback(() => bootstrap(false), [bootstrap]);
+
+  const value = useMemo(() => ({ status, user, currentAccount, selectAccount, error, login, verifyMfa, logout, retryBootstrap }),
+    [status, user, currentAccount, selectAccount, error, login, verifyMfa, logout, retryBootstrap]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

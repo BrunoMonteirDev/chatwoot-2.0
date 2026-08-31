@@ -433,8 +433,10 @@ export default function App() {
     return updated;
   };
   const unreadRefreshTimer = useRef<number | null>(null);
+  const accessRefreshTimer = useRef<number | null>(null);
   useEffect(() => () => {
     if (unreadRefreshTimer.current !== null) window.clearTimeout(unreadRefreshTimer.current);
+    if (accessRefreshTimer.current !== null) window.clearTimeout(accessRefreshTimer.current);
   }, []);
   const openedReadConversationRef = useRef<number | null>(null);
   const markSelectedConversationRead = useCallback(() => {
@@ -466,8 +468,14 @@ export default function App() {
       void messageHistory.retry();
     },
     onAccessChanged: () => {
-      void retryBootstrap();
-      void retryConversations();
+      // Inbox/contact changes can invalidate the account cache in bursts.
+      // Refresh access once after the burst without replacing the chat UI.
+      if (accessRefreshTimer.current !== null) window.clearTimeout(accessRefreshTimer.current);
+      accessRefreshTimer.current = window.setTimeout(() => {
+        accessRefreshTimer.current = null;
+        void retryBootstrap();
+        void retryConversations();
+      }, 500);
     },
     onContact: (contact) => {
       contactDirectory.upsertRealtimeContact(contact);
