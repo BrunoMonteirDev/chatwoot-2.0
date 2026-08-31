@@ -2197,7 +2197,10 @@ export const ChatArea: React.FC<Props> = ({
                         onTimeUpdate={(event) => setReviewCurrentTime(event.currentTarget.currentTime)}
                         onPlay={() => setIsReviewPlaying(true)}
                         onPause={() => setIsReviewPlaying(false)}
-                        onEnded={() => { setIsReviewPlaying(false); setReviewCurrentTime(recordedAudio.duration || 0); }}
+                        onEnded={(event) => {
+                          setIsReviewPlaying(false);
+                          setReviewCurrentTime(finiteAudioDuration(event.currentTarget.duration) || 0);
+                        }}
                         className="hidden"
                       />
                     </>

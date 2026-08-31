@@ -21,7 +21,7 @@ self.addEventListener('fetch', (event) => {
   // Attachments are ActiveStorage redirects. Leave them entirely to the
   // browser/network stack so media streams, downloads and signed redirects
   // are never affected by the PWA cache layer.
-  if (request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/') || url.pathname.startsWith('/rails/') || url.pathname === '/cable') return;
+  if (request.method !== 'GET' || url.protocol === 'blob:' || url.origin !== self.location.origin || url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/') || url.pathname.startsWith('/rails/') || url.pathname === '/cable') return;
 
   if (request.mode === 'navigate') {
     event.respondWith(fetch(request).catch(() => caches.match('/index.html')));
