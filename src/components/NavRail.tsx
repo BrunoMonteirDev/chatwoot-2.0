@@ -1384,7 +1384,7 @@ export const NavRail: React.FC<Props> = ({
               {/* Atalhos do teclado */}
               <button
                 type="button"
-                onClick={() => { setShowUserMenu(false); onLogout?.(); }}
+                onClick={() => setShowUserMenu(false)}
                 className={`w-full text-left px-2.5 py-2 rounded-xl text-xs font-medium flex items-center space-x-3 transition-colors cursor-pointer ${
                   isDarkMode
                     ? 'hover:bg-[#2a3942] text-[#e9edef]'
@@ -1452,7 +1452,7 @@ export const NavRail: React.FC<Props> = ({
               {/* Encerrar sessão */}
               <button
                 type="button"
-                onClick={() => setShowUserMenu(false)}
+                onClick={() => { setShowUserMenu(false); onLogout?.(); }}
                 className={`w-full text-left px-2.5 py-2 rounded-xl text-xs font-medium flex items-center space-x-3 text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer`}
               >
                 <LogOut className="w-4 h-4 shrink-0" />
