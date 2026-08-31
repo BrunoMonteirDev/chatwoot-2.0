@@ -464,18 +464,21 @@ export default function App() {
       }, 400);
     },
     onReconnect: () => {
-      void retryConversations();
+      // Reconnection is common on mobile/proxies. Merge the current page
+      // silently instead of resetting the whole conversation-list state.
+      void refreshRecentConversations();
       void messageHistory.retry();
     },
     onAccessChanged: () => {
-      // Inbox/contact changes can invalidate the account cache in bursts.
-      // Refresh access once after the burst without replacing the chat UI.
+      // `account.cache_invalidated` is also emitted for ordinary inbox and
+      // contact changes. It must never revalidate the auth token or restart
+      // the list: both operations caused a visible loop when providers emit
+      // events in bursts. Inbox updates have their own realtime event.
       if (accessRefreshTimer.current !== null) window.clearTimeout(accessRefreshTimer.current);
       accessRefreshTimer.current = window.setTimeout(() => {
         accessRefreshTimer.current = null;
-        void retryBootstrap();
-        void retryConversations();
-      }, 500);
+        void refreshRecentConversations();
+      }, 1_000);
     },
     onContact: (contact) => {
       contactDirectory.upsertRealtimeContact(contact);
@@ -502,7 +505,7 @@ export default function App() {
         return { ...current, status, sendAllowed: status === 'connected' };
       });
     },
-  }), [applyConversationUpdate, applyRealtimeMessage, contactDetails.applyRealtimeUpdate, contactDirectory, currentAccount, messageHistory.retry, messageHistory.upsertRealtimeMessage, navigate, refreshRecentConversations, removeConversation, retryBootstrap, retryConversations, selectedConversation?.contactId, selectedConversation?.inboxId, selectedConversationId, selectedInbox, upsertRealtimeConversation, upsertRealtimeInbox]);
+  }), [applyConversationUpdate, applyRealtimeMessage, contactDetails.applyRealtimeUpdate, contactDirectory, currentAccount, messageHistory.retry, messageHistory.upsertRealtimeMessage, navigate, refreshRecentConversations, removeConversation, selectedConversation?.contactId, selectedConversation?.inboxId, selectedConversationId, selectedInbox, upsertRealtimeConversation, upsertRealtimeInbox]);
   const { connectionStatus: realtimeConnectionStatus, typing } = useChatwootRealtime(authenticatedUser, currentAccount, selectedConversationId, realtimeHandlers);
 
   useEffect(() => {
