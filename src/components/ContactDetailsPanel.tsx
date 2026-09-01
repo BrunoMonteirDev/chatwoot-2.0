@@ -1,9 +1,12 @@
-import { Check, Clock, FileText, History, Loader2, Mail, Phone, RefreshCw, Save, Tag, User, X } from 'lucide-react';
+import { Check, Clock, Download, FileText, History, Image as ImageIcon, Link, Loader2, Mail, Phone, RefreshCw, Save, Tag, User, X } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
-import type { AccountLabel, AssignableAgent, ContactNote, ContactProfile, ConversationPriority, ConversationSummary, ConversationTeam } from '../domain/currentUser';
+import type { AccountLabel, AssignableAgent, ContactNote, ContactProfile, ConversationAttachmentSummary, ConversationPriority, ConversationSummary, ConversationTeam } from '../domain/currentUser';
 import type { ContactUpdate } from '../integrations/chatwoot/contacts';
 import { contactConversationHistoryItem, previousContactConversations } from '../features/contacts/contactConversationHistory';
 import type { Inbox } from '../domain/currentUser';
+import type { Message } from '../types';
+import { contentGroups } from '../features/attachments/conversationContent';
+import { documentPresentation, triggerAttachmentDownload } from '../features/attachments/fileUtils';
 
 interface Props {
   contact: ContactProfile | null;
@@ -13,7 +16,7 @@ interface Props {
   isSaving: boolean;
   isCreatingNote: boolean;
   isDarkMode: boolean;
-  initialTab?: 'contact' | 'attributes';
+  initialTab?: 'contact' | 'attributes' | 'content';
   conversation?: ConversationSummary | null;
   conversationLabels?: AccountLabel[];
   conversationAgents?: AssignableAgent[];
@@ -34,6 +37,7 @@ interface Props {
   contactConversationsError?: string | null;
   inboxes?: Inbox[];
   onOpenConversation?: (conversationId: number) => void;
+  attachments?: ConversationAttachmentSummary[]; attachmentStatus?: 'idle' | 'loading' | 'ready' | 'error'; attachmentError?: string | null; hasMoreAttachments?: boolean; onLoadMoreAttachments?: () => void; onRetryAttachments?: () => void; messages?: Message[]; onOpenImage?: (url: string, title?: string) => void;
 }
 
 const stringify = (value: Record<string, unknown>) => JSON.stringify(value, null, 2);
@@ -46,8 +50,8 @@ const priorityOptions: { value: ConversationPriority; label: string }[] = [
   { value: 'urgent', label: 'Urgente' },
 ];
 
-export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, isCreatingNote, isDarkMode, initialTab = 'contact', conversation = null, conversationLabels = [], conversationAgents = [], conversationTeams = [], conversationParticipants = [], managementPendingAction = null, onSetConversationPriority, onAssignConversationAgent, onAssignConversationTeam, onSetConversationLabels, onSetConversationParticipants, onClose, onRetry, onUpdate, onCreateNote, contactConversations = [], contactConversationsStatus = 'idle', contactConversationsError = null, inboxes = [], onOpenConversation }: Props) => {
-  const [tab, setTab] = useState<'contact' | 'attributes'>(initialTab);
+export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, isCreatingNote, isDarkMode, initialTab = 'contact', conversation = null, conversationLabels = [], conversationAgents = [], conversationTeams = [], conversationParticipants = [], managementPendingAction = null, onSetConversationPriority, onAssignConversationAgent, onAssignConversationTeam, onSetConversationLabels, onSetConversationParticipants, onClose, onRetry, onUpdate, onCreateNote, contactConversations = [], contactConversationsStatus = 'idle', contactConversationsError = null, inboxes = [], onOpenConversation, attachments = [], attachmentStatus = 'idle', attachmentError = null, hasMoreAttachments = false, onLoadMoreAttachments, onRetryAttachments, messages = [], onOpenImage }: Props) => {
+  const [tab, setTab] = useState<'contact' | 'attributes' | 'content'>(initialTab);
   const [draft, setDraft] = useState({ name: '', email: '', phoneNumber: '', identifier: '', companyName: '' });
   const [additionalText, setAdditionalText] = useState('{}');
   const [customText, setCustomText] = useState('{}');
@@ -83,6 +87,8 @@ export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, i
   };
   const participantIds = conversationParticipants.map((participant) => participant.id);
   const previousConversations = previousContactConversations(contactConversations, conversation?.id || null);
+  const [contentTab, setContentTab] = useState<'media' | 'links' | 'documents'>('media');
+  const content = contentGroups(attachments, messages);
   const toggleConversationParticipant = async (agentId: number) => {
     if (!onSetConversationParticipants || managementBusy) return;
     const next = new Set(participantIds);
@@ -113,7 +119,7 @@ export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, i
     <div className={`h-14 px-3 flex items-center justify-between border-b shrink-0 ${isDarkMode ? 'bg-[#151717] border-[#1e1f1f]' : 'bg-[#f0f2f5] border-[#d1d7db]'}`}>
       <div className="flex items-center gap-2"><button type="button" onClick={onClose} title="Fechar painel" className="p-1.5 rounded-full hover:bg-white/10"><X className="w-5 h-5 text-[#8696a0]" /></button><span className="font-bold text-sm">Dados do contato</span></div>
     </div>
-    <div className="p-3 flex gap-1 border-b border-white/10"><button type="button" onClick={() => setTab('contact')} className={`px-3 py-1 rounded-md text-xs font-semibold ${tab === 'contact' ? 'bg-[#00a884] text-white' : 'text-[#8696a0]'}`}>Dados</button><button type="button" onClick={() => setTab('attributes')} className={`px-3 py-1 rounded-md text-xs font-semibold ${tab === 'attributes' ? 'bg-[#00a884] text-white' : 'text-[#8696a0]'}`}>Atributos</button></div>
+    <div className="p-3 flex gap-1 border-b border-white/10"><button type="button" onClick={() => setTab('contact')} className={`px-3 py-1 rounded-md text-xs font-semibold ${tab === 'contact' ? 'bg-[#00a884] text-white' : 'text-[#8696a0]'}`}>Dados</button><button type="button" onClick={() => setTab('attributes')} className={`px-3 py-1 rounded-md text-xs font-semibold ${tab === 'attributes' ? 'bg-[#00a884] text-white' : 'text-[#8696a0]'}`}>Atributos</button><button type="button" onClick={() => setTab('content')} className={`px-3 py-1 rounded-md text-xs font-semibold ${tab === 'content' ? 'bg-[#00a884] text-white' : 'text-[#8696a0]'}`}>Conteúdo</button></div>
     <div className="flex-1 overflow-y-auto p-4 space-y-4">
       {status === 'loading' && <div className="py-12 text-center text-sm text-[#8696a0]"><Loader2 className="inline w-4 h-4 animate-spin mr-2" />Carregando contato…</div>}
       {status === 'error' && <div className="py-12 text-center text-sm text-red-300">{error}<button type="button" onClick={onRetry} className="block mx-auto mt-3 text-[#00a884] font-semibold"><RefreshCw className="inline w-3.5 h-3.5 mr-1" />Tentar novamente</button></div>}
@@ -205,6 +211,7 @@ export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, i
 
           </section>}
         </div>}
+        {tab === 'content' && <section><div className="mb-3 flex gap-1"><button type="button" onClick={() => setContentTab('media')} className={`rounded px-2 py-1 text-xs ${contentTab === 'media' ? 'bg-[#00a884] text-white' : 'text-[#8696a0]'}`}>Mídias</button><button type="button" onClick={() => setContentTab('links')} className={`rounded px-2 py-1 text-xs ${contentTab === 'links' ? 'bg-[#00a884] text-white' : 'text-[#8696a0]'}`}>Links</button><button type="button" onClick={() => setContentTab('documents')} className={`rounded px-2 py-1 text-xs ${contentTab === 'documents' ? 'bg-[#00a884] text-white' : 'text-[#8696a0]'}`}>Documentos</button></div>{attachmentStatus === 'loading' && contentTab !== 'links' ? <p className="text-xs text-[#8696a0]">Carregando anexos…</p> : attachmentStatus === 'error' && contentTab !== 'links' ? <div className="text-xs text-red-400">{attachmentError}<button type="button" onClick={onRetryAttachments} className="ml-2 text-[#00a884]">Tentar novamente</button></div> : contentTab === 'media' ? <div className="grid grid-cols-3 gap-2">{content.media.map(item => <button key={item.id} type="button" onClick={() => item.kind === 'image' ? onOpenImage?.(item.url, item.title || undefined) : window.open(item.url, '_blank', 'noopener')} className="aspect-square overflow-hidden rounded-lg bg-black/10">{item.kind === 'image' ? <img src={item.thumbnailUrl || item.url} alt={item.title || 'Imagem'} className="h-full w-full object-cover" /> : <video src={item.url} preload="metadata" className="h-full w-full object-cover" />}</button>)}{!content.media.length && <p className="col-span-3 py-6 text-center text-xs text-[#8696a0]">Nenhuma mídia.</p>}</div> : contentTab === 'documents' ? <div className="space-y-2">{content.documents.map(item => <div key={item.id} className="flex items-center gap-2 rounded-lg border border-white/10 p-2"><FileText className="h-5 w-5 text-[#00a884]" /><span className="min-w-0 flex-1 truncate text-xs">{item.title || documentPresentation(item.title).label}{item.size ? ` · ${(item.size / 1024 / 1024).toFixed(1)} MB` : ''}</span><button type="button" onClick={() => triggerAttachmentDownload(item.url, item.title || undefined)} title="Baixar arquivo"><Download className="h-4 w-4" /></button></div>)}{!content.documents.length && <p className="py-6 text-center text-xs text-[#8696a0]">Nenhum documento.</p>}</div> : <div className="space-y-2">{content.links.map(url => <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="block rounded-lg border border-white/10 p-2 text-xs text-[#53bdeb]"><span className="flex items-center gap-1"><Link className="h-3 w-3" />{new URL(url).hostname}</span><span className="mt-1 block truncate">{url}</span></a>)}{!content.links.length && <p className="py-6 text-center text-xs text-[#8696a0]">Nenhum link nas mensagens carregadas.</p>}</div>}{hasMoreAttachments && contentTab !== 'links' && <button type="button" onClick={onLoadMoreAttachments} className="mt-3 text-xs font-semibold text-[#00a884]">Carregar mais</button>}</section>}
       </>}
     </div>
     {status === 'ready' && contact && <div className="border-t border-white/10 p-3"><button type="button" disabled={!hasChanges || isSaving} onClick={() => void save()} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] px-3 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Salvar alterações</button></div>}

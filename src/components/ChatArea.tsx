@@ -68,6 +68,7 @@ import { finiteAudioDuration, recordingFile, recordingMimeType, releaseRecording
 import { documentPresentation, filesFromTransfer, hasFilesInTransfer, triggerAttachmentDownload } from '../features/attachments/fileUtils';
 import { shouldSendMessageOnEnter, type SendMessageShortcut } from '../features/messages/sendMessageShortcut';
 import { useContactConversations } from '../features/contacts/useContactConversations';
+import { useConversationAttachments } from '../features/attachments/useConversationAttachments';
 
 
 // Helper to format WhatsApp Markdown, URLs, Mentions, Bold (*), Italic (_), Strikethrough (~), Code (`)
@@ -687,11 +688,12 @@ export const ChatArea: React.FC<Props> = ({
 }) => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isContactPanelOpen, setIsContactPanelOpen] = useState(false);
-  const [contactPanelTab, setContactPanelTab] = useState<'contact' | 'attributes'>('contact');
+  const [contactPanelTab, setContactPanelTab] = useState<'contact' | 'attributes' | 'content'>('contact');
   const [conversationParticipants, setConversationParticipants] = useState<AssignableAgent[]>([]);
   const [inputText, setInputText] = useState('');
   const [messageMode, setMessageMode] = useState<'responder' | 'privada'>('responder');
   const contactConversations = useContactConversations(accountId, conversation?.contactId ?? null, isContactPanelOpen);
+  const conversationAttachments = useConversationAttachments(accountId, conversation?.id ?? null, isContactPanelOpen);
   const [ticketStatus, setTicketStatus] = useState<'resolver' | 'resolvido' | 'adiado' | 'pendente'>('resolver');
   const [showResolverMenu, setShowResolverMenu] = useState(false);
 
@@ -2639,6 +2641,14 @@ export const ChatArea: React.FC<Props> = ({
           contactConversationsError={contactConversations.error}
           inboxes={inboxes}
           onOpenConversation={onOpenDirectConversation}
+          attachments={conversationAttachments.attachments}
+          attachmentStatus={conversationAttachments.status}
+          attachmentError={conversationAttachments.error}
+          hasMoreAttachments={conversationAttachments.hasMore}
+          onLoadMoreAttachments={conversationAttachments.loadMore}
+          onRetryAttachments={conversationAttachments.retry}
+          messages={chat.messages}
+          onOpenImage={(url, title) => onImageClick(url, title)}
           onClose={() => setIsContactPanelOpen(false)}
         />
       ) : isContactPanelOpen && (

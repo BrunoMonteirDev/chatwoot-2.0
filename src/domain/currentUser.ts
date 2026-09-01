@@ -154,6 +154,17 @@ export interface ConversationAttachment {
   size: number | null;
 }
 
+export interface ConversationAttachmentSummary {
+  id: number;
+  messageId: number | null;
+  kind: ConversationAttachmentKind;
+  url: string;
+  thumbnailUrl: string | null;
+  title: string | null;
+  size: number | null;
+  createdAt: number;
+}
+
 export interface ConversationMessage {
   id: number;
   conversationId: number;

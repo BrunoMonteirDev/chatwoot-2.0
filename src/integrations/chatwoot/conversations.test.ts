@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { authSession } from './authSession';
 import { conversationService } from './conversations';
+import { conversationAttachmentService } from './conversationAttachments';
 
 describe('conversationService', () => {
   beforeEach(() => {
@@ -77,6 +78,12 @@ describe('conversationService', () => {
 
     await expect(conversationService.listByContact(2, 9)).resolves.toMatchObject([{ id: 31, contactId: 9 }]);
     expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/v1/accounts/2/contacts/9/conversations');
+  });
+
+  it('lista anexos da conversa sem buscar o histórico de mensagens', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ meta: { total_count: 1 }, payload: [{ id: 7, message_id: 51, file_type: 'image', data_url: 'https://cdn.test/a.jpg', thumb_url: 'https://cdn.test/a-thumb.jpg', file_size: 1024, extension: 'foto.jpg', created_at: 100 }] }), { status: 200 }));
+    await expect(conversationAttachmentService.list(2, 31, 1)).resolves.toMatchObject({ totalCount: 1, attachments: [{ id: 7, kind: 'image', title: 'foto.jpg' }] });
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/v1/accounts/2/conversations/31/attachments?page=1');
   });
 
   it('propaga erro de permissão ao buscar o histórico do contato', async () => {
