@@ -15,15 +15,14 @@ describe('mergeRealtimeConversation', () => {
     expect(merged[0].status).toBe('resolved');
     expect(mergeRealtimeConversation(merged, conversation({ id: 1, updatedAt: 199, status: 'open' }), 'todas')[0].status).toBe('resolved');
   });
-
-  it('não adiciona conversa criada fora da inbox selecionada', () => {
-    expect(mergeRealtimeConversation([], conversation({ inboxId: 8 }), '7')).toEqual([]);
-  });
-
+  it('não adiciona conversa criada fora da inbox selecionada', () => expect(mergeRealtimeConversation([], conversation({ inboxId: 8 }), '7')).toEqual([]));
   it('não deixa evento com mesmo timestamp e atividade anterior desfazer a conversa atual', () => {
     const current = [conversation({ updatedAt: 200, lastActivityAt: 220, labels: ['vip'] })];
-    const stale = conversation({ updatedAt: 200, lastActivityAt: 210, status: 'resolved', labels: [] });
-    expect(mergeRealtimeConversation(current, stale, 'todas')[0]).toMatchObject({ status: 'open', labels: ['vip'] });
+    expect(mergeRealtimeConversation(current, conversation({ updatedAt: 200, lastActivityAt: 210, status: 'resolved', labels: [] }), 'todas')[0]).toMatchObject({ status: 'open', labels: ['vip'] });
+  });
+  it('não deixa uma resposta antiga regredir nome e avatar resolvidos', () => {
+    const current = [conversation({ contactName: 'Ricardo Freitas', contactAvatarUrl: 'https://cdn/avatar.jpg' })];
+    expect(mergeRealtimeConversation(current, conversation({ contactName: '+55 44 99563-9999', contactAvatarUrl: null, updatedAt: 101 }), 'todas')[0]).toMatchObject({ contactName: 'Ricardo Freitas', contactAvatarUrl: 'https://cdn/avatar.jpg' });
   });
 });
 
@@ -34,7 +33,6 @@ describe('matchesConversationFilters', () => {
     expect(matchesConversationFilters(conversation({ teamId: 8, labels: ['vip', 'urgente'] }), filters)).toBe(false);
     expect(matchesConversationFilters(conversation({ teamId: 9, labels: ['vip'] }), filters)).toBe(false);
   });
-
   it('remove ou insere pontualmente a conversa quando um evento realtime muda o filtro', () => {
     const filters = { teamId: 9, labels: ['vip'] };
     const current = [conversation({ id: 1, teamId: 9, labels: ['vip'] })];

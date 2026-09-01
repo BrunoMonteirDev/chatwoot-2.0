@@ -457,7 +457,7 @@ export default function App() {
   const conversationManagement = useConversationManagement(currentAccount?.id ?? null, selectedConversation?.inboxId ?? null);
   const updateSelectedContact = async (update: Parameters<typeof contactDetails.update>[0]) => {
     const updated = await contactDetails.update(update);
-    if (updated && selectedConversationId) applyConversationUpdate(selectedConversationId, { contactName: updated.name, contactId: updated.id });
+    if (updated && selectedConversationId) applyConversationUpdate(selectedConversationId, { contactName: updated.name, contactAvatarUrl: updated.avatarUrl, contactId: updated.id });
     return updated;
   };
   const unreadRefreshTimer = useRef<number | null>(null);
@@ -513,7 +513,7 @@ export default function App() {
       contactDirectory.upsertRealtimeContact(contact);
       contactDetails.applyRealtimeUpdate(contact);
       if (selectedConversation?.contactId === contact.id && selectedConversationId) {
-        applyConversationUpdate(selectedConversationId, { contactName: contact.name, contactId: contact.id });
+        applyConversationUpdate(selectedConversationId, { contactName: contact.name, contactAvatarUrl: contact.avatarUrl, contactId: contact.id });
       }
     },
     onContactRemoved: (contactId) => {
@@ -1293,6 +1293,7 @@ export default function App() {
                   onContactProfileResolved={(profile) => {
                     if (!selectedConversationId) return;
                     applyConversationUpdate(selectedConversationId, { ...(profile.name ? { contactName: profile.name } : {}), ...(profile.avatarUrl ? { contactAvatarUrl: profile.avatarUrl } : {}) });
+                    void contactDetails.retry();
                   }}
                   managementCatalogs={conversationManagement.catalogs}
                   managementCatalogStatus={conversationManagement.catalogStatus}

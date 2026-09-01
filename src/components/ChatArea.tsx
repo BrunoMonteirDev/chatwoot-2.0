@@ -71,7 +71,7 @@ import { useContactConversations } from '../features/contacts/useContactConversa
 import { useConversationAttachments } from '../features/attachments/useConversationAttachments';
 import { groupMetadataClient } from '../features/groups/metadata';
 import { participantColor, participantLabel, participantPhone } from '../features/groups/participant';
-import { providerProfileClient } from '../features/contacts/providerProfile';
+import { isPhoneDefaultContactName, providerProfileClient } from '../features/contacts/providerProfile';
 
 
 // Helper to format WhatsApp Markdown, URLs, Mentions, Bold (*), Italic (_), Strikethrough (~), Code (`)
@@ -785,6 +785,7 @@ export const ChatArea: React.FC<Props> = ({
   const conversationInbox = conversation ? inboxes.find((inbox) => inbox.id === conversation.inboxId) : undefined;
   const [groupParticipants, setGroupParticipants] = useState<Record<string, { jid: string; name?: string; phoneNumber?: string; avatarUrl?: string }>>({});
   const [providerContactProfile, setProviderContactProfile] = useState<{ name?: string; avatarUrl?: string }>({});
+  const [isSyncingContactProfile, setIsSyncingContactProfile] = useState(false);
   useEffect(() => {
     const isGroup = chat.isGroup || conversation?.isGroup || chat.messages.some(message => message.whatsappRemoteJid?.endsWith('@g.us'));
     const transport = chat.messages.slice().reverse().find(message => message.whatsappTransport && message.whatsappTransport !== 'meta_cloud')?.whatsappTransport;
@@ -798,15 +799,29 @@ export const ChatArea: React.FC<Props> = ({
   useEffect(() => {
     const isGroup = chat.isGroup || conversation?.isGroup || chat.messages.some(message => message.whatsappRemoteJid?.endsWith('@g.us'));
     const transport = chat.messages.slice().reverse().find(message => message.whatsappTransport && message.whatsappTransport !== 'meta_cloud')?.whatsappTransport;
-    if (isGroup || !conversation || !transport) { setProviderContactProfile({}); return; }
+    if (isGroup || !conversation || transport !== 'waha' || !contact) return;
+    const needsName = !contact.name.trim() || isPhoneDefaultContactName(contact.name, contact.phoneNumber);
+    const needsAvatar = !contact.avatarUrl;
+    if (!needsName && !needsAvatar) return;
     let active = true;
     void providerProfileClient.get(conversation.inboxId, conversation.id, transport).then((profile) => {
       if (!active) return;
       setProviderContactProfile(profile);
       if (profile.name || profile.avatarUrl) onContactProfileResolved?.(profile);
-    }).catch(() => { if (active) setProviderContactProfile({}); });
+    }).catch(() => undefined);
     return () => { active = false; };
-  }, [chat.id, chat.isGroup, conversation?.id, conversation?.inboxId]);
+  }, [chat.id, chat.isGroup, contact?.avatarUrl, contact?.name, contact?.phoneNumber, contactStatus, conversation?.id, conversation?.inboxId]);
+  const contactProfileTransport = chat.messages.slice().reverse().find(message => message.whatsappTransport)?.whatsappTransport;
+  const canSyncContactProfile = !(chat.isGroup || conversation?.isGroup) && contactProfileTransport === 'waha';
+  const syncContactProfile = async () => {
+    if (!conversation || contactProfileTransport !== 'waha' || isSyncingContactProfile) return;
+    setIsSyncingContactProfile(true);
+    try {
+      const profile = await providerProfileClient.get(conversation.inboxId, conversation.id, contactProfileTransport, true);
+      setProviderContactProfile(profile);
+      if (profile.name || profile.avatarUrl) onContactProfileResolved?.(profile);
+    } finally { setIsSyncingContactProfile(false); }
+  };
   const externalSendBlocked = !canSendWhatsAppMessage(whatsappConnection, messageMode === 'privada');
   const canUseMetaTemplates = !externalSendBlocked && Boolean(conversationInbox && metaCloudMetadataForInbox(conversationInbox));
 
@@ -2671,6 +2686,9 @@ export const ChatArea: React.FC<Props> = ({
           panelTitle={chat.isGroup || conversation?.isGroup || contact?.additionalAttributes.whatsapp_chat_type === 'group' || chat.messages.some((message) => message.whatsappRemoteJid?.endsWith('@g.us')) ? 'Dados do grupo' : 'Dados do contato'}
           profileName={providerContactProfile.name}
           profileAvatarUrl={providerContactProfile.avatarUrl}
+          canSyncWithWhatsApp={canSyncContactProfile}
+          isSyncingWithWhatsApp={isSyncingContactProfile}
+          onSyncWithWhatsApp={syncContactProfile}
           conversation={conversation}
           conversationLabels={managementCatalogs?.labels}
           conversationAgents={managementCatalogs?.agents}

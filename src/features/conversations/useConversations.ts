@@ -6,6 +6,13 @@ import { conversationService, type ConversationServerFilters } from '../../integ
 export const matchesConversationFilters = (conversation: ConversationSummary, filters: ConversationServerFilters) =>
   (!filters.teamId || conversation.teamId === filters.teamId) && (filters.labels || []).every((label) => conversation.labels.includes(label));
 
+const phoneLikeName = (name: string) => /^[+\d\s().-]+$/.test(name) && name.replace(/\D/g, '').length >= 8;
+const preserveResolvedContact = (current: ConversationSummary, incoming: ConversationSummary): ConversationSummary => ({
+  ...incoming,
+  ...(current.contactAvatarUrl && !incoming.contactAvatarUrl ? { contactAvatarUrl: current.contactAvatarUrl } : {}),
+  ...(!phoneLikeName(current.contactName) && phoneLikeName(incoming.contactName) ? { contactName: current.contactName } : {}),
+});
+
 export const mergeFilteredRealtimeConversation = (
   current: ConversationSummary[],
   updated: ConversationSummary,
@@ -13,7 +20,7 @@ export const mergeFilteredRealtimeConversation = (
   filters: ConversationServerFilters,
 ): ConversationSummary[] => {
   const previous = current.find((conversation) => conversation.id === updated.id);
-  const merged = previous ? { ...previous, ...updated } : updated;
+  const merged = previous ? preserveResolvedContact(previous, { ...previous, ...updated }) : updated;
   if (!matchesConversationFilters(merged, filters)) return previous ? current.filter((conversation) => conversation.id !== updated.id) : current;
   return mergeRealtimeConversation(current, updated, selectedInbox);
 };
@@ -26,7 +33,7 @@ export const mergeRealtimeConversation = (current: ConversationSummary[], update
   if (existing && (existing.updatedAt > updated.updatedAt || (existing.updatedAt === updated.updatedAt && existing.lastActivityAt > updated.lastActivityAt))) return current;
   const normalizedInboxId = /^\d+$/.test(selectedInbox) ? Number(selectedInbox) : null;
   if (!existing && normalizedInboxId && updated.inboxId !== normalizedInboxId) return current;
-  const merged = existing ? { ...existing, ...updated } : updated;
+  const merged = existing ? preserveResolvedContact(existing, { ...existing, ...updated }) : updated;
   return [merged, ...current.filter(item => item.id !== updated.id)].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 };
 
@@ -58,7 +65,7 @@ export const useConversations = (accountId: number | null, selectedInbox: string
     try {
       const result = await conversationService.list({ accountId, inboxId, ...filters, page, signal: controller.signal });
       if (controller.signal.aborted || requestId !== requestIdRef.current) return;
-      setConversations((current) => append ? [...current, ...result.conversations.filter((item) => !current.some((existing) => existing.id === item.id))] : result.conversations);
+      setConversations((current) => append ? result.conversations.reduce((items, conversation) => mergeRealtimeConversation(items, conversation, selectedInbox), current) : (current.length ? result.conversations.reduce((items, conversation) => mergeRealtimeConversation(items, conversation, selectedInbox), current) : result.conversations));
       pageRef.current = page;
       setHasNextPage(result.hasNextPage);
       loadedAccountRef.current = accountId;

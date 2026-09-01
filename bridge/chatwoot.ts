@@ -306,6 +306,12 @@ export const chatwootBridge = {
       method: 'PATCH', body: JSON.stringify({ ...(input.name ? { name: input.name } : {}), ...(input.avatarUrl ? { avatar_url: input.avatarUrl } : {}) }),
     });
   },
+  saveContactProfile: (contactId: number, input: { name?: string; avatarUrl?: string }) => {
+    if (!input.name && !input.avatarUrl) return Promise.resolve(undefined);
+    return request(`/api/v1/accounts/${currentAccountId()}/contacts/${contactId}`, {
+      method: 'PATCH', body: JSON.stringify({ ...(input.name ? { name: input.name } : {}), ...(input.avatarUrl ? { avatar_url: input.avatarUrl } : {}) }),
+    }, true);
+  },
   saveEvolutionIdentity: (contactId: number, phoneNumber: string | undefined, lid: string | undefined) => request(`/api/v1/accounts/${currentAccountId()}/contacts/${contactId}`, {
     method: 'PATCH',
     body: JSON.stringify({

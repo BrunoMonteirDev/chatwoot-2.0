@@ -69,6 +69,13 @@ describe('chatwootBridge media messages', () => {
     expect(body).toEqual({ name: 'Equipe', avatar_url: 'https://pps.whatsapp.net/avatar.jpg' });
   });
 
+  it('persiste somente os campos de perfil resolvidos no contato interno', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ payload: { id: 4 } }), { status: 200 })));
+    await chatwootBridge.saveContactProfile(4, { avatarUrl: 'https://pps.whatsapp.net/avatar.jpg' });
+    expect(vi.mocked(fetch).mock.calls[0][0]).toContain('/contacts/4');
+    expect(JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string)).toEqual({ avatar_url: 'https://pps.whatsapp.net/avatar.jpg' });
+  });
+
   it('envia reply recebido à mensagem original pelo source_id Evolution', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 1 }), { status: 200 })));
     await chatwootBridge.createIncomingMessage('inbox', 'whatsapp:5511', 31, 'Resposta do cliente', 'reply-42', 'original-41', undefined, undefined, 19);
