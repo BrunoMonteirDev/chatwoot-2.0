@@ -578,6 +578,7 @@ interface Props {
   historyStatus?: 'idle' | 'loading' | 'ready' | 'error';
   historyError?: string | null;
   hasOlderMessages?: boolean;
+  hasOnlyHiddenSystemMessages?: boolean;
   isLoadingOlder?: boolean;
   onRetryHistory?: () => void;
   onLoadOlderMessages?: () => void;
@@ -634,6 +635,7 @@ export const ChatArea: React.FC<Props> = ({
   historyStatus = 'ready',
   historyError,
   hasOlderMessages = false,
+  hasOnlyHiddenSystemMessages = false,
   isLoadingOlder = false,
   onRetryHistory,
   onLoadOlderMessages,
@@ -1770,7 +1772,7 @@ export const ChatArea: React.FC<Props> = ({
           </div>
         )}
         {historyStatus === 'ready' && chat.messages.length === 0 && (
-          <div className={`py-8 text-center text-sm ${isDarkMode ? 'text-[#8696a0]' : 'text-[#667781]'}`}>Esta conversa ainda não possui mensagens.</div>
+          <div className={`py-8 text-center text-sm ${isDarkMode ? 'text-[#8696a0]' : 'text-[#667781]'}`}>{hasOnlyHiddenSystemMessages ? 'Mensagens do sistema estão ocultas.' : 'Esta conversa ainda não possui mensagens.'}</div>
         )}
         {isLoadingOlder && <div className={`py-2 text-center text-xs ${isDarkMode ? 'text-[#8696a0]' : 'text-[#667781]'}`}>Carregando mensagens anteriores…</div>}
         {chat.messages.map((msg, index) => {
