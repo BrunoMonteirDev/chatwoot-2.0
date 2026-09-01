@@ -134,8 +134,8 @@ export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, i
     try {
       await onSyncWithWhatsApp?.();
       setFeedback('Dados sincronizados com o WhatsApp');
-    } catch (cause) {
-      setFeedback(cause instanceof Error ? cause.message : 'Não foi possível sincronizar os dados com o WhatsApp.');
+    } catch {
+      setFeedback('Não foi possível sincronizar os dados com o WhatsApp. Tente novamente em instantes.');
     }
   };
 

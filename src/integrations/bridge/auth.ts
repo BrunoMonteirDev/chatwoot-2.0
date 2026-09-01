@@ -2,7 +2,7 @@ import { authSession } from '../chatwoot/authSession';
 
 export class BridgeAuthenticationError extends Error {}
 
-export const authenticatedBridgeHeaders = (accountId?: number | null) => {
+export const authenticatedBridgeHeaders = () => {
   const session = authSession.get();
   if (!session) throw new BridgeAuthenticationError('Faça login novamente para concluir esta operação.');
   return {
@@ -12,6 +12,5 @@ export const authenticatedBridgeHeaders = (accountId?: number | null) => {
     client: session.client,
     expiry: session.expiry,
     uid: session.uid,
-    ...(accountId ? { 'x-chatwoot-account-id': String(accountId) } : {}),
   };
 };

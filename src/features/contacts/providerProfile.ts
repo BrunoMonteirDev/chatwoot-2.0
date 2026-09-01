@@ -23,7 +23,7 @@ export const providerProfileClient = {
   async get(accountId: number, inboxId: number, conversationId: number, transport?: WhatsAppTransport | null, force = false): Promise<{ name?: string; avatarUrl?: string }> {
     if (!bridgeUrl) throw new BridgeApiError(503, null, 'O endereço seguro do bridge não está configurado.');
     const query = new URLSearchParams({ accountId: String(accountId), inboxId: String(inboxId), conversationId: String(conversationId), ...(transport ? { transport } : {}), ...(force ? { force: 'true' } : {}) });
-    const response = await fetch(`${bridgeUrl}/contacts/profile?${query}`, { headers: authenticatedBridgeHeaders(accountId) });
+    const response = await fetch(`${bridgeUrl}/contacts/profile?${query}`, { headers: authenticatedBridgeHeaders() });
     const body = await response.json().catch(() => null);
     if (!response.ok) throw new BridgeApiError(response.status, body, body && typeof body === 'object' && typeof body.error === 'string' ? body.error : 'Não foi possível carregar o perfil do contato.');
     return body && typeof body === 'object' ? body as { name?: string; avatarUrl?: string } : {};
