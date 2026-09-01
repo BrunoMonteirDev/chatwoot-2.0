@@ -7,3 +7,9 @@ export const contentGroups = (attachments: ConversationAttachmentSummary[], mess
   documents: attachments.filter(item => item.kind === 'file' || item.kind === 'other'),
   links: [...new Set(messages.flatMap(message => message.text?.match(URL_PATTERN) || []))],
 });
+
+export const attachmentsWithinDates = (attachments: ConversationAttachmentSummary[], from: string, to: string) => {
+  const fromTime = from ? new Date(`${from}T00:00:00`).getTime() / 1000 : null;
+  const toTime = to ? new Date(`${to}T23:59:59`).getTime() / 1000 : null;
+  return attachments.filter((attachment) => (fromTime === null || attachment.createdAt >= fromTime) && (toTime === null || attachment.createdAt <= toTime));
+};
