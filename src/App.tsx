@@ -43,6 +43,7 @@ import { toChatListItem } from './features/conversations/toChatListItem';
 import { cacheRealtimeMessage, useConversationMessages } from './features/messages/useConversationMessages';
 import { messageHistoryCache, messageHistoryPrefetcher } from './features/messages/MessageHistoryCache';
 import { showSystemMessagesFrom, uiSettingsWithSystemMessageVisibility, visibleConversationMessages } from './features/messages/systemMessageVisibility';
+import { sendMessageShortcutFrom, uiSettingsWithSendMessageShortcut } from './features/messages/sendMessageShortcut';
 import { toChatMessages } from './features/messages/toChatMessages';
 import { useConversationManagement } from './features/conversations/useConversationManagement';
 import { useChatwootRealtime } from './features/realtime/useChatwootRealtime';
@@ -426,6 +427,7 @@ export default function App() {
   const contactDetails = useContactDetails(currentAccount?.id ?? null, selectedConversation?.contactId ?? null);
   const messageHistory = useConversationMessages(currentAccount?.id ?? null, selectedConversationId, selectedConversation?.inboxId ?? null, contactDetails.contact?.phoneNumber);
   const showSystemMessages = showSystemMessagesFrom(authenticatedUser?.uiSettings);
+  const sendMessageShortcut = sendMessageShortcutFrom(authenticatedUser?.uiSettings);
   const visibleHistoryMessages = useMemo(() => visibleConversationMessages(messageHistory.messages, showSystemMessages), [messageHistory.messages, showSystemMessages]);
   const hasOnlyHiddenSystemMessages = messageHistory.messages.length > 0 && visibleHistoryMessages.length === 0;
   const activeChatWithHistory = useMemo(() => selectedConversationId
@@ -1055,7 +1057,7 @@ export default function App() {
             onRefreshInboxes={retryInboxes}
             profile={authenticatedUser}
             onSaveProfile={async (profile) => {
-              await authService.updateProfile({ name: profile.name, display_name: profile.displayName, email: profile.email, phone_number: profile.phoneNumber, message_signature: profile.messageSignature, ui_settings: uiSettingsWithSystemMessageVisibility(authenticatedUser?.uiSettings, profile.showSystemMessages), ...(profile.password ? { current_password: profile.currentPassword, password: profile.password, password_confirmation: profile.passwordConfirmation } : {}) });
+              await authService.updateProfile({ name: profile.name, display_name: profile.displayName, email: profile.email, phone_number: profile.phoneNumber, message_signature: profile.messageSignature, ui_settings: uiSettingsWithSendMessageShortcut(uiSettingsWithSystemMessageVisibility(authenticatedUser?.uiSettings, profile.showSystemMessages), profile.sendMessageShortcut), ...(profile.password ? { current_password: profile.currentPassword, password: profile.password, password_confirmation: profile.passwordConfirmation } : {}) });
               await retryBootstrap();
             }}
             onResetAccessToken={async () => { await authService.resetAccessToken(); await retryBootstrap(); }}
@@ -1247,6 +1249,7 @@ export default function App() {
                   conversation={selectedConversation}
                   inboxes={inboxes}
                   whatsappConnection={whatsappConnection}
+                  sendMessageShortcut={sendMessageShortcut}
                   managementCatalogs={conversationManagement.catalogs}
                   managementCatalogStatus={conversationManagement.catalogStatus}
                   managementCatalogError={conversationManagement.catalogError}

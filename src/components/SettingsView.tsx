@@ -62,6 +62,7 @@ import { PermissionProfilesPanel } from './PermissionProfilesPanel';
 import { AgentInboxPermissionsModal } from './AgentInboxPermissionsModal';
 import { browserNotifications, type BrowserNotificationState } from '../features/notifications/browserNotifications';
 import { AutomationRulesPanel } from './AutomationRulesPanel';
+import { sendMessageShortcutFrom, type SendMessageShortcut } from '../features/messages/sendMessageShortcut';
 
 export type SettingsTab =
   | 'perfil'
@@ -107,7 +108,7 @@ interface Props {
   inboxesError?: string | null;
   onRefreshInboxes?: () => Promise<void> | void;
   profile?: CurrentUser | null;
-  onSaveProfile?: (profile: { name: string; displayName: string; email: string; phoneNumber: string; messageSignature: string; showSystemMessages: boolean; currentPassword?: string; password?: string; passwordConfirmation?: string }) => Promise<void>;
+  onSaveProfile?: (profile: { name: string; displayName: string; email: string; phoneNumber: string; messageSignature: string; showSystemMessages: boolean; sendMessageShortcut: SendMessageShortcut; currentPassword?: string; password?: string; passwordConfirmation?: string }) => Promise<void>;
   onResetAccessToken?: () => Promise<void>;
   selectedInboxId?: number | null;
   onOpenInbox?: (inboxId: number) => void;
@@ -166,6 +167,7 @@ export const SettingsView: React.FC<Props> = ({
   const [browserNotificationState, setBrowserNotificationState] = useState<BrowserNotificationState>(() => browserNotifications.state());
   const [browserNotificationsEnabled, setBrowserNotificationsEnabled] = useState(() => browserNotifications.enabled());
   const [showSystemMessages, setShowSystemMessages] = useState(() => profile?.uiSettings.show_system_messages !== false);
+  const [sendMessageShortcut, setSendMessageShortcut] = useState<SendMessageShortcut>(() => sendMessageShortcutFrom(profile?.uiSettings));
 
   useEffect(() => {
     setProfileName(profile?.name || user.name);
@@ -175,6 +177,7 @@ export const SettingsView: React.FC<Props> = ({
     setProfileSignature(profile?.messageSignature || '');
     setApiToken(profile?.apiAccessToken || '');
     setShowSystemMessages(profile?.uiSettings.show_system_messages !== false);
+    setSendMessageShortcut(sendMessageShortcutFrom(profile?.uiSettings));
   }, [profile, user]);
 
   const saveProfile = async () => {
@@ -182,7 +185,7 @@ export const SettingsView: React.FC<Props> = ({
     if (newPassword && newPassword !== passwordConfirmation) { showToast('A confirmação da senha não confere.'); return; }
     setProfileSaving(true);
     try {
-      await onSaveProfile({ name: profileName.trim(), displayName: profileDisplayName.trim(), email: profileEmail.trim(), phoneNumber: profilePhone.trim(), messageSignature: profileSignature, showSystemMessages, ...(newPassword ? { currentPassword, password: newPassword, passwordConfirmation } : {}) });
+      await onSaveProfile({ name: profileName.trim(), displayName: profileDisplayName.trim(), email: profileEmail.trim(), phoneNumber: profilePhone.trim(), messageSignature: profileSignature, showSystemMessages, sendMessageShortcut, ...(newPassword ? { currentPassword, password: newPassword, passwordConfirmation } : {}) });
       onUpdateUser({ ...user, name: profileDisplayName.trim() || profileName.trim(), phone: profilePhone.trim(), about: profileSignature, avatar: profile?.avatarUrl || user.avatar });
       setCurrentPassword(''); setNewPassword(''); setPasswordConfirmation('');
       showToast('Perfil atualizado com sucesso.');
@@ -537,6 +540,7 @@ export const SettingsView: React.FC<Props> = ({
                 <h4 className="flex items-center gap-2 text-sm font-bold"><Bell className="h-4 w-4 text-[#00a884]" />Preferências</h4>
                 <div className={`flex items-center justify-between gap-4 rounded-xl border px-4 py-3 text-sm ${isDarkMode ? 'border-[#2a3942] bg-[#182228]' : 'border-[#d1d7db] bg-[#f8f9fa]'}`}><div><span className="block">Notificações no navegador</span><span className="mt-1 block text-xs text-[#8696a0]">Alertas de novas mensagens quando o Kopla estiver em segundo plano.</span></div><button type="button" disabled={browserNotificationState === 'unsupported' || browserNotificationState === 'denied'} onClick={() => void toggleBrowserNotifications()} className={`rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-50 ${browserNotificationsEnabled ? 'bg-[#00a884] text-white' : 'border border-[#00a884] text-[#00a884]'}`}>{browserNotificationsEnabled ? 'Ativadas' : browserNotificationState === 'denied' ? 'Bloqueadas' : 'Ativar'}</button></div>
                 <button type="button" onClick={() => setShowSystemMessages((current) => !current)} className={`flex w-full items-center justify-between gap-4 rounded-xl border px-4 py-3 text-left text-sm ${isDarkMode ? 'border-[#2a3942] bg-[#182228]' : 'border-[#d1d7db] bg-[#f8f9fa]'}`}><span><span className="block">Mostrar mensagens do sistema</span><span className="mt-1 block text-xs text-[#8696a0]">Exibe eventos como atribuições, etiquetas e mudanças de status na conversa.</span></span><span className={`rounded-lg px-3 py-2 text-xs font-bold ${showSystemMessages ? 'bg-[#00a884] text-white' : 'border border-[#8696a0] text-[#667781]'}`}>{showSystemMessages ? 'Ligado' : 'Desligado'}</span></button>
+                <label className={`flex items-center justify-between gap-4 rounded-xl border px-4 py-3 text-sm ${isDarkMode ? 'border-[#2a3942] bg-[#182228]' : 'border-[#d1d7db] bg-[#f8f9fa]'}`}><span><span className="block">Enviar mensagem com</span><span className="mt-1 block text-xs text-[#8696a0]">Shift+Enter sempre adiciona uma quebra de linha.</span></span><select value={sendMessageShortcut} onChange={(event) => setSendMessageShortcut(event.target.value === 'ctrl_enter' ? 'ctrl_enter' : 'enter')} className={`rounded-lg border px-3 py-2 text-xs font-bold outline-none ${isDarkMode ? 'border-[#40515a] bg-[#202c33] text-white' : 'border-[#d1d7db] bg-white text-[#111b21]'}`}><option value="enter">Enter</option><option value="ctrl_enter">Ctrl+Enter / Cmd+Enter</option></select></label>
                 <button type="button" onClick={onToggleDarkMode} className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-sm ${isDarkMode ? 'border-[#2a3942] bg-[#182228]' : 'border-[#d1d7db] bg-[#f8f9fa]'}`}><span className="flex items-center gap-2"><Palette className="h-4 w-4 text-[#00a884]" />Tema</span><span>{isDarkMode ? 'Escuro' : 'Claro'}</span></button>
               </section>
 

@@ -65,6 +65,7 @@ import { metaCloudMetadataForInbox } from '../integrations/whatsapp/provider';
 import { canSendWhatsAppMessage, type OperationalWhatsAppConnection } from '../integrations/whatsapp/connection';
 import { finiteAudioDuration, recordingFile, recordingMimeType, releaseRecordingResources, type AudioRecordingPhase } from '../features/audio/recording';
 import { documentPresentation, filesFromTransfer, hasFilesInTransfer, triggerAttachmentDownload } from '../features/attachments/fileUtils';
+import { shouldSendMessageOnEnter, type SendMessageShortcut } from '../features/messages/sendMessageShortcut';
 
 
 // Helper to format WhatsApp Markdown, URLs, Mentions, Bold (*), Italic (_), Strikethrough (~), Code (`)
@@ -618,6 +619,7 @@ interface Props {
   accountId?: number | null;
   inboxes?: Inbox[];
   whatsappConnection?: OperationalWhatsAppConnection | null;
+  sendMessageShortcut?: SendMessageShortcut;
 }
 
 export const ChatArea: React.FC<Props> = ({
@@ -675,6 +677,7 @@ export const ChatArea: React.FC<Props> = ({
   accountId = null,
   inboxes = [],
   whatsappConnection = null,
+  sendMessageShortcut = 'enter',
 }) => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isContactPanelOpen, setIsContactPanelOpen] = useState(false);
@@ -1332,7 +1335,7 @@ export const ChatArea: React.FC<Props> = ({
       return;
     }
 
-    if ((e.key === 'Enter' && isCmdOrCtrl) || (e.key === 'Enter' && !e.shiftKey)) {
+    if (shouldSendMessageOnEnter(e.nativeEvent, sendMessageShortcut)) {
       e.preventDefault();
       handleSend();
     }
