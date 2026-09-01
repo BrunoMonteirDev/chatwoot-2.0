@@ -627,6 +627,7 @@ interface Props {
   sendMessageShortcut?: SendMessageShortcut;
   onCopyConversationLink?: () => void;
   onOpenDirectConversation?: (conversationId: number) => void;
+  onGroupSubjectResolved?: (subject: string) => void;
 }
 
 export const ChatArea: React.FC<Props> = ({
@@ -687,6 +688,7 @@ export const ChatArea: React.FC<Props> = ({
   sendMessageShortcut = 'enter',
   onCopyConversationLink,
   onOpenDirectConversation,
+  onGroupSubjectResolved,
 }) => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isContactPanelOpen, setIsContactPanelOpen] = useState(false);
@@ -2695,6 +2697,7 @@ export const ChatArea: React.FC<Props> = ({
           onOpenConversationSearch={() => { setIsSearchOpen(true); onSearchInChat?.(); setIsContactPanelOpen(false); }}
           onOpenContent={() => setContactPanelTab('content')}
           onOpenImage={(url, title) => onImageClick(url, title)}
+          onGroupSubjectResolved={onGroupSubjectResolved}
         />
       )}
 

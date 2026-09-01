@@ -1287,6 +1287,9 @@ export default function App() {
                   sendMessageShortcut={sendMessageShortcut}
                   onCopyConversationLink={() => void handleCopyConversationLink()}
                   onOpenDirectConversation={openConversationDirectly}
+                  onGroupSubjectResolved={(subject) => {
+                    if (selectedConversationId) applyConversationUpdate(selectedConversationId, { contactName: subject });
+                  }}
                   managementCatalogs={conversationManagement.catalogs}
                   managementCatalogStatus={conversationManagement.catalogStatus}
                   managementCatalogError={conversationManagement.catalogError}

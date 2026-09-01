@@ -72,6 +72,7 @@ interface Props {
   onOpenConversationSearch?: () => void;
   onOpenContent?: () => void;
   onOpenImage?: (url: string, title?: string) => void;
+  onGroupSubjectResolved?: (subject: string) => void;
 }
 
 export const ContactAttributesPanel: React.FC<Props> = ({
@@ -88,6 +89,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
   onOpenConversationSearch,
   onOpenContent,
   onOpenImage,
+  onGroupSubjectResolved,
 }) => {
   // Atributos e Conteúdo têm uma única implementação: ContactDetailsPanel.
   // Este painel permanece apenas como a aba Dados específica de grupos.
@@ -134,6 +136,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
     void groupMetadataClient.get(inboxId, conversationId, groupTransport).then(({ group }) => {
       if (!active) return;
       setGroupMetadata(group); setDescriptionDraft(group.description || '');
+      if (group.subject?.trim()) onGroupSubjectResolved?.(group.subject.trim());
       setGroupMembers(group.participants.map(member => {
         const phone = participantPhone(member.jid, member.phoneNumber);
         return { id: member.jid, name: member.name || phone || member.jid, phone: phone || member.jid, avatar: member.avatarUrl, isAdmin: Boolean(member.admin), status: member.admin ? 'Administrador' : undefined, avatarBg: participantColor(member.jid) };
@@ -184,6 +187,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
 
   const applyGroup = (group: GroupMetadata) => {
     setGroupMetadata(group); setDescriptionDraft(group.description || '');
+    if (group.subject?.trim()) onGroupSubjectResolved?.(group.subject.trim());
     setGroupMembers(group.participants.map(member => {
       const phone = participantPhone(member.jid, member.phoneNumber);
       return { id: member.jid, name: member.name || phone || member.jid, phone: phone || member.jid, avatar: member.avatarUrl, isAdmin: Boolean(member.admin), status: member.admin ? 'Administrador' : undefined, avatarBg: participantColor(member.jid) };

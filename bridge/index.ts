@@ -133,7 +133,13 @@ app.get('/groups/metadata', async (request, response) => {
     if (transport === 'meta_cloud') return response.status(422).json({ error: 'Metadados de grupos não estão disponíveis na Meta Cloud.', category: 'unsupported_operation' });
     const cached = groupMetadataCache.get(transport, groupJid);
     const metadata = cached || groupMetadataCache.set(await loadGroupMetadata(transport, inbox.configuration, groupJid));
-    if (!cached && metadata.subject && target.contactId) await chatwootBridge.saveEvolutionGroup(target.contactId, groupJid, metadata.subject);
+    // Persist even when metadata came from the five-minute cache. This fixes
+    // groups opened before the subject-sync existed without another provider
+    // request, while a persistence failure must never hide valid metadata.
+    if (metadata.subject && target.contactId) {
+      try { await chatwootBridge.saveEvolutionGroup(target.contactId, groupJid, metadata.subject); }
+      catch (error) { console.warn('[groups] could not persist provider subject', { conversationId, groupJid, error: error instanceof Error ? error.message : 'unknown' }); }
+    }
     return response.json({ group: metadata, cached: Boolean(cached) });
   } catch (error) { return response.status(502).json({ error: error instanceof Error ? error.message : 'Não foi possível carregar o grupo.' }); }
 });
