@@ -148,17 +148,19 @@ app.get('/groups/metadata', async (request, response) => {
 app.get('/contacts/profile', async (request, response) => {
   if (!(await requireBridgeUser(request, response))) return;
   const inboxId = Number(request.query.inboxId); const conversationId = Number(request.query.conversationId);
-  if (!Number.isInteger(inboxId) || !Number.isInteger(conversationId)) return response.status(400).json({ error: 'Inbox e conversa são obrigatórias.' });
+  const accountId = Number(request.query.accountId);
+  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !Number.isInteger(conversationId)) return response.status(400).json({ error: 'Conta, inbox e conversa são obrigatórias.' });
   const force = request.query.force === 'true';
   try {
+    const profile = await chatwootBridge.withAccount(accountId, async () => {
     const inbox = await chatwootBridge.findWhatsAppInboxById(inboxId);
     const transport = groupTransport(inbox.configuration, request.query.transport);
-    if (!transport || transport === 'meta_cloud') return response.status(422).json({ error: 'A sincronização de perfil não é compatível com este transporte.', category: 'unsupported_operation' });
+    if (!transport || transport === 'meta_cloud') throw new Error('A sincronização de perfil não é compatível com este transporte.');
     const target = await chatwootBridge.conversationContactTarget(conversationId, inboxId);
-    if (transport !== 'waha' || !inbox.configuration.wahaSessionName) return response.status(422).json({ error: 'A sincronização de perfil não é compatível com este transporte.', category: 'unsupported_operation' });
+    if (transport !== 'waha' || !inbox.configuration.wahaSessionName) throw new Error('A sincronização de perfil não é compatível com este transporte.');
     if (!target.contactId) throw new Error('A conversa não possui um contato Chatwoot resolvido.');
     const plan = contactProfileSyncPlan(target, force);
-    if (!plan.name && !plan.avatar) return response.json({});
+    if (!plan.name && !plan.avatar) return {};
     const profiles = profileCacheForWahaSession(inbox.configuration.wahaSessionName);
     await refreshWahaChatProfiles(inbox.configuration.wahaSessionName, profiles, force);
     const digits = target.phoneNumber.replace(/\D/g, '');
@@ -174,7 +176,9 @@ app.get('/contacts/profile', async (request, response) => {
     }
     const update = { ...(name ? { name } : {}), ...(avatarUrl ? { avatarUrl } : {}) };
     if (Object.keys(update).length) await chatwootBridge.saveContactProfile(target.contactId, update);
-    return response.json(update);
+    return update;
+    });
+    return response.json(profile);
   } catch (error) { return response.status(502).json({ error: error instanceof Error ? error.message : 'Não foi possível carregar o perfil do contato.' }); }
 });
 

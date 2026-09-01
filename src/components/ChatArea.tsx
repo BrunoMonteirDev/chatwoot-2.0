@@ -800,7 +800,7 @@ export const ChatArea: React.FC<Props> = ({
   useEffect(() => {
     const isGroup = chat.isGroup || conversation?.isGroup || chat.messages.some(message => message.whatsappRemoteJid?.endsWith('@g.us'));
     const transport = chat.messages.slice().reverse().find(message => message.whatsappTransport && message.whatsappTransport !== 'meta_cloud')?.whatsappTransport;
-    if (isGroup || !conversation || transport !== 'waha' || !contact) return;
+    if (isGroup || !conversation || transport !== 'waha' || !contact || !accountId) return;
     const needsName = !contact.name.trim() || isPhoneDefaultContactName(contact.name, contact.phoneNumber);
     const needsAvatar = !contact.avatarUrl;
     if (!needsName && !needsAvatar) return;
@@ -811,20 +811,20 @@ export const ChatArea: React.FC<Props> = ({
     if (automaticallySyncedContactProfiles.current.has(syncKey)) return;
     automaticallySyncedContactProfiles.current.add(syncKey);
     let active = true;
-    void providerProfileClient.get(conversation.inboxId, conversation.id, transport).then((profile) => {
+    void providerProfileClient.get(accountId, conversation.inboxId, conversation.id, transport).then((profile) => {
       if (!active) return;
       setProviderContactProfile(profile);
       if (profile.name || profile.avatarUrl) onContactProfileResolved?.(profile);
     }).catch(() => undefined);
     return () => { active = false; };
-  }, [chat.id, chat.isGroup, contact?.avatarUrl, contact?.name, contact?.phoneNumber, contactStatus, conversation?.id, conversation?.inboxId]);
+  }, [accountId, chat.id, chat.isGroup, contact?.avatarUrl, contact?.name, contact?.phoneNumber, contactStatus, conversation?.id, conversation?.inboxId]);
   const contactProfileTransport = chat.messages.slice().reverse().find(message => message.whatsappTransport)?.whatsappTransport;
   const canSyncContactProfile = !(chat.isGroup || conversation?.isGroup) && contactProfileTransport === 'waha';
   const syncContactProfile = async () => {
-    if (!conversation || contactProfileTransport !== 'waha' || isSyncingContactProfile) return;
+    if (!conversation || !accountId || contactProfileTransport !== 'waha' || isSyncingContactProfile) return;
     setIsSyncingContactProfile(true);
     try {
-      const profile = await providerProfileClient.get(conversation.inboxId, conversation.id, contactProfileTransport, true);
+      const profile = await providerProfileClient.get(accountId, conversation.inboxId, conversation.id, contactProfileTransport, true);
       setProviderContactProfile(profile);
       if (profile.name || profile.avatarUrl) onContactProfileResolved?.(profile);
     } finally { setIsSyncingContactProfile(false); }

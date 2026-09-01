@@ -1293,6 +1293,9 @@ export default function App() {
                   onContactProfileResolved={(profile) => {
                     if (!selectedConversationId) return;
                     applyConversationUpdate(selectedConversationId, { ...(profile.name ? { contactName: profile.name } : {}), ...(profile.avatarUrl ? { contactAvatarUrl: profile.avatarUrl } : {}) });
+                    if (contactDetails.contact && selectedConversation?.contactId === contactDetails.contact.id) {
+                      contactDetails.applyRealtimeUpdate({ ...contactDetails.contact, ...(profile.name ? { name: profile.name } : {}), ...(profile.avatarUrl ? { avatarUrl: profile.avatarUrl } : {}) });
+                    }
                     void contactDetails.retry();
                   }}
                   managementCatalogs={conversationManagement.catalogs}
