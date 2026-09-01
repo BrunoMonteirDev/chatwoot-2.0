@@ -693,7 +693,7 @@ export const ChatArea: React.FC<Props> = ({
   const [inputText, setInputText] = useState('');
   const [messageMode, setMessageMode] = useState<'responder' | 'privada'>('responder');
   const contactConversations = useContactConversations(accountId, conversation?.contactId ?? null, isContactPanelOpen);
-  const conversationAttachments = useConversationAttachments(accountId, conversation?.id ?? null, isContactPanelOpen);
+  const conversationAttachments = useConversationAttachments(accountId, conversation?.id ?? null, isContactPanelOpen && contactPanelTab === 'content');
   const [ticketStatus, setTicketStatus] = useState<'resolver' | 'resolvido' | 'adiado' | 'pendente'>('resolver');
   const [showResolverMenu, setShowResolverMenu] = useState(false);
 
@@ -2621,6 +2621,7 @@ export const ChatArea: React.FC<Props> = ({
           isSaving={isContactSaving}
           isCreatingNote={isCreatingContactNote}
           initialTab={contactPanelTab}
+          onTabChange={setContactPanelTab}
           isDarkMode={isDarkMode}
           conversation={conversation}
           conversationLabels={managementCatalogs?.labels}
