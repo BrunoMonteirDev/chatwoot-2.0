@@ -14,7 +14,7 @@ describe('Embedded Signup browser events', () => {
   });
 
   it('identifica coexistência somente pelo evento oficial da Meta', () => {
-    const event = { origin: 'https://www.facebook.com', data: { type: 'WA_EMBEDDED_SIGNUP', event: 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING', data: { waba_id: 'waba-coexist' } } } as MessageEvent;
-    expect(parseEmbeddedSignupEvent(event)).toEqual({ kind: 'finished', result: { onboardingMode: 'coexistence', wabaId: 'waba-coexist', phoneNumberId: null, businessId: null } });
+    const event = { origin: 'https://www.facebook.com', data: { type: 'WA_EMBEDDED_SIGNUP', event: 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING', data: { business_id: 'business-coexist', waba_id: 'waba-coexist' } } } as MessageEvent;
+    expect(parseEmbeddedSignupEvent(event)).toEqual({ kind: 'finished', result: { onboardingMode: 'coexistence', wabaId: 'waba-coexist', phoneNumberId: null, businessId: 'business-coexist' } });
   });
 });

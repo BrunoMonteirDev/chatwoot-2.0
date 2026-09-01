@@ -43,7 +43,7 @@ export const parseEmbeddedSignupEvent = (event: MessageEvent<unknown>): { kind: 
   const onboardingMode: MetaOnboardingMode | null = payload.event === 'FINISH' ? 'standard' : payload.event === 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING' ? 'coexistence' : null;
   if (!onboardingMode || !payload.data || typeof payload.data !== 'object') return null;
   const result = payload.data as { waba_id?: unknown; phone_number_id?: unknown; business_id?: unknown };
-  if (typeof result.waba_id !== 'string' || !result.waba_id || (onboardingMode === 'standard' && (typeof result.phone_number_id !== 'string' || !result.phone_number_id))) return { kind: 'error' };
+  if (typeof result.business_id !== 'string' || !result.business_id || typeof result.waba_id !== 'string' || !result.waba_id || (onboardingMode === 'standard' && (typeof result.phone_number_id !== 'string' || !result.phone_number_id))) return { kind: 'error' };
   return { kind: 'finished', result: { onboardingMode, wabaId: result.waba_id, phoneNumberId: typeof result.phone_number_id === 'string' ? result.phone_number_id : null, businessId: typeof result.business_id === 'string' ? result.business_id : null } };
 };
 
@@ -73,7 +73,7 @@ export const loadFacebookSdk = (publicConfig: MetaEmbeddedSignupPublicConfig): P
   return sdkPromise;
 };
 
-export const openEmbeddedSignup = async (publicConfig: MetaEmbeddedSignupPublicConfig, onboardingMode: MetaOnboardingMode): Promise<string> => {
+export const openEmbeddedSignup = async (publicConfig: MetaEmbeddedSignupPublicConfig): Promise<string> => {
   const sdk = await loadFacebookSdk(publicConfig);
   return new Promise((resolve, reject) => {
     sdk.login(response => {
@@ -84,10 +84,9 @@ export const openEmbeddedSignup = async (publicConfig: MetaEmbeddedSignupPublicC
       config_id: publicConfig.configurationId,
       response_type: 'code',
       override_default_response_type: true,
-      // Meta requires a distinct feature type for WhatsApp Business App
-      // onboarding. The final session event, not this requested mode alone,
-      // is what the bridge persists as the actual onboarding mode.
-      extras: { setup: {}, featureType: onboardingMode === 'coexistence' ? 'whatsapp_business_app_onboarding' : 'whatsapp_business_messaging', sessionInfoVersion: '3' },
+      // Match Chatwoot's native Embedded Signup implementation. Meta decides
+      // whether the terminal event is standard FINISH or coexistence onboarding.
+      extras: { setup: {}, featureType: 'whatsapp_business_app_onboarding', sessionInfoVersion: '3' },
     });
   });
 };

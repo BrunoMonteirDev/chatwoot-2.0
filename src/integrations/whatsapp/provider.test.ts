@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { externalMessageId, metaCloudMetadataForInbox, parseExternalMessageId, transportStatusesForInbox, whatsappConfigurationForInbox, whatsappProviderForInbox } from './provider';
+import { externalMessageId, isNativeWhatsAppInbox, metaCloudMetadataForInbox, parseExternalMessageId, transportStatusesForInbox, whatsappConfigurationForInbox, whatsappProviderForInbox } from './provider';
 
 const inbox = { id: 1, name: 'WhatsApp', avatarUrl: null, channelType: 'Channel::Api', channelId: 1, webhookUrl: null, inboxIdentifier: 'token', additionalAttributes: {} };
 
@@ -21,6 +21,13 @@ describe('WhatsApp providers', () => {
     const meta = { ...inbox, additionalAttributes: { whatsapp_provider: 'meta_cloud', meta_waba_id: 'waba-1', meta_phone_number_id: 'phone-1', meta_display_phone_number: '+55 11 99999-9999' } };
     expect(whatsappProviderForInbox(meta)).toBe('meta_cloud');
     expect(metaCloudMetadataForInbox(meta)).toMatchObject({ meta_waba_id: 'waba-1', meta_phone_number_id: 'phone-1' });
+  });
+
+  it('mantém Channel::Whatsapp nativo fora da camada de transportes do bridge', () => {
+    const native = { ...inbox, channelType: 'Channel::Whatsapp', additionalAttributes: {} };
+    expect(isNativeWhatsAppInbox(native)).toBe(true);
+    expect(whatsappConfigurationForInbox(native)).toBeNull();
+    expect(metaCloudMetadataForInbox(native)).toBeNull();
   });
 
   it('namespaceia e interpreta IDs externos sem misturar provedores', () => {

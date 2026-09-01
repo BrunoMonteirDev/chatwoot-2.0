@@ -25,6 +25,11 @@ export interface MetaCloudInboxMetadata {
 
 export interface WhatsAppInboxConfiguration { mode: WhatsAppMode; transports: WhatsAppTransport[]; meta: MetaCloudInboxMetadata | null; evolutionInstanceName: string | null; wahaSessionName: string | null; }
 
+// Native Cloud inboxes deliberately have no bridge transport metadata. Keeping
+// this separate prevents outbound webhooks, custom Meta tokens, and future
+// hybrid routing from being selected for Channel::Whatsapp by accident.
+export const isNativeWhatsAppInbox = (inbox: Inbox) => inbox.channelType === 'Channel::Whatsapp';
+
 const transportsFor = (attributes: Record<string, unknown>): WhatsAppTransport[] => {
   const declared = Array.isArray(attributes.whatsapp_transports) ? attributes.whatsapp_transports.filter((item): item is WhatsAppTransport => item === 'evolution' || item === 'waha' || item === 'meta_cloud') : [];
   if (declared.length) return [...new Set(declared)];

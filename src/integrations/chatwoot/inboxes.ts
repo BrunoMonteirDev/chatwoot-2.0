@@ -21,6 +21,45 @@ export const inboxService = {
     return response.payload.map(normalizeInbox);
   },
 
+  async nativeWhatsAppEmbeddedSignupConfig(accountId: number): Promise<{ appId: string; configurationId: string; graphApiVersion: string }> {
+    const response = await chatwootApiClient.get<{ app_id?: unknown; configuration_id?: unknown; api_version?: unknown }>(`${root(accountId)}/whatsapp/authorization/config`);
+    if (typeof response.app_id !== 'string' || !response.app_id || typeof response.configuration_id !== 'string' || !response.configuration_id) {
+      throw new Error('O WhatsApp Embedded Signup nativo não está configurado no Chatwoot.');
+    }
+    return {
+      appId: response.app_id,
+      configurationId: response.configuration_id,
+      graphApiVersion: typeof response.api_version === 'string' && response.api_version ? response.api_version : 'v22.0',
+    };
+  },
+
+  async createNativeWhatsAppInbox(accountId: number, params: { code: string; businessId: string; wabaId: string; phoneNumberId?: string | null }): Promise<Inbox> {
+    const response = await chatwootApiClient.post<{ success?: unknown; id?: unknown }>(`${root(accountId)}/whatsapp/authorization`, {
+      code: params.code,
+      business_id: params.businessId,
+      waba_id: params.wabaId,
+      ...(params.phoneNumberId ? { phone_number_id: params.phoneNumberId } : {}),
+    });
+    if (response.success !== true || !Number.isInteger(response.id)) throw new Error('O Chatwoot não confirmou a criação da inbox oficial.');
+    const inbox = (await this.list(accountId)).find(item => item.id === response.id);
+    if (!inbox || inbox.channelType !== 'Channel::Whatsapp') throw new Error('O Chatwoot não retornou uma inbox WhatsApp nativa.');
+    return inbox;
+  },
+
+  async reauthorizeNativeWhatsAppInbox(accountId: number, inboxId: number, params: { code: string; businessId: string; wabaId: string; phoneNumberId?: string | null }): Promise<Inbox> {
+    const response = await chatwootApiClient.post<{ success?: unknown; id?: unknown }>(`${root(accountId)}/whatsapp/authorization`, {
+      inbox_id: inboxId,
+      code: params.code,
+      business_id: params.businessId,
+      waba_id: params.wabaId,
+      ...(params.phoneNumberId ? { phone_number_id: params.phoneNumberId } : {}),
+    });
+    if (response.success !== true || response.id !== inboxId) throw new Error('O Chatwoot não confirmou a reautorização da inbox oficial.');
+    const inbox = (await this.list(accountId)).find(item => item.id === inboxId);
+    if (!inbox || inbox.channelType !== 'Channel::Whatsapp') throw new Error('A inbox reautorizada não é uma inbox WhatsApp nativa.');
+    return inbox;
+  },
+
   async createEvolutionInbox(accountId: number, { name, webhookUrl }: CreateEvolutionInboxParams): Promise<Inbox> {
     const response = await chatwootApiClient.post<ChatwootInboxDto>(`${root(accountId)}/inboxes`, {
       name,

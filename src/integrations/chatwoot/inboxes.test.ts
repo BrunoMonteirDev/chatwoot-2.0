@@ -32,6 +32,21 @@ describe('inboxService', () => {
     expect(vi.mocked(fetch).mock.calls[1][1]).toMatchObject({ method: 'PATCH', body: JSON.stringify({ channel: { additional_attributes: { evolution_provider: 'evolution', evolution_instance_name: 'cw-12-vendas' }, webhook_url: 'https://bridge.example.test/webhooks/chatwoot' } }) });
   });
 
+  it('usa somente o endpoint nativo para criar uma inbox oficial', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ app_id: 'app-id', configuration_id: 'config-id', api_version: 'v22.0' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, id: 8, channel_type: 'whatsapp' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ payload: [{ id: 8, name: 'Oficial', avatar_url: null, channel_type: 'Channel::Whatsapp' }] }), { status: 200 }));
+
+    await expect(inboxService.nativeWhatsAppEmbeddedSignupConfig(12)).resolves.toEqual({ appId: 'app-id', configurationId: 'config-id', graphApiVersion: 'v22.0' });
+    await expect(inboxService.createNativeWhatsAppInbox(12, { code: 'code', businessId: 'business', wabaId: 'waba', phoneNumberId: 'phone' })).resolves.toMatchObject({ id: 8, channelType: 'Channel::Whatsapp' });
+
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/v1/accounts/12/whatsapp/authorization/config');
+    expect(vi.mocked(fetch).mock.calls[1][0]).toBe('/api/v1/accounts/12/whatsapp/authorization');
+    expect(vi.mocked(fetch).mock.calls[1][1]).toMatchObject({ method: 'POST', body: JSON.stringify({ code: 'code', business_id: 'business', waba_id: 'waba', phone_number_id: 'phone' }) });
+    expect(vi.mocked(fetch).mock.calls.filter(call => String(call[0]) === '/api/v1/accounts/12/inboxes' && (call[1] as RequestInit | undefined)?.method === 'POST')).toHaveLength(0);
+  });
+
   it('lista e substitui membros reais da inbox', async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 2, name: 'Ana', thumbnail: null }]), { status: 200 }))
