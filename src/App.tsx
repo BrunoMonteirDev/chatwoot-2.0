@@ -40,7 +40,8 @@ import { useInboxes } from './features/inboxes/useInboxes';
 import { errorMessageForUser } from './integrations/chatwoot/errors';
 import { useConversations } from './features/conversations/useConversations';
 import { toChatListItem } from './features/conversations/toChatListItem';
-import { useConversationMessages } from './features/messages/useConversationMessages';
+import { cacheRealtimeMessage, useConversationMessages } from './features/messages/useConversationMessages';
+import { messageHistoryCache, messageHistoryPrefetcher } from './features/messages/MessageHistoryCache';
 import { toChatMessages } from './features/messages/toChatMessages';
 import { useConversationManagement } from './features/conversations/useConversationManagement';
 import { useChatwootRealtime } from './features/realtime/useChatwootRealtime';
@@ -449,6 +450,7 @@ export default function App() {
     onConversation: upsertRealtimeConversation,
     onMessage: (message: ConversationMessage, unreadCount?: number, lastActivityAt?: number) => {
       applyRealtimeMessage(message, unreadCount, lastActivityAt);
+      cacheRealtimeMessage(currentAccount?.id ?? null, message);
       messageHistory.upsertRealtimeMessage(message);
       if (message.kind === 'incoming' && currentAccount) {
         void browserNotifications.show({ title: message.senderName || 'Nova mensagem', body: message.content || (message.attachments.length ? 'Enviou um anexo' : 'Nova mensagem'), url: `/app/accounts/${currentAccount.id}/conversations/${message.conversationId}` });
@@ -737,6 +739,23 @@ export default function App() {
       return 0;
     });
   }, [listChats, searchQuery, selectedInbox, activeFilter, selectedStatus, filterRules, selectedSort, authenticatedUser]);
+
+  // Only message JSON/metadata is prefetched; attachment URLs are left untouched
+  // until their normal renderer requests them. The visible list is capped so a
+  // large inbox never turns idling into a burst of history requests.
+  useEffect(() => {
+    if (!currentAccount) return;
+    filteredAndSortedChats.slice(0, 10).forEach((chat) => {
+      const conversationId = Number(chat.id);
+      if (!Number.isInteger(conversationId) || conversationId < 1 || messageHistoryCache.has(currentAccount.id, conversationId) || messageHistoryCache.isLoading(currentAccount.id, conversationId)) return;
+      const key = messageHistoryCache.key(currentAccount.id, conversationId);
+      messageHistoryPrefetcher.enqueue(key, async () => {
+        if (messageHistoryCache.has(currentAccount.id, conversationId)) return;
+        const page = await messageHistoryCache.request(currentAccount.id, conversationId, (signal) => messageService.list({ accountId: currentAccount.id, conversationId, signal }));
+        messageHistoryCache.set(currentAccount.id, conversationId, page);
+      });
+    });
+  }, [currentAccount, filteredAndSortedChats]);
 
   // Handle sending message
   const handleSendMessage = (chatId: string, text: string, attachments?: File[], isPrivate?: boolean, replyTo?: import('./types').ReplyTo | null) => {
@@ -1210,6 +1229,8 @@ export default function App() {
                   isLoadingOlder={messageHistory.isLoadingOlder}
                   onRetryHistory={() => void messageHistory.retry()}
                   onLoadOlderMessages={messageHistory.loadOlder}
+                  historyScrollTop={messageHistory.cachedScrollTop}
+                  onHistoryScrollChange={messageHistory.saveScroll}
                   onRetryMessage={(messageId) => void messageHistory.retrySend(Number(messageId)).then((message) => {
                     if (message) applyOutgoingMessage(message);
                   })}

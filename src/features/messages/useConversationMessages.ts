@@ -1,20 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ConversationMessage } from '../../domain/currentUser';
 import { errorMessageForUser } from '../../integrations/chatwoot/errors';
 import { messageService } from '../../integrations/chatwoot/messages';
 import { parseExternalMessageId } from '../../integrations/whatsapp/provider';
 import { fallbackRemoteJid, whatsappReactionService, type WhatsAppReactionTransport } from '../../integrations/whatsapp/reactions';
 import { whatsappMessageMutationService } from '../../integrations/whatsapp/messageMutations';
+import { mergeMessage, messageHistoryCache } from './MessageHistoryCache';
 
-export const mergeRealtimeMessage = (current: ConversationMessage[], incoming: ConversationMessage): ConversationMessage[] => {
-  const index = current.findIndex(message => message.id === incoming.id || (incoming.echoId && message.echoId === incoming.echoId));
-  if (index !== -1) {
-    if (current[index].updatedAt && incoming.updatedAt && current[index].updatedAt > incoming.updatedAt) return current;
-    const next = [...current];
-    next[index] = incoming;
-    return next;
-  }
-  return [...current, incoming].sort((a, b) => a.createdAt - b.createdAt || a.id - b.id);
+export const mergeRealtimeMessage = mergeMessage;
+
+// Realtime is delivered at application scope, while this hook only owns the
+// selected chat. Updating an existing entry here keeps inactive cached chats
+// current without turning every received message into a cache entry.
+export const cacheRealtimeMessage = (accountId: number | null, message: ConversationMessage) => {
+  if (accountId) messageHistoryCache.upsertIfPresent(accountId, message);
 };
 
 type StoredReaction = { sender_id: string; emoji: string; transport: WhatsAppReactionTransport; origin: 'contact' | 'mobile' | 'platform' };
@@ -62,22 +61,19 @@ export const useConversationMessages = (accountId: number | null, conversationId
   const pendingMessageFiles = useRef(new PendingMessageFiles());
   const reactionInFlight = useRef(new Set<string>());
 
-  const load = useCallback(async (before?: number, prepend = false) => {
+  const load = useCallback(async (before?: number, prepend = false, silent = false) => {
     if (!accountId || !conversationId) return;
-    abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
     const requestId = ++requestIdRef.current;
-    prepend ? setIsLoadingOlder(true) : setStatus('loading');
-    setError(null);
+    if (prepend) setIsLoadingOlder(true);
+    else if (!silent) { setStatus('loading'); setError(null); }
     try {
-      const page = await messageService.list({ accountId, conversationId, before, signal: controller.signal });
+      const page = await messageHistoryCache.request(accountId, conversationId, (signal) => messageService.list({ accountId, conversationId, before, signal }), controller.signal, before ? `before:${before}` : 'latest');
       if (controller.signal.aborted || requestId !== requestIdRef.current) return;
-      setMessages(current => prepend
-        ? [...page.messages.filter(item => !current.some(existing => existing.id === item.id)), ...current]
-        : page.messages
-      );
-      setHasOlderMessages(page.hasOlderMessages);
+      const cached = messageHistoryCache.set(accountId, conversationId, page, { prepend, preserveExisting: silent });
+      setMessages(cached.messages);
+      setHasOlderMessages(cached.hasOlderMessages);
       setStatus('ready');
     } catch (cause) {
       if (controller.signal.aborted || requestId !== requestIdRef.current) return;
@@ -88,12 +84,22 @@ export const useConversationMessages = (accountId: number | null, conversationId
     }
   }, [accountId, conversationId]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     pendingMessageFiles.current.clear();
-    setMessages([]);
     setHasOlderMessages(false);
     if (!accountId || !conversationId) { setStatus('idle'); return; }
-    void load();
+    const cached = messageHistoryCache.get(accountId, conversationId);
+    if (cached) {
+      setMessages(cached.messages);
+      setHasOlderMessages(cached.hasOlderMessages);
+      setStatus('ready');
+      // A cache hit is always rendered first. Expired entries are revalidated
+      // immediately; fresh entries still get a low-cost SWR merge.
+      void load(undefined, false, true);
+    } else {
+      setMessages([]);
+      void load();
+    }
     return () => abortRef.current?.abort();
   }, [accountId, conversationId, load]);
 
@@ -235,23 +241,30 @@ export const useConversationMessages = (accountId: number | null, conversationId
 
   const upsertRealtimeMessage = useCallback((message: ConversationMessage) => {
     if (message.conversationId !== conversationId) return;
+    cacheRealtimeMessage(accountId, message);
     setMessages(current => mergeRealtimeMessage(current, message));
     setStatus('ready');
-  }, [conversationId]);
+  }, [accountId, conversationId]);
 
   // Backstop for transient ActionCable/proxy drops: merge the latest page in
   // the background rather than resetting the current view or its scroll.
   const refreshLatest = useCallback(async () => {
     if (!accountId || !conversationId) return;
     try {
-      const page = await messageService.list({ accountId, conversationId });
-      setMessages(current => page.messages.reduce(mergeRealtimeMessage, current));
-      setHasOlderMessages(current => current || page.hasOlderMessages);
+      const page = await messageHistoryCache.request(accountId, conversationId, (signal) => messageService.list({ accountId, conversationId, signal }));
+      const cached = messageHistoryCache.set(accountId, conversationId, page, { preserveExisting: true });
+      setMessages(cached.messages);
+      setHasOlderMessages(cached.hasOlderMessages);
       setStatus('ready');
     } catch {
       // Realtime refresh is opportunistic; the normal retry UI owns errors.
     }
   }, [accountId, conversationId]);
 
-  return { messages, status, error, hasOlderMessages, isLoadingOlder, retry: () => load(), loadOlder, send, retrySend, remove, react, edit: (messageId: number, content: string) => mutate('edit', messageId, content), revoke: (messageId: number) => mutate('revoke', messageId), upsertRealtimeMessage, refreshLatest };
+  const saveScroll = useCallback((scrollTop: number) => {
+    if (accountId && conversationId) messageHistoryCache.setScroll(accountId, conversationId, scrollTop);
+  }, [accountId, conversationId]);
+  const cachedScrollTop = accountId && conversationId ? messageHistoryCache.get(accountId, conversationId)?.scrollTop || 0 : 0;
+
+  return { messages, status, error, hasOlderMessages, isLoadingOlder, cachedScrollTop, saveScroll, retry: () => load(), loadOlder, send, retrySend, remove, react, edit: (messageId: number, content: string) => mutate('edit', messageId, content), revoke: (messageId: number) => mutate('revoke', messageId), upsertRealtimeMessage, refreshLatest };
 };

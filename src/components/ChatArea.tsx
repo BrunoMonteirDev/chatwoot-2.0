@@ -601,6 +601,8 @@ interface Props {
   onMarkConversationRead?: () => void;
   onMarkConversationUnread?: () => void;
   onReachLatestMessage?: () => void;
+  historyScrollTop?: number;
+  onHistoryScrollChange?: (scrollTop: number) => void;
   realtimeConnectionStatus?: RealtimeConnectionStatus;
   typingName?: string | null;
   contact?: ContactProfile | null;
@@ -655,6 +657,8 @@ export const ChatArea: React.FC<Props> = ({
   onMarkConversationRead,
   onMarkConversationUnread,
   onReachLatestMessage,
+  historyScrollTop = 0,
+  onHistoryScrollChange,
   realtimeConnectionStatus = 'disconnected',
   typingName,
   contact,
@@ -1022,6 +1026,7 @@ export const ChatArea: React.FC<Props> = ({
   const handleScroll = () => {
     const el = scrollContainerRef.current;
     if (!el) return;
+    onHistoryScrollChange?.(el.scrollTop);
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     if (distanceFromBottom > 80) {
       setIsUserScrolledUp(true);
@@ -1074,10 +1079,15 @@ export const ChatArea: React.FC<Props> = ({
     previousScrollHeight.current = null;
   }, [chat.messages, isLoadingOlder]);
 
-  // When active chat changes, reset scroll to bottom
+  // Restore the per-conversation position. New conversations without a saved
+  // position retain the familiar bottom-of-chat behavior.
   useEffect(() => {
-    scrollToBottom();
-  }, [chat.id]);
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const restore = () => { el.scrollTop = historyScrollTop || el.scrollHeight; };
+    const frame = window.requestAnimationFrame(restore);
+    return () => window.cancelAnimationFrame(frame);
+  }, [chat.id, historyScrollTop]);
 
   // Voice recording timer
   useEffect(() => {
