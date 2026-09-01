@@ -786,6 +786,7 @@ export const ChatArea: React.FC<Props> = ({
   const [groupParticipants, setGroupParticipants] = useState<Record<string, { jid: string; name?: string; phoneNumber?: string; avatarUrl?: string }>>({});
   const [providerContactProfile, setProviderContactProfile] = useState<{ name?: string; avatarUrl?: string }>({});
   const [isSyncingContactProfile, setIsSyncingContactProfile] = useState(false);
+  const automaticallySyncedContactProfiles = useRef(new Set<string>());
   useEffect(() => {
     const isGroup = chat.isGroup || conversation?.isGroup || chat.messages.some(message => message.whatsappRemoteJid?.endsWith('@g.us'));
     const transport = chat.messages.slice().reverse().find(message => message.whatsappTransport && message.whatsappTransport !== 'meta_cloud')?.whatsappTransport;
@@ -803,6 +804,12 @@ export const ChatArea: React.FC<Props> = ({
     const needsName = !contact.name.trim() || isPhoneDefaultContactName(contact.name, contact.phoneNumber);
     const needsAvatar = !contact.avatarUrl;
     if (!needsName && !needsAvatar) return;
+    const syncKey = `${conversation.id}:${contact.id}`;
+    // AvatarFromUrlJob is asynchronous in Chatwoot. Its first reload can
+    // legitimately still contain a null thumbnail, so one opening must never
+    // turn that transient state into a provider polling loop.
+    if (automaticallySyncedContactProfiles.current.has(syncKey)) return;
+    automaticallySyncedContactProfiles.current.add(syncKey);
     let active = true;
     void providerProfileClient.get(conversation.inboxId, conversation.id, transport).then((profile) => {
       if (!active) return;
