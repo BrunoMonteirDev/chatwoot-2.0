@@ -1213,7 +1213,7 @@ export default function App() {
                 {conversationsRefreshing && <div className="h-0.5 overflow-hidden bg-transparent" aria-label="Atualizando conversas"><div className="h-full w-1/3 animate-pulse bg-[#00a884]" /></div>}
 
                 {/* Scrollable Chat List */}
-                <div className="flex-1 overflow-y-auto pb-24 md:pb-0 transition-colors" onScroll={(event) => {
+                <div className="relative z-0 flex-1 overflow-y-auto pb-24 md:pb-0 transition-colors" onScroll={(event) => {
                   const element = event.currentTarget;
                   if (hasNextPage && element.scrollTop + element.clientHeight >= element.scrollHeight - 120) loadMore();
                 }}>

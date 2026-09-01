@@ -155,6 +155,36 @@ app.patch('/groups/description', async (request, response) => {
     return response.status(/\b(401|403)\b|admin|permission|not authorized/i.test(message) ? 403 : 502).json({ error: message });
   }
 });
+
+app.post('/groups/participants', async (request, response) => {
+  if (!(await requireBridgeUser(request, response))) return;
+  const body = request.body as { inboxId?: unknown; conversationId?: unknown; transport?: unknown; participant?: unknown };
+  if (!Number.isInteger(body.inboxId) || !Number.isInteger(body.conversationId) || typeof body.participant !== 'string' || !body.participant.trim()) return response.status(400).json({ error: 'Participante inválido.' });
+  try {
+    const inbox = await chatwootBridge.findWhatsAppInboxById(body.inboxId as number); const groupJid = await chatwootBridge.conversationGroupTarget(body.conversationId as number, body.inboxId as number); const transport = groupTransport(inbox.configuration, body.transport);
+    if (!transport) return response.status(409).json({ error: 'Não foi possível determinar o transporte deste grupo.', category: 'transport_unavailable' });
+    if (transport === 'meta_cloud') return response.status(422).json({ error: 'A Meta Cloud não permite participantes de grupos.', category: 'unsupported_operation' });
+    const group = transport === 'waha'
+      ? !inbox.configuration.wahaSessionName ? null : { ...(await wahaTransport.addGroupParticipant(inbox.configuration.wahaSessionName, groupJid, body.participant)), transport, canEditDescription: true }
+      : !inbox.configuration.evolutionInstanceName ? null : { ...(await evolutionBridge.addGroupParticipant(inbox.configuration.evolutionInstanceName, groupJid, body.participant)), transport, canEditDescription: true };
+    if (!group) throw new Error('A conexão deste grupo não está configurada.');
+    return response.json({ group: groupMetadataCache.set(group) });
+  } catch (error) { const message = error instanceof Error ? error.message : 'Não foi possível adicionar o participante.'; return response.status(/\b(401|403)\b|admin|permission|not authorized/i.test(message) ? 403 : 502).json({ error: message }); }
+});
+
+app.post('/groups/leave', async (request, response) => {
+  if (!(await requireBridgeUser(request, response))) return;
+  const body = request.body as { inboxId?: unknown; conversationId?: unknown; transport?: unknown };
+  if (!Number.isInteger(body.inboxId) || !Number.isInteger(body.conversationId)) return response.status(400).json({ error: 'Grupo inválido.' });
+  try {
+    const inbox = await chatwootBridge.findWhatsAppInboxById(body.inboxId as number); const groupJid = await chatwootBridge.conversationGroupTarget(body.conversationId as number, body.inboxId as number); const transport = groupTransport(inbox.configuration, body.transport);
+    if (!transport) return response.status(409).json({ error: 'Não foi possível determinar o transporte deste grupo.', category: 'transport_unavailable' });
+    if (transport === 'meta_cloud') return response.status(422).json({ error: 'A Meta Cloud não permite sair de grupos.', category: 'unsupported_operation' });
+    if (transport === 'waha') { if (!inbox.configuration.wahaSessionName) throw new Error('A sessão WAHA desta inbox não está configurada.'); await wahaTransport.leaveGroup(inbox.configuration.wahaSessionName, groupJid); }
+    else { if (!inbox.configuration.evolutionInstanceName) throw new Error('A instância Evolution desta inbox não está configurada.'); await evolutionBridge.leaveGroup(inbox.configuration.evolutionInstanceName, groupJid); }
+    return response.status(204).end();
+  } catch (error) { const message = error instanceof Error ? error.message : 'Não foi possível sair do grupo.'; return response.status(/\b(401|403)\b|admin|permission|not authorized/i.test(message) ? 403 : 502).json({ error: message }); }
+});
 const saveConnectionStatus = (accountId: number, inboxId: number, transport: 'evolution' | 'waha' | 'meta_cloud', status: ConnectionStatus) =>
   chatwootBridge.withAccount(accountId, () => chatwootBridge.updateInboxAdditionalAttributes(inboxId, connectionStatusPatch(transport, status)));
 

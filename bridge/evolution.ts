@@ -149,6 +149,13 @@ export const evolutionBridge = {
   async updateGroupDescription(instance: string, groupJid: string, description: string) {
     return evolutionGroupMetadata(await managementResponse(`/group/updateGroupDescription/${encodeURIComponent(instance)}`, { method: 'POST', body: JSON.stringify({ groupJid, description }) }), groupJid);
   },
+  async addGroupParticipant(instance: string, groupJid: string, participant: string) {
+    await managementResponse(`/group/updateParticipant/${encodeURIComponent(instance)}`, { method: 'POST', body: JSON.stringify({ groupJid, action: 'add', participants: [normalizeEvolutionDestination(participant)] }) });
+    return this.getGroupMetadata(instance, groupJid);
+  },
+  async leaveGroup(instance: string, groupJid: string) {
+    await managementResponse(`/group/leaveGroup/${encodeURIComponent(instance)}`, { method: 'DELETE', body: JSON.stringify({ groupJid }) });
+  },
   async createInstance(instanceName: string) {
     try {
       return await managementResponse('/instance/create', { method: 'POST', body: JSON.stringify({ instanceName, integration: 'WHATSAPP-BAILEYS', qrcode: true }) });

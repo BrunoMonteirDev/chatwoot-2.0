@@ -40,10 +40,11 @@ import {
   Key,
   Minus,
 } from 'lucide-react';
-import { Chat } from '../types';
+import { Chat, Attachment } from '../types';
 import { groupMetadataClient, type GroupMetadata } from '../features/groups/metadata';
 import { participantColor, participantPhone } from '../features/groups/participant';
 import type { WhatsAppTransport } from '../integrations/whatsapp/provider';
+import { triggerAttachmentDownload } from '../features/attachments/fileUtils';
 
 interface GroupMember {
   id: string;
@@ -67,6 +68,9 @@ interface Props {
   conversationId?: number;
   inboxId?: number;
   groupTransport?: WhatsAppTransport | null;
+  onOpenConversationSearch?: () => void;
+  onOpenContent?: () => void;
+  onOpenImage?: (url: string, title?: string) => void;
 }
 
 export const ContactAttributesPanel: React.FC<Props> = ({
@@ -79,6 +83,9 @@ export const ContactAttributesPanel: React.FC<Props> = ({
   conversationId,
   inboxId,
   groupTransport,
+  onOpenConversationSearch,
+  onOpenContent,
+  onOpenImage,
 }) => {
   const [currentTab, setCurrentTab] = useState<'contact' | 'attributes'>(activeTab);
 
@@ -109,69 +116,33 @@ export const ContactAttributesPanel: React.FC<Props> = ({
   const [isSearchingMembers, setIsSearchingMembers] = useState(false);
 
   // Toggle & input states
-  const [isMuted, setIsMuted] = useState(false);
-  const [isFavorite, setIsFavorite] = useState(chat.favorite || false);
-
-  // Notes state
-  const [clientNotes, setClientNotes] = useState('Suporte prioritário White Label. Cliente VIP.');
-  const [isEditingNotes, setIsEditingNotes] = useState(false);
-
   // Add Member Modal State
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberPhone, setNewMemberPhone] = useState('');
 
-  // Default Group Members list (for groups)
-  const [groupMembers, setGroupMembers] = useState<GroupMember[]>([
-    {
-      id: 'm1',
-      name: 'Você',
-      phone: '+55 11 99999-8888',
-      status: 'Adicionar etiqueta de membro',
-      isMe: true,
-      avatarBg: '#2563eb',
-    },
-    {
-      id: 'm2',
-      name: '~Atendimento White Label',
-      phone: '+55 11 5108-6616',
-      status: 'Atendimento das 9h as 18h, segunda a sexta 🕶️',
-      isAdmin: true,
-      avatarBg: '#0284c7',
-    },
-    {
-      id: 'm3',
-      name: 'CWMKT White Label',
-      phone: '+55 11 3322-1100',
-      status: 'Suporte exclusivo https://cwmkt.com.br',
-      isAdmin: true,
-      website: 'https://cwmkt.com.br',
-      avatarBg: '#10b981',
-    },
-    {
-      id: 'm4',
-      name: 'Ricardo Freitas',
-      phone: '+55 11 98765-4321',
-      status: 'Disponível para reuniões',
-      avatarBg: '#8b5cf6',
-    },
-  ]);
+  const [groupMembers, setGroupMembers] = useState<GroupMember[]>([]);
   const [groupMetadata, setGroupMetadata] = useState<GroupMetadata | null>(null);
   const [groupError, setGroupError] = useState<string | null>(null);
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState('');
   const [savingDescription, setSavingDescription] = useState(false);
+  const [addingMember, setAddingMember] = useState(false);
+  const [leavingGroup, setLeavingGroup] = useState(false);
 
   useEffect(() => {
-    if (!chat.isGroup || !conversationId || !inboxId) return;
+    if (!conversationId || !inboxId) return;
     let active = true;
     void groupMetadataClient.get(inboxId, conversationId, groupTransport).then(({ group }) => {
       if (!active) return;
       setGroupMetadata(group); setDescriptionDraft(group.description || '');
-      setGroupMembers(group.participants.map(member => ({ id: member.jid, name: member.name || (member.jid.endsWith('@lid') ? 'Participante' : 'Sem nome'), phone: participantPhone(member.jid, member.phoneNumber), isAdmin: Boolean(member.admin), status: member.admin ? 'Administrador' : undefined, avatarBg: participantColor(member.jid) })));
+      setGroupMembers(group.participants.map(member => {
+        const phone = participantPhone(member.jid, member.phoneNumber);
+        return { id: member.jid, name: member.name || phone || member.jid, phone: phone || member.jid, isAdmin: Boolean(member.admin), status: member.admin ? 'Administrador' : undefined, avatarBg: participantColor(member.jid) };
+      }));
     }).catch(error => { if (active) setGroupError(error instanceof Error ? error.message : 'Não foi possível carregar o grupo.'); });
     return () => { active = false; };
-  }, [chat.isGroup, conversationId, inboxId, groupTransport]);
+  }, [conversationId, inboxId, groupTransport]);
 
   const saveDescription = async () => {
     if (!conversationId || !inboxId || !groupMetadata?.transport) return;
@@ -213,21 +184,31 @@ export const ContactAttributesPanel: React.FC<Props> = ({
     document.body.style.userSelect = 'none';
   };
 
-  const handleAddMember = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMemberName.trim()) return;
-    const newMember: GroupMember = {
-      id: `m-${Date.now()}`,
-      name: newMemberName.trim(),
-      phone: newMemberPhone.trim() || '+55 11 90000-0000',
-      status: 'Membro adicionado',
-      avatarBg: '#ec4899',
-    };
-    setGroupMembers((prev) => [...prev, newMember]);
-    setNewMemberName('');
-    setNewMemberPhone('');
-    setShowAddMemberModal(false);
+  const applyGroup = (group: GroupMetadata) => {
+    setGroupMetadata(group); setDescriptionDraft(group.description || '');
+    setGroupMembers(group.participants.map(member => {
+      const phone = participantPhone(member.jid, member.phoneNumber);
+      return { id: member.jid, name: member.name || phone || member.jid, phone: phone || member.jid, isAdmin: Boolean(member.admin), status: member.admin ? 'Administrador' : undefined, avatarBg: participantColor(member.jid) };
+    }));
   };
+  const handleAddMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMemberPhone.trim() || !conversationId || !inboxId || !groupMetadata) return;
+    setAddingMember(true); setGroupError(null);
+    try { const { group } = await groupMetadataClient.addParticipant(inboxId, conversationId, groupMetadata.transport, newMemberPhone.trim()); applyGroup(group); setNewMemberName(''); setNewMemberPhone(''); setShowAddMemberModal(false); }
+    catch (error) { setGroupError(error instanceof Error ? error.message : 'Não foi possível adicionar o participante.'); }
+    finally { setAddingMember(false); }
+  };
+
+  const leaveGroup = async () => {
+    if (!conversationId || !inboxId || !groupMetadata || !window.confirm('Sair deste grupo? Esta ação será feita no WhatsApp.')) return;
+    setLeavingGroup(true); setGroupError(null);
+    try { await groupMetadataClient.leave(inboxId, conversationId, groupMetadata.transport); onClose(); }
+    catch (error) { setGroupError(error instanceof Error ? error.message : 'Não foi possível sair do grupo.'); }
+    finally { setLeavingGroup(false); }
+  };
+
+  const groupAttachments = chat.messages.flatMap(message => message.attachments || []).slice(0, 4);
 
   const filteredMembers = groupMembers.filter(
     (m) =>
@@ -317,7 +298,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
               <h3 className="font-bold text-sm tracking-tight truncate">
                 {selectedMemberContact
                   ? 'Dados do contato'
-                  : chat.isGroup
+                  : (chat.isGroup || Boolean(groupMetadata))
                   ? 'Dados do grupo'
                   : 'Dados do contato'}
               </h3>
@@ -619,7 +600,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
         {/* ======================================================== */}
         {/* SCENARIO B: GROUP INFO PANEL ("Dados do grupo")           */}
         {/* ======================================================== */}
-        {currentTab === 'contact' && chat.isGroup && !selectedMemberContact && (
+        {currentTab === 'contact' && (chat.isGroup || Boolean(groupMetadata)) && !selectedMemberContact && (
           <div className="space-y-4 pb-8">
             {/* 1. Group Hero Avatar, Name & Subtitle */}
             <div className="flex flex-col items-center text-center p-5 border-b border-black/5 dark:border-white/5 space-y-2">
@@ -650,7 +631,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
 
               {/* Action Buttons below group name: Adicionar, Pesquisar */}
               <div className="flex items-center justify-center gap-4 pt-3">
-                <button
+                {groupMetadata && <button
                   type="button"
                   onClick={() => setShowAddMemberModal(true)}
                   className="flex flex-col items-center space-y-1 text-xs text-[#8696a0] hover:text-[#00a884] cursor-pointer group"
@@ -659,11 +640,11 @@ export const ContactAttributesPanel: React.FC<Props> = ({
                     <UserPlus className="w-4 h-4" />
                   </div>
                   <span className="text-[11px]">Adicionar</span>
-                </button>
+                </button>}
 
                 <button
                   type="button"
-                  onClick={() => setIsSearchingMembers((prev) => !prev)}
+                  onClick={onOpenConversationSearch}
                   className="flex flex-col items-center space-y-1 text-xs text-[#8696a0] hover:text-[#00a884] cursor-pointer group"
                 >
                   <div className="w-10 h-10 rounded-full bg-black/5 dark:bg-white/10 flex items-center justify-center text-[#e9edef] group-hover:bg-[#00a884] group-hover:text-white transition-colors">
@@ -680,114 +661,22 @@ export const ContactAttributesPanel: React.FC<Props> = ({
             </div>
 
             {/* 2. Media, links e docs Preview */}
-            <div className="p-4 border-b border-black/5 dark:border-white/5 space-y-3">
+            <div role="button" tabIndex={0} onClick={onOpenContent} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onOpenContent?.(); }} className="w-full cursor-pointer p-4 text-left border-b border-black/5 dark:border-white/5 space-y-3 hover:bg-black/5 dark:hover:bg-white/5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2 text-xs font-semibold">
                   <FileText className="w-4 h-4 text-[#8696a0]" />
                   <span>Mídia, links e docs</span>
                 </div>
                 <div className="flex items-center space-x-1 text-xs text-[#8696a0]">
-                  <span className="font-mono">113</span>
                   <ChevronRight className="w-4 h-4" />
                 </div>
               </div>
 
-              {/* Media Thumbnails Grid */}
               <div className="grid grid-cols-4 gap-2">
-                <div className="h-16 rounded-lg bg-black/20 dark:bg-white/10 overflow-hidden relative cursor-pointer border border-white/5 hover:opacity-80 transition-opacity">
-                  <img
-                    src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=200&q=80"
-                    alt="Media 1"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                <div className="h-16 rounded-lg bg-black/20 dark:bg-white/10 overflow-hidden relative cursor-pointer border border-white/5 hover:opacity-80 transition-opacity">
-                  <img
-                    src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=200&q=80"
-                    alt="Media 2"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                <div className="h-16 rounded-lg bg-black/40 overflow-hidden relative cursor-pointer border border-white/5 flex items-center justify-center text-white text-[10px] font-bold">
-                  <div className="absolute inset-0 bg-black/50" />
-                  <span className="relative z-10">▶ 0:41</span>
-                </div>
-                <div className="h-16 rounded-lg bg-[#202c33] p-1.5 flex flex-col justify-between border border-white/5 cursor-pointer">
-                  <div className="w-5 h-5 rounded bg-red-500 text-white flex items-center justify-center text-[8px] font-black">
-                    PDF
-                  </div>
-                  <span className="text-[9px] text-[#8696a0] truncate font-mono">
-                    manual.pdf
-                  </span>
-                </div>
+                {groupAttachments.length ? groupAttachments.map((attachment) => <button key={attachment.id} type="button" onClick={(event) => { event.stopPropagation(); if (attachment.type === 'image') onOpenImage?.(attachment.url, attachment.title); else if (attachment.type === 'file') triggerAttachmentDownload(attachment.url, attachment.title); else onOpenContent?.(); }} className="h-16 overflow-hidden rounded-lg border border-white/5 bg-[#202c33] text-left">
+                  {attachment.type === 'image' ? <img src={attachment.previewUrl || attachment.url} alt={attachment.title || 'Imagem'} className="h-full w-full object-cover" /> : attachment.type === 'video' ? <video src={attachment.url} preload="metadata" className="h-full w-full object-cover" /> : <div className="flex h-full flex-col justify-between p-1.5"><FileText className="h-5 w-5 text-red-400" /><span className="truncate text-[9px] text-[#8696a0]">{attachment.title || 'Documento'}</span></div>}
+                </button>) : <p className="col-span-4 py-2 text-center text-xs text-[#8696a0]">Nenhuma mídia, link ou documento.</p>}
               </div>
-            </div>
-
-            {/* 3. Settings & Features List */}
-            <div className="space-y-1 py-1 border-b border-black/5 dark:border-white/5">
-              <button
-                type="button"
-                className="w-full px-4 py-3 flex items-center justify-between text-xs hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer"
-              >
-                <div className="flex items-center space-x-3 text-[#e9edef]">
-                  <Star className="w-4 h-4 text-[#8696a0]" />
-                  <span>Mensagens favoritas</span>
-                </div>
-                <ChevronRight className="w-4 h-4 text-[#8696a0]" />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsMuted(!isMuted)}
-                className="w-full px-4 py-3 flex items-center justify-between text-xs hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer"
-              >
-                <div className="flex items-center space-x-3 text-[#e9edef]">
-                  <Bell className="w-4 h-4 text-[#8696a0]" />
-                  <span>Configurações de notificação</span>
-                </div>
-                <div
-                  className={`w-8 h-4 rounded-full transition-colors p-0.5 ${
-                    isMuted ? 'bg-[#00a884]' : 'bg-[#374248]'
-                  }`}
-                >
-                  <div
-                    className={`w-3 h-3 rounded-full bg-white transition-transform ${
-                      isMuted ? 'translate-x-4' : 'translate-x-0'
-                    }`}
-                  />
-                </div>
-              </button>
-
-              <div className="px-4 py-3 flex items-start space-x-3 text-xs">
-                <Lock className="w-4 h-4 text-[#8696a0] shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-semibold text-[#e9edef]">Criptografia</p>
-                  <p className="text-[11px] text-[#8696a0] leading-relaxed mt-0.5">
-                    As mensagens são protegidas com a criptografia de ponta a ponta. Clique para saber mais.
-                  </p>
-                </div>
-              </div>
-
-              <div className="px-4 py-3 flex items-start space-x-3 text-xs">
-                <Shield className="w-4 h-4 text-[#8696a0] shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-semibold text-[#e9edef]">Privacidade avançada da conversa</p>
-                  <p className="text-[11px] text-[#8696a0] mt-0.5">Desativada</p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                className="w-full px-4 py-3 flex items-center space-x-3 text-xs hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer text-[#e9edef]"
-              >
-                <Users className="w-4 h-4 text-[#8696a0]" />
-                <div className="text-left">
-                  <p className="font-semibold">Create a similar group</p>
-                  <p className="text-[11px] text-[#8696a0]">
-                    Comece com os mesmos membros. Você poderá adicionar ou remover os membros que desejar.
-                  </p>
-                </div>
-              </button>
             </div>
 
             {/* 4. Group Members List Section */}
@@ -870,46 +759,15 @@ export const ContactAttributesPanel: React.FC<Props> = ({
 
             {/* 5. Group Actions Footer */}
             <div className="p-4 space-y-1 border-t border-black/5 dark:border-white/5 text-xs">
-              <button
+              {groupMetadata && <button
                 type="button"
-                className="w-full text-left py-2.5 px-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 text-[#e9edef] flex items-center space-x-3 transition-colors cursor-pointer"
-              >
-                <FileText className="w-4 h-4 text-[#8696a0]" />
-                <span>Mostrar mudanças de membros</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsFavorite(!isFavorite)}
-                className="w-full text-left py-2.5 px-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 text-[#e9edef] flex items-center space-x-3 transition-colors cursor-pointer"
-              >
-                <Heart className={`w-4 h-4 ${isFavorite ? 'text-red-500 fill-current' : 'text-[#8696a0]'}`} />
-                <span>{isFavorite ? 'Remover dos Favoritos' : 'Adicionar aos Favoritos'}</span>
-              </button>
-
-              <button
-                type="button"
-                className="w-full text-left py-2.5 px-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 text-[#e9edef] flex items-center space-x-3 transition-colors cursor-pointer"
-              >
-                <FolderPlus className="w-4 h-4 text-[#8696a0]" />
-                <span>Adicionar à lista</span>
-              </button>
-
-              <button
-                type="button"
-                className="w-full text-left py-2.5 px-2 rounded-lg hover:bg-red-500/10 text-red-500 font-semibold flex items-center space-x-3 transition-colors cursor-pointer"
-              >
-                <CircleDot className="w-4 h-4" />
-                <span>Limpar conversa</span>
-              </button>
-
-              <button
-                type="button"
+                disabled={leavingGroup}
+                onClick={() => void leaveGroup()}
                 className="w-full text-left py-2.5 px-2 rounded-lg hover:bg-red-500/10 text-red-500 font-semibold flex items-center space-x-3 transition-colors cursor-pointer"
               >
                 <LogOut className="w-4 h-4" />
-                <span>Sair do grupo</span>
-              </button>
+                <span>{leavingGroup ? 'Saindo…' : 'Sair do grupo'}</span>
+              </button>}
             </div>
           </div>
         )}
@@ -917,7 +775,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
         {/* ======================================================== */}
         {/* SCENARIO B: CONTACT INFO PANEL ("Dados do contato")       */}
         {/* ======================================================== */}
-        {currentTab === 'contact' && (!chat.isGroup || selectedMemberContact) && (
+        {currentTab === 'contact' && (!(chat.isGroup || groupMetadata) || selectedMemberContact) && (
           <div className="space-y-4 pb-8">
             {/* 1. Contact Cover & Hero Header */}
             <div className="flex flex-col items-center text-center p-5 border-b border-black/5 dark:border-white/5 space-y-2">
@@ -1254,26 +1112,11 @@ export const ContactAttributesPanel: React.FC<Props> = ({
             <form onSubmit={handleAddMember} className="space-y-3 text-xs">
               <div>
                 <label className="block text-[11px] font-bold text-[#8696a0] uppercase mb-1">
-                  Nome do Participante
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={newMemberName}
-                  onChange={(e) => setNewMemberName(e.target.value)}
-                  placeholder="Ex: João da Silva"
-                  className={`w-full px-3 py-2 rounded-xl border outline-none ${
-                    isDarkMode ? 'bg-[#202c33] border-[#2a3942] text-white' : 'bg-gray-50 border-gray-300'
-                  }`}
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-[#8696a0] uppercase mb-1">
                   Telefone (WhatsApp)
                 </label>
                 <input
                   type="text"
+                  required
                   value={newMemberPhone}
                   onChange={(e) => setNewMemberPhone(e.target.value)}
                   placeholder="Ex: +55 11 98888-7777"
@@ -1293,9 +1136,10 @@ export const ContactAttributesPanel: React.FC<Props> = ({
                 </button>
                 <button
                   type="submit"
+                  disabled={addingMember || !newMemberPhone.trim()}
                   className="px-4 py-2 rounded-xl bg-[#00a884] hover:bg-[#008f70] text-white text-xs font-bold shadow-md cursor-pointer"
                 >
-                  Adicionar
+                  {addingMember ? 'Adicionando…' : 'Adicionar'}
                 </button>
               </div>
             </form>

@@ -189,7 +189,14 @@ export const wahaTransport = {
     return groupMetadata(await request(`/api/${namePath(session)}/groups/${encodeURIComponent(groupId)}`), groupId);
   },
   async updateGroupDescription(session: string, groupId: string, description: string) {
-    return groupMetadata(await request(`/api/${namePath(session)}/groups/${encodeURIComponent(groupId)}`, { method: 'PUT', body: JSON.stringify({ description }) }), groupId);
+    return groupMetadata(await request(`/api/${namePath(session)}/groups/${encodeURIComponent(groupId)}/description`, { method: 'PUT', body: JSON.stringify({ description }) }), groupId);
+  },
+  async addGroupParticipant(session: string, groupId: string, participant: string) {
+    await request(`/api/${namePath(session)}/groups/${encodeURIComponent(groupId)}/participants/add`, { method: 'POST', body: JSON.stringify({ participants: [{ id: normalizeWahaChatId(participant) }] }) });
+    return this.getGroupMetadata(session, groupId);
+  },
+  async leaveGroup(session: string, groupId: string) {
+    await request(`/api/${namePath(session)}/groups/${encodeURIComponent(groupId)}/leave`, { method: 'POST' });
   },
   async sendText(session: string, chatId: string, text: string, replyTo?: string) {
     return sent(await request('/api/sendText', { method: 'POST', body: JSON.stringify({ session, chatId: normalizeWahaChatId(chatId), text, ...(replyTo ? { reply_to: replyTo } : {}) }) }));

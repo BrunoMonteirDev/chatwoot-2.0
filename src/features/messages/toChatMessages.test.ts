@@ -40,9 +40,10 @@ describe('toChatMessages reactions', () => {
     expect(first.senderIdentity).toBe('5511999999999@s.whatsapp.net');
   });
 
-  it('trata LID sem número resolvido sem inventar telefone', () => {
+  it('usa LID apenas quando nome e número não estão disponíveis', () => {
     const [item] = toChatMessages([baseMessage({ contentAttributes: { whatsapp_participant_jid: '12345@lid', whatsapp_participant_name: 'Ana' } })]);
-    expect(item.senderName).toBe('Ana · Número não disponível');
+    expect(item.senderName).toBe('Ana');
     expect(item.senderIdentity).toBe('12345@lid');
+    expect(toChatMessages([baseMessage({ senderName: null, contentAttributes: { whatsapp_participant_jid: '12345@lid' } })])[0].senderName).toBe('12345@lid');
   });
 });

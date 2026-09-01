@@ -63,7 +63,7 @@ describe('WAHA session transport', () => {
     vi.stubGlobal('fetch', fetchMock);
     await expect(wahaTransport.getGroupMetadata('empresa', '1@g.us')).resolves.toMatchObject({ description: 'Antes', participants: [{ jid: '5511999999999@c.us', admin: 'admin' }] });
     await wahaTransport.updateGroupDescription('empresa', '1@g.us', 'Depois');
-    expect(fetchMock.mock.calls[1][0]).toBe('http://waha.test/api/empresa/groups/1%40g.us');
+    expect(fetchMock.mock.calls[1][0]).toBe('http://waha.test/api/empresa/groups/1%40g.us/description');
     expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toEqual({ description: 'Depois' });
   });
 

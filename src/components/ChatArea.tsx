@@ -2613,7 +2613,7 @@ export const ChatArea: React.FC<Props> = ({
       )}
 
       {/* Contact Attributes Side Panel */}
-      {isContactPanelOpen && contactStatus !== 'idle' && onRetryContact && onUpdateContact && onCreateContactNote ? (
+      {isContactPanelOpen && (!(chat.isGroup || conversation?.isGroup || contact?.additionalAttributes.whatsapp_chat_type === 'group' || chat.messages.some((message) => message.whatsappRemoteJid?.endsWith('@g.us'))) || contactPanelTab !== 'contact') && contactStatus !== 'idle' && onRetryContact && onUpdateContact && onCreateContactNote ? (
         <ContactDetailsPanel
           contact={contact || null}
           notes={contactNotes}
@@ -2664,6 +2664,9 @@ export const ChatArea: React.FC<Props> = ({
           conversationId={conversation?.id}
           inboxId={conversation?.inboxId}
           groupTransport={chat.messages.slice().reverse().find(message => message.whatsappTransport && message.whatsappTransport !== 'meta_cloud')?.whatsappTransport || null}
+          onOpenConversationSearch={() => { setIsSearchOpen(true); onSearchInChat?.(); setIsContactPanelOpen(false); }}
+          onOpenContent={() => setContactPanelTab('content')}
+          onOpenImage={(url, title) => onImageClick(url, title)}
         />
       )}
 
