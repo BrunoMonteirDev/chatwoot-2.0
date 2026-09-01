@@ -75,13 +75,19 @@ export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, i
     setAdditionalText(stringify(contact.additionalAttributes));
     setCustomText(stringify(contact.customAttributes));
   }, [contact]);
+  // The bridge has already persisted the provider name. Keep the editable
+  // field aligned with that confirmed result while Chatwoot propagates its
+  // contact.updated event and the contact GET catches up.
+  useEffect(() => {
+    if (profileName) setDraft(current => ({ ...current, name: profileName }));
+  }, [profileName]);
 
   const surface = isDarkMode ? 'bg-[#111b21] border-[#222d34] text-[#e9edef]' : 'bg-white border-[#d1d7db] text-[#111b21]';
   const input = `w-full rounded-lg border px-2.5 py-2 text-xs outline-none ${isDarkMode ? 'border-[#374248] bg-[#202c33] text-white' : 'border-[#d1d7db] bg-white text-[#111b21]'}`;
   const selectedLabels = new Set(conversation?.labels ?? []);
   const managementBusy = managementPendingAction !== null;
   const hasChanges = Boolean(contact && (
-    draft.name !== contact.name ||
+    draft.name !== (profileName || contact.name) ||
     draft.email !== (contact.email || '') ||
     draft.phoneNumber !== (contact.phoneNumber || '') ||
     draft.identifier !== (contact.identifier || '') ||
