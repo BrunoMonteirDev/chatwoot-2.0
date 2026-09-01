@@ -71,6 +71,7 @@ import { useContactConversations } from '../features/contacts/useContactConversa
 import { useConversationAttachments } from '../features/attachments/useConversationAttachments';
 import { groupMetadataClient } from '../features/groups/metadata';
 import { participantColor, participantLabel, participantPhone } from '../features/groups/participant';
+import { providerProfileClient } from '../features/contacts/providerProfile';
 
 
 // Helper to format WhatsApp Markdown, URLs, Mentions, Bold (*), Italic (_), Strikethrough (~), Code (`)
@@ -628,6 +629,7 @@ interface Props {
   onCopyConversationLink?: () => void;
   onOpenDirectConversation?: (conversationId: number) => void;
   onGroupSubjectResolved?: (subject: string) => void;
+  onContactProfileResolved?: (profile: { name?: string; avatarUrl?: string }) => void;
 }
 
 export const ChatArea: React.FC<Props> = ({
@@ -689,6 +691,7 @@ export const ChatArea: React.FC<Props> = ({
   onCopyConversationLink,
   onOpenDirectConversation,
   onGroupSubjectResolved,
+  onContactProfileResolved,
 }) => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isContactPanelOpen, setIsContactPanelOpen] = useState(false);
@@ -781,6 +784,7 @@ export const ChatArea: React.FC<Props> = ({
   const [replyTo, setReplyTo] = useState<ReplyTo | null>(null);
   const conversationInbox = conversation ? inboxes.find((inbox) => inbox.id === conversation.inboxId) : undefined;
   const [groupParticipants, setGroupParticipants] = useState<Record<string, { jid: string; name?: string; phoneNumber?: string; avatarUrl?: string }>>({});
+  const [providerContactProfile, setProviderContactProfile] = useState<{ name?: string; avatarUrl?: string }>({});
   useEffect(() => {
     const isGroup = chat.isGroup || conversation?.isGroup || chat.messages.some(message => message.whatsappRemoteJid?.endsWith('@g.us'));
     const transport = chat.messages.slice().reverse().find(message => message.whatsappTransport && message.whatsappTransport !== 'meta_cloud')?.whatsappTransport;
@@ -789,6 +793,18 @@ export const ChatArea: React.FC<Props> = ({
     void groupMetadataClient.get(conversation.inboxId, conversation.id, transport).then(({ group }) => {
       if (active) setGroupParticipants(Object.fromEntries(group.participants.map(participant => [participant.jid, participant])));
     }).catch(() => { if (active) setGroupParticipants({}); });
+    return () => { active = false; };
+  }, [chat.id, chat.isGroup, conversation?.id, conversation?.inboxId]);
+  useEffect(() => {
+    const isGroup = chat.isGroup || conversation?.isGroup || chat.messages.some(message => message.whatsappRemoteJid?.endsWith('@g.us'));
+    const transport = chat.messages.slice().reverse().find(message => message.whatsappTransport && message.whatsappTransport !== 'meta_cloud')?.whatsappTransport;
+    if (isGroup || !conversation || !transport) { setProviderContactProfile({}); return; }
+    let active = true;
+    void providerProfileClient.get(conversation.inboxId, conversation.id, transport).then((profile) => {
+      if (!active) return;
+      setProviderContactProfile(profile);
+      if (profile.name || profile.avatarUrl) onContactProfileResolved?.(profile);
+    }).catch(() => { if (active) setProviderContactProfile({}); });
     return () => { active = false; };
   }, [chat.id, chat.isGroup, conversation?.id, conversation?.inboxId]);
   const externalSendBlocked = !canSendWhatsAppMessage(whatsappConnection, messageMode === 'privada');
@@ -2653,6 +2669,8 @@ export const ChatArea: React.FC<Props> = ({
           onTabChange={setContactPanelTab}
           isDarkMode={isDarkMode}
           panelTitle={chat.isGroup || conversation?.isGroup || contact?.additionalAttributes.whatsapp_chat_type === 'group' || chat.messages.some((message) => message.whatsappRemoteJid?.endsWith('@g.us')) ? 'Dados do grupo' : 'Dados do contato'}
+          profileName={providerContactProfile.name}
+          profileAvatarUrl={providerContactProfile.avatarUrl}
           conversation={conversation}
           conversationLabels={managementCatalogs?.labels}
           conversationAgents={managementCatalogs?.agents}

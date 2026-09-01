@@ -17,6 +17,8 @@ interface Props {
   isCreatingNote: boolean;
   isDarkMode: boolean;
   panelTitle?: string;
+  profileName?: string;
+  profileAvatarUrl?: string;
   initialTab?: 'contact' | 'attributes' | 'content';
   onTabChange?: (tab: 'contact' | 'attributes' | 'content') => void;
   conversation?: ConversationSummary | null;
@@ -52,7 +54,7 @@ const priorityOptions: { value: ConversationPriority; label: string }[] = [
   { value: 'urgent', label: 'Urgente' },
 ];
 
-export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, isCreatingNote, isDarkMode, panelTitle = 'Dados do contato', initialTab = 'contact', onTabChange, conversation = null, conversationLabels = [], conversationAgents = [], conversationTeams = [], conversationParticipants = [], managementPendingAction = null, onSetConversationPriority, onAssignConversationAgent, onAssignConversationTeam, onSetConversationLabels, onSetConversationParticipants, onClose, onRetry, onUpdate, onCreateNote, contactConversations = [], contactConversationsStatus = 'idle', contactConversationsError = null, inboxes = [], onOpenConversation, attachments = [], attachmentStatus = 'idle', attachmentError = null, hasMoreAttachments = false, onLoadMoreAttachments, onRetryAttachments, messages = [], onOpenImage }: Props) => {
+export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, isCreatingNote, isDarkMode, panelTitle = 'Dados do contato', profileName, profileAvatarUrl, initialTab = 'contact', onTabChange, conversation = null, conversationLabels = [], conversationAgents = [], conversationTeams = [], conversationParticipants = [], managementPendingAction = null, onSetConversationPriority, onAssignConversationAgent, onAssignConversationTeam, onSetConversationLabels, onSetConversationParticipants, onClose, onRetry, onUpdate, onCreateNote, contactConversations = [], contactConversationsStatus = 'idle', contactConversationsError = null, inboxes = [], onOpenConversation, attachments = [], attachmentStatus = 'idle', attachmentError = null, hasMoreAttachments = false, onLoadMoreAttachments, onRetryAttachments, messages = [], onOpenImage }: Props) => {
   const [tab, setTab] = useState<'contact' | 'attributes' | 'content'>(initialTab);
   const [draft, setDraft] = useState({ name: '', email: '', phoneNumber: '', identifier: '', companyName: '' });
   const [additionalText, setAdditionalText] = useState('{}');
@@ -140,8 +142,8 @@ export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, i
         {feedback && <div className="rounded-lg bg-[#00a884]/10 p-2 text-xs text-[#7de2cc]">{feedback}</div>}
         {tab === 'contact' && <>
           <section className="border-b border-white/10 pb-5 text-center">
-            <div className="mx-auto grid h-24 w-24 place-items-center overflow-hidden rounded-full bg-[#063c31] text-3xl font-semibold text-[#25d366]">{contact.avatarUrl ? <img src={contact.avatarUrl} alt={contact.name} className="h-full w-full object-cover" /> : contact.name.slice(0, 2).toUpperCase()}</div>
-            <h2 className="mt-4 text-base font-bold">{contact.name}</h2>
+            <div className="mx-auto grid h-24 w-24 place-items-center overflow-hidden rounded-full bg-[#063c31] text-3xl font-semibold text-[#25d366]">{profileAvatarUrl || contact.avatarUrl ? <img src={profileAvatarUrl || contact.avatarUrl || ''} alt={profileName || contact.name} className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : (profileName || contact.name).slice(0, 2).toUpperCase()}</div>
+            <h2 className="mt-4 text-base font-bold">{profileName || contact.name}</h2>
             {contact.companyName && <p className="mt-1 text-xs text-[#8696a0]">{contact.companyName}</p>}
             {contact.phoneNumber && <p className="mt-1 text-xs text-[#53bdeb]">{contact.phoneNumber}</p>}
           </section>

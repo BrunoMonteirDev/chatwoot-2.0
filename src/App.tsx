@@ -1290,6 +1290,10 @@ export default function App() {
                   onGroupSubjectResolved={(subject) => {
                     if (selectedConversationId) applyConversationUpdate(selectedConversationId, { contactName: subject });
                   }}
+                  onContactProfileResolved={(profile) => {
+                    if (!selectedConversationId) return;
+                    applyConversationUpdate(selectedConversationId, { ...(profile.name ? { contactName: profile.name } : {}), ...(profile.avatarUrl ? { contactAvatarUrl: profile.avatarUrl } : {}) });
+                  }}
                   managementCatalogs={conversationManagement.catalogs}
                   managementCatalogStatus={conversationManagement.catalogStatus}
                   managementCatalogError={conversationManagement.catalogError}

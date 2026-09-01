@@ -9,7 +9,7 @@ import type { EvolutionGroupParticipant } from './evolutionEvent.js';
 export type ApiInbox = { id: number; channel_type: string; inbox_identifier?: string; additional_attributes?: Record<string, unknown>; secret?: string };
 type Contact = { id: number; source_id: string };
 type Conversation = { id: number; internal_id?: number; status: string; inbox_id?: number; last_activity_at?: number };
-type ConversationTarget = { id: number; inbox_id: number; meta?: { sender?: { id?: number; phone_number?: string | null; additional_attributes?: Record<string, unknown> | null } }; contact_inbox?: { source_id?: string | null } };
+type ConversationTarget = { id: number; inbox_id: number; meta?: { sender?: { id?: number; name?: string; thumbnail?: string | null; phone_number?: string | null; additional_attributes?: Record<string, unknown> | null } }; contact_inbox?: { source_id?: string | null } };
 type AccountContact = {
   id: number;
   phone_number?: string;
@@ -366,6 +366,15 @@ export const chatwootBridge = {
     const phoneNumber = conversation.meta?.sender?.phone_number?.replace(/\D/g, '') || conversation.contact_inbox?.source_id?.match(/^whatsapp:(\d{8,15})$/)?.[1];
     if (!phoneNumber || !/^\d{8,15}$/.test(phoneNumber)) throw new Error('A conversa não possui um contato individual WhatsApp válido.');
     return phoneNumber;
+  },
+  async conversationContactTarget(conversationId: number, inboxId: number) {
+    const conversation = await request<ConversationTarget>(`/api/v1/accounts/${currentAccountId()}/conversations/${conversationId}`, {}, true);
+    if (conversation.inbox_id !== inboxId) throw new Error('A conversa não pertence à inbox informada.');
+    const attributes = conversation.meta?.sender?.additional_attributes;
+    const rawPhone = conversation.meta?.sender?.phone_number || attributes?.waha_phone || attributes?.evolution_phone || conversation.contact_inbox?.source_id?.match(/^whatsapp:(\d{8,15})$/)?.[1];
+    const digits = typeof rawPhone === 'string' ? rawPhone.replace(/\D/g, '') : '';
+    if (!/^\d{8,15}$/.test(digits)) throw new Error('A conversa não possui um número WhatsApp resolvido.');
+    return { phoneNumber: `+${digits}`, contactId: conversation.meta?.sender?.id, ...(conversation.contact_inbox?.source_id ? { sourceId: conversation.contact_inbox.source_id } : {}), ...(conversation.meta?.sender?.name ? { name: conversation.meta.sender.name } : {}), ...(conversation.meta?.sender?.thumbnail ? { avatarUrl: conversation.meta.sender.thumbnail } : {}) };
   },
   async conversationGroupTargetDetails(conversationId: number, inboxId: number) {
     const conversation = await request<ConversationTarget>(`/api/v1/accounts/${currentAccountId()}/conversations/${conversationId}`, {}, true);
