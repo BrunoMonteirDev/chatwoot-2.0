@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appRouteFromUrl, urlForAppRoute } from './appRoute';
+import { absoluteConversationUrl, appRouteFromUrl, canonicalConversationPath, urlForAppRoute } from './appRoute';
 
 const route = (path: string) => appRouteFromUrl(new URL(path, 'https://app.example.test'));
 
@@ -19,5 +19,11 @@ describe('app routes', () => {
     expect(route('/app/accounts/42/contacts')).toEqual({ accountId: '42', tab: 'communities' });
     expect(route('/app/accounts/42/calls')).toEqual({ accountId: '42', tab: 'calls' });
     expect(route('/unknown')).toEqual({ tab: 'chats' });
+  });
+
+  it('generates a stable canonical conversation link without inboxId', () => {
+    expect(canonicalConversationPath(42, 698)).toBe('/app/accounts/42/conversations/698');
+    expect(absoluteConversationUrl('https://kopla.example.test', 42, 698)).toBe('https://kopla.example.test/app/accounts/42/conversations/698');
+    expect(canonicalConversationPath(42, 698)).not.toContain('inbox');
   });
 });

@@ -39,6 +39,7 @@ import { useAuth } from './features/auth/AuthContext';
 import { useInboxes } from './features/inboxes/useInboxes';
 import { errorMessageForUser } from './integrations/chatwoot/errors';
 import { useConversations } from './features/conversations/useConversations';
+import { copyConversationLink } from './features/conversations/copyConversationLink';
 import { toChatListItem } from './features/conversations/toChatListItem';
 import { cacheRealtimeMessage, useConversationMessages } from './features/messages/useConversationMessages';
 import { messageHistoryCache, messageHistoryPrefetcher } from './features/messages/MessageHistoryCache';
@@ -817,6 +818,21 @@ export default function App() {
     );
   };
 
+  const handleCopyConversationLink = async () => {
+    if (!currentAccount || !selectedConversation) return;
+    try {
+      await copyConversationLink({
+        origin: window.location.origin,
+        accountId: currentAccount.id,
+        conversationId: selectedConversation.id,
+        clipboard: navigator.clipboard,
+        onCopied: () => addToast('Link copiado'),
+      });
+    } catch {
+      addToast('Não foi possível copiar o link.', 'error');
+    }
+  };
+
   const handleForwardMessage = async (messageId: string, destinationConversationId: string) => {
     if (!currentAccount || !selectedConversationId || !/^\d+$/.test(messageId) || !/^\d+$/.test(destinationConversationId)) return { ok: false, error: 'Conversa ou mensagem inválida.' };
     try {
@@ -1250,6 +1266,7 @@ export default function App() {
                   inboxes={inboxes}
                   whatsappConnection={whatsappConnection}
                   sendMessageShortcut={sendMessageShortcut}
+                  onCopyConversationLink={() => void handleCopyConversationLink()}
                   managementCatalogs={conversationManagement.catalogs}
                   managementCatalogStatus={conversationManagement.catalogStatus}
                   managementCatalogError={conversationManagement.catalogError}

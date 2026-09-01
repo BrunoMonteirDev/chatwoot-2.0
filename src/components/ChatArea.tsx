@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   ArrowLeft,
   Search,
+  Copy,
   MoreVertical,
   Plus,
   Smile,
@@ -620,6 +621,7 @@ interface Props {
   inboxes?: Inbox[];
   whatsappConnection?: OperationalWhatsAppConnection | null;
   sendMessageShortcut?: SendMessageShortcut;
+  onCopyConversationLink?: () => void;
 }
 
 export const ChatArea: React.FC<Props> = ({
@@ -678,6 +680,7 @@ export const ChatArea: React.FC<Props> = ({
   inboxes = [],
   whatsappConnection = null,
   sendMessageShortcut = 'enter',
+  onCopyConversationLink,
 }) => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isContactPanelOpen, setIsContactPanelOpen] = useState(false);
@@ -1663,6 +1666,14 @@ export const ChatArea: React.FC<Props> = ({
             )}
           </div>
 
+          <button
+            type="button"
+            onClick={onCopyConversationLink}
+            title="Copiar link da conversa"
+            className={`h-9 w-9 sm:h-10 sm:w-10 flex items-center justify-center rounded-full transition-colors ${isDarkMode ? 'hover:bg-[#2a3942]' : 'hover:bg-[#e9edef]'}`}
+          >
+            <Copy className="w-4 h-4 sm:w-5 sm:h-5" />
+          </button>
           <button
             onClick={() => {
               setIsSearchOpen((prev) => !prev);

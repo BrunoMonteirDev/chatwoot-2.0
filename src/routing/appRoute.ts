@@ -66,3 +66,13 @@ export const urlForAppRoute = (route: AppRoute) => {
   else if (route.tab === 'tools') pathname = `${base}/notes`;
   return pathname || '/';
 };
+
+// Shared links intentionally omit inboxes and list filters. A conversation is
+// addressed by its account and stable Chatwoot conversation ID alone.
+export const canonicalConversationPath = (accountId: number | string, conversationId: number | string) => (
+  urlForAppRoute({ accountId: String(accountId), tab: 'chats', conversationId: String(conversationId) })
+);
+
+export const absoluteConversationUrl = (origin: string, accountId: number | string, conversationId: number | string) => (
+  new URL(canonicalConversationPath(accountId, conversationId), origin).toString()
+);
