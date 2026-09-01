@@ -207,6 +207,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
   };
 
   const groupAttachments = chat.messages.flatMap(message => message.attachments || []).slice(0, 4);
+  const groupDisplayName = groupMetadata?.subject?.trim() || chat.name;
 
   const filteredMembers = groupMembers.filter(
     (m) =>
@@ -581,7 +582,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
                   {chat.avatarType === 'image' && chat.avatar ? (
                     <img
                       src={chat.avatar}
-                      alt={chat.name}
+                      alt={groupDisplayName}
                       className="w-full h-full object-cover"
                       referrerPolicy="no-referrer"
                     />
@@ -593,7 +594,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
 
               <div className="mt-1">
                 <h2 className="font-bold text-lg leading-tight px-2 break-words">
-                  {chat.name}
+                  {groupDisplayName}
                 </h2>
                 <p className="text-xs text-[#8696a0] mt-1 font-medium">
                   Grupo · <span className="text-[#00a884] font-semibold">{groupMembers.length} membros</span>

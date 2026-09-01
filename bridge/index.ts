@@ -126,12 +126,14 @@ app.get('/groups/metadata', async (request, response) => {
   if (!Number.isInteger(inboxId) || !Number.isInteger(conversationId)) return response.status(400).json({ error: 'Inbox e conversa são obrigatórias.' });
   try {
     const inbox = await chatwootBridge.findWhatsAppInboxById(inboxId);
-    const groupJid = await chatwootBridge.conversationGroupTarget(conversationId, inboxId);
+    const target = await chatwootBridge.conversationGroupTargetDetails(conversationId, inboxId);
+    const groupJid = target.groupJid;
     const transport = groupTransport(inbox.configuration, request.query.transport);
     if (!transport) return response.status(409).json({ error: 'Não foi possível determinar o transporte deste grupo.', category: 'transport_unavailable' });
     if (transport === 'meta_cloud') return response.status(422).json({ error: 'Metadados de grupos não estão disponíveis na Meta Cloud.', category: 'unsupported_operation' });
     const cached = groupMetadataCache.get(transport, groupJid);
     const metadata = cached || groupMetadataCache.set(await loadGroupMetadata(transport, inbox.configuration, groupJid));
+    if (!cached && metadata.subject && target.contactId) await chatwootBridge.saveEvolutionGroup(target.contactId, groupJid, metadata.subject);
     return response.json({ group: metadata, cached: Boolean(cached) });
   } catch (error) { return response.status(502).json({ error: error instanceof Error ? error.message : 'Não foi possível carregar o grupo.' }); }
 });
