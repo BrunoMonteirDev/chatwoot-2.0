@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { attachmentsWithinDates, contentGroups } from './conversationContent';
+import { attachmentsWithinDates, contentGroups, linksMatchingSearch } from './conversationContent';
 
 describe('conversation content', () => it('separates media, documents and loaded-message links', () => {
   const attachments = [{ id: 1, kind: 'image', url: '/a', thumbnailUrl: null, title: null, size: null, createdAt: 1 }, { id: 2, kind: 'file', url: '/b', thumbnailUrl: null, title: 'a.pdf', size: 2, createdAt: 1 }] as any;
@@ -9,4 +9,11 @@ describe('conversation content', () => it('separates media, documents and loaded
 it('filters attachments by their sent date inclusively', () => {
   const attachments = [{ id: 1, createdAt: 1_704_067_200 }, { id: 2, createdAt: 1_704_164_400 }] as any;
   expect(attachmentsWithinDates(attachments, '2024-01-02', '2024-01-02').map(item => item.id)).toEqual([2]);
+});
+
+it('filters links by URL or domain without changing the original list', () => {
+  const links = ['https://docs.example.test/guide', 'https://store.example.test/item'];
+
+  expect(linksMatchingSearch(links, 'DOCS.EXAMPLE')).toEqual(['https://docs.example.test/guide']);
+  expect(linksMatchingSearch(links, '   ')).toBe(links);
 });
