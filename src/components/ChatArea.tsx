@@ -2687,6 +2687,7 @@ export const ChatArea: React.FC<Props> = ({
           isDarkMode={isDarkMode}
           onClose={() => setIsContactPanelOpen(false)}
           activeTab={contactPanelTab}
+          onTabChange={setContactPanelTab}
           conversationId={conversation?.id}
           inboxId={conversation?.inboxId}
           groupTransport={chat.messages.slice().reverse().find(message => message.whatsappTransport && message.whatsappTransport !== 'meta_cloud')?.whatsappTransport || null}

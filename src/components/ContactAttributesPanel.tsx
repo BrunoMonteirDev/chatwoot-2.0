@@ -64,7 +64,8 @@ interface Props {
   onSelectChat?: (chat: Chat) => void;
   isDarkMode: boolean;
   onClose: () => void;
-  activeTab?: 'contact' | 'attributes';
+  activeTab?: 'contact' | 'attributes' | 'content';
+  onTabChange?: (tab: 'contact' | 'attributes' | 'content') => void;
   conversationId?: number;
   inboxId?: number;
   groupTransport?: WhatsAppTransport | null;
@@ -79,7 +80,8 @@ export const ContactAttributesPanel: React.FC<Props> = ({
   onSelectChat,
   isDarkMode,
   onClose,
-  activeTab = 'contact',
+  activeTab: _activeTab = 'contact',
+  onTabChange,
   conversationId,
   inboxId,
   groupTransport,
@@ -87,13 +89,9 @@ export const ContactAttributesPanel: React.FC<Props> = ({
   onOpenContent,
   onOpenImage,
 }) => {
-  const [currentTab, setCurrentTab] = useState<'contact' | 'attributes'>(activeTab);
-
-  useEffect(() => {
-    if (activeTab) {
-      setCurrentTab(activeTab);
-    }
-  }, [activeTab]);
+  // Atributos e Conteúdo têm uma única implementação: ContactDetailsPanel.
+  // Este painel permanece apenas como a aba Dados específica de grupos.
+  const currentTab: 'contact' | 'attributes' = 'contact';
 
   // Accordion states for Attributes view
   const [isActionsOpen, setIsActionsOpen] = useState(false);
@@ -285,24 +283,13 @@ export const ContactAttributesPanel: React.FC<Props> = ({
           )}
 
           <div className="flex items-center space-x-2 truncate">
-            {currentTab === 'attributes' ? (
-              <>
-                <div className="p-1 rounded bg-[#00a884]/20 text-[#00a884]">
-                  <User className="w-4 h-4" />
-                </div>
-                <h3 className="font-bold text-sm tracking-tight truncate text-[#e9edef]">
-                  Contatos
-                </h3>
-              </>
-            ) : (
-              <h3 className="font-bold text-sm tracking-tight truncate">
-                {selectedMemberContact
-                  ? 'Dados do contato'
-                  : (chat.isGroup || Boolean(groupMetadata))
-                  ? 'Dados do grupo'
-                  : 'Dados do contato'}
-              </h3>
-            )}
+          <h3 className="font-bold text-sm tracking-tight truncate">
+            {selectedMemberContact
+              ? 'Dados do contato'
+              : (chat.isGroup || Boolean(groupMetadata))
+              ? 'Dados do grupo'
+              : 'Dados do contato'}
+          </h3>
           </div>
         </div>
 
@@ -310,10 +297,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
         <div className={`flex items-center p-0.5 rounded-lg border ${isDarkMode ? 'bg-[#202c33] border-[#2a3942]' : 'bg-gray-200 border-gray-300'}`}>
           <button
             type="button"
-            onClick={() => {
-              setCurrentTab('contact');
-              setSelectedMemberContact(null);
-            }}
+            onClick={() => { setSelectedMemberContact(null); onTabChange?.('contact'); }}
             className={`px-2 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer ${
               currentTab === 'contact'
                 ? 'bg-[#00a884] text-white shadow-xs'
@@ -322,20 +306,8 @@ export const ContactAttributesPanel: React.FC<Props> = ({
           >
             Dados
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setCurrentTab('attributes');
-              setSelectedMemberContact(null);
-            }}
-            className={`px-2 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer ${
-              currentTab === 'attributes'
-                ? 'bg-[#00a884] text-white shadow-xs'
-                : isDarkMode ? 'text-[#8696a0] hover:text-white' : 'text-gray-600 hover:text-black'
-            }`}
-          >
-            Atributos
-          </button>
+          <button type="button" onClick={() => { setSelectedMemberContact(null); onTabChange?.('attributes'); }} className={`px-2 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer ${isDarkMode ? 'text-[#8696a0] hover:text-white' : 'text-gray-600 hover:text-black'}`}>Atributos</button>
+          <button type="button" onClick={() => { setSelectedMemberContact(null); onTabChange?.('content'); }} className={`px-2 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer ${isDarkMode ? 'text-[#8696a0] hover:text-white' : 'text-gray-600 hover:text-black'}`}>Conteúdo</button>
         </div>
       </div>
 
