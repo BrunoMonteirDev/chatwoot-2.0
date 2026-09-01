@@ -72,10 +72,10 @@ export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, i
   useEffect(() => { setTab(initialTab); }, [initialTab]);
   useEffect(() => {
     if (!contact) return;
-    setDraft({ name: contact.name, email: contact.email || '', phoneNumber: contact.phoneNumber || '', identifier: contact.identifier || '', companyName: contact.companyName || '' });
+    setDraft({ name: profileName || contact.name, email: contact.email || '', phoneNumber: contact.phoneNumber || '', identifier: contact.identifier || '', companyName: contact.companyName || '' });
     setAdditionalText(stringify(contact.additionalAttributes));
     setCustomText(stringify(contact.customAttributes));
-  }, [contact]);
+  }, [contact, profileName]);
   // The bridge has already persisted the provider name. Keep the editable
   // field aligned with that confirmed result while Chatwoot propagates its
   // contact.updated event and the contact GET catches up.
