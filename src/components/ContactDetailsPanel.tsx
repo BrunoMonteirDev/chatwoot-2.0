@@ -16,6 +16,7 @@ interface Props {
   isSaving: boolean;
   isCreatingNote: boolean;
   isDarkMode: boolean;
+  panelTitle?: string;
   initialTab?: 'contact' | 'attributes' | 'content';
   onTabChange?: (tab: 'contact' | 'attributes' | 'content') => void;
   conversation?: ConversationSummary | null;
@@ -51,7 +52,7 @@ const priorityOptions: { value: ConversationPriority; label: string }[] = [
   { value: 'urgent', label: 'Urgente' },
 ];
 
-export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, isCreatingNote, isDarkMode, initialTab = 'contact', onTabChange, conversation = null, conversationLabels = [], conversationAgents = [], conversationTeams = [], conversationParticipants = [], managementPendingAction = null, onSetConversationPriority, onAssignConversationAgent, onAssignConversationTeam, onSetConversationLabels, onSetConversationParticipants, onClose, onRetry, onUpdate, onCreateNote, contactConversations = [], contactConversationsStatus = 'idle', contactConversationsError = null, inboxes = [], onOpenConversation, attachments = [], attachmentStatus = 'idle', attachmentError = null, hasMoreAttachments = false, onLoadMoreAttachments, onRetryAttachments, messages = [], onOpenImage }: Props) => {
+export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, isCreatingNote, isDarkMode, panelTitle = 'Dados do contato', initialTab = 'contact', onTabChange, conversation = null, conversationLabels = [], conversationAgents = [], conversationTeams = [], conversationParticipants = [], managementPendingAction = null, onSetConversationPriority, onAssignConversationAgent, onAssignConversationTeam, onSetConversationLabels, onSetConversationParticipants, onClose, onRetry, onUpdate, onCreateNote, contactConversations = [], contactConversationsStatus = 'idle', contactConversationsError = null, inboxes = [], onOpenConversation, attachments = [], attachmentStatus = 'idle', attachmentError = null, hasMoreAttachments = false, onLoadMoreAttachments, onRetryAttachments, messages = [], onOpenImage }: Props) => {
   const [tab, setTab] = useState<'contact' | 'attributes' | 'content'>(initialTab);
   const [draft, setDraft] = useState({ name: '', email: '', phoneNumber: '', identifier: '', companyName: '' });
   const [additionalText, setAdditionalText] = useState('{}');
@@ -122,10 +123,14 @@ export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, i
   };
 
   return <div className={`fixed inset-0 z-[80] flex h-full w-full flex-col ${surface} md:relative md:z-30 md:w-[380px] md:max-w-[90vw] md:shrink-0 md:border-l`}>
-    <div className={`h-14 px-3 flex items-center justify-between border-b shrink-0 ${isDarkMode ? 'bg-[#151717] border-[#1e1f1f]' : 'bg-[#f0f2f5] border-[#d1d7db]'}`}>
-      <div className="flex items-center gap-2"><button type="button" onClick={onClose} title="Fechar painel" className="p-1.5 rounded-full hover:bg-white/10"><X className="w-5 h-5 text-[#8696a0]" /></button><span className="font-bold text-sm">Dados do contato</span></div>
+    <div className={`h-14 px-3 flex items-center justify-between gap-2 border-b shrink-0 ${isDarkMode ? 'bg-[#151717] border-[#1e1f1f]' : 'bg-[#f0f2f5] border-[#d1d7db]'}`}>
+      <div className="flex min-w-0 items-center gap-2"><button type="button" onClick={onClose} title="Fechar painel" className="shrink-0 p-1.5 rounded-full hover:bg-white/10"><X className="w-5 h-5 text-[#8696a0]" /></button><span className="truncate font-bold text-sm">{panelTitle}</span></div>
+      <div className={`flex shrink-0 items-center gap-1 rounded-lg border p-0.5 ${isDarkMode ? 'bg-[#202c33] border-[#2a3942]' : 'bg-gray-200 border-gray-300'}`}>
+        <button type="button" onClick={() => selectTab('contact')} className={`px-2 py-1 rounded-md text-[11px] font-semibold ${tab === 'contact' ? 'bg-[#00a884] text-white' : 'text-[#8696a0]'}`}>Dados</button>
+        <button type="button" onClick={() => selectTab('attributes')} className={`px-2 py-1 rounded-md text-[11px] font-semibold ${tab === 'attributes' ? 'bg-[#00a884] text-white' : 'text-[#8696a0]'}`}>Atributos</button>
+        <button type="button" onClick={() => selectTab('content')} className={`px-2 py-1 rounded-md text-[11px] font-semibold ${tab === 'content' ? 'bg-[#00a884] text-white' : 'text-[#8696a0]'}`}>Conteúdo</button>
+      </div>
     </div>
-    <div className="p-3 flex gap-1 border-b border-white/10"><button type="button" onClick={() => selectTab('contact')} className={`px-3 py-1 rounded-md text-xs font-semibold ${tab === 'contact' ? 'bg-[#00a884] text-white' : 'text-[#8696a0]'}`}>Dados</button><button type="button" onClick={() => selectTab('attributes')} className={`px-3 py-1 rounded-md text-xs font-semibold ${tab === 'attributes' ? 'bg-[#00a884] text-white' : 'text-[#8696a0]'}`}>Atributos</button><button type="button" onClick={() => selectTab('content')} className={`px-3 py-1 rounded-md text-xs font-semibold ${tab === 'content' ? 'bg-[#00a884] text-white' : 'text-[#8696a0]'}`}>Conteúdo</button></div>
     <div className="flex-1 overflow-y-auto p-4 space-y-4">
       {status === 'loading' && <div className="py-12 text-center text-sm text-[#8696a0]"><Loader2 className="inline w-4 h-4 animate-spin mr-2" />Carregando contato…</div>}
       {status === 'error' && <div className="py-12 text-center text-sm text-red-300">{error}<button type="button" onClick={onRetry} className="block mx-auto mt-3 text-[#00a884] font-semibold"><RefreshCw className="inline w-3.5 h-3.5 mr-1" />Tentar novamente</button></div>}

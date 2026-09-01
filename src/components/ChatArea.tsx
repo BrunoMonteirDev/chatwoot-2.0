@@ -2650,6 +2650,7 @@ export const ChatArea: React.FC<Props> = ({
           initialTab={contactPanelTab}
           onTabChange={setContactPanelTab}
           isDarkMode={isDarkMode}
+          panelTitle={chat.isGroup || conversation?.isGroup || contact?.additionalAttributes.whatsapp_chat_type === 'group' || chat.messages.some((message) => message.whatsappRemoteJid?.endsWith('@g.us')) ? 'Dados do grupo' : 'Dados do contato'}
           conversation={conversation}
           conversationLabels={managementCatalogs?.labels}
           conversationAgents={managementCatalogs?.agents}
