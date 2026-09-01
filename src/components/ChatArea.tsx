@@ -70,7 +70,7 @@ import { shouldSendMessageOnEnter, type SendMessageShortcut } from '../features/
 import { useContactConversations } from '../features/contacts/useContactConversations';
 import { useConversationAttachments } from '../features/attachments/useConversationAttachments';
 import { groupMetadataClient } from '../features/groups/metadata';
-import { participantColor } from '../features/groups/participant';
+import { participantColor, participantLabel, participantPhone } from '../features/groups/participant';
 
 
 // Helper to format WhatsApp Markdown, URLs, Mentions, Bold (*), Italic (_), Strikethrough (~), Code (`)
@@ -778,15 +778,15 @@ export const ChatArea: React.FC<Props> = ({
   }, []);
   const [replyTo, setReplyTo] = useState<ReplyTo | null>(null);
   const conversationInbox = conversation ? inboxes.find((inbox) => inbox.id === conversation.inboxId) : undefined;
-  const [groupParticipantAvatars, setGroupParticipantAvatars] = useState<Record<string, string>>({});
+  const [groupParticipants, setGroupParticipants] = useState<Record<string, { jid: string; name?: string; phoneNumber?: string; avatarUrl?: string }>>({});
   useEffect(() => {
     const isGroup = chat.isGroup || conversation?.isGroup || chat.messages.some(message => message.whatsappRemoteJid?.endsWith('@g.us'));
     const transport = chat.messages.slice().reverse().find(message => message.whatsappTransport && message.whatsappTransport !== 'meta_cloud')?.whatsappTransport;
-    if (!isGroup || !conversation || !transport) { setGroupParticipantAvatars({}); return; }
+    if (!isGroup || !conversation || !transport) { setGroupParticipants({}); return; }
     let active = true;
     void groupMetadataClient.get(conversation.inboxId, conversation.id, transport).then(({ group }) => {
-      if (active) setGroupParticipantAvatars(Object.fromEntries(group.participants.flatMap(participant => participant.avatarUrl ? [[participant.jid, participant.avatarUrl]] : [])));
-    }).catch(() => { if (active) setGroupParticipantAvatars({}); });
+      if (active) setGroupParticipants(Object.fromEntries(group.participants.map(participant => [participant.jid, participant])));
+    }).catch(() => { if (active) setGroupParticipants({}); });
     return () => { active = false; };
   }, [chat.id, chat.isGroup, conversation?.id, conversation?.inboxId]);
   const externalSendBlocked = !canSendWhatsAppMessage(whatsappConnection, messageMode === 'privada');
@@ -1812,7 +1812,13 @@ export const ChatArea: React.FC<Props> = ({
           const isMe = msg.sender === 'me';
           const prevMsg = chat.messages[index - 1];
           const isGroupMessage = Boolean(chat.isGroup || conversation?.isGroup || msg.whatsappRemoteJid?.endsWith('@g.us'));
-          const participantAvatar = msg.senderIdentity ? groupParticipantAvatars[msg.senderIdentity] : undefined;
+          const groupParticipant = msg.senderIdentity ? groupParticipants[msg.senderIdentity] : undefined;
+          const participantAvatar = groupParticipant?.avatarUrl;
+          const unresolvedIdentity = msg.senderName === msg.senderIdentity || msg.senderName?.endsWith('@lid') || msg.senderName?.startsWith('+');
+          const senderName = groupParticipant
+            ? participantLabel(unresolvedIdentity ? groupParticipant.name : msg.senderName, groupParticipant.jid, groupParticipant.phoneNumber)
+            : msg.senderName;
+          const senderPhone = msg.senderPhone || (groupParticipant ? participantPhone(groupParticipant.jid, groupParticipant.phoneNumber) : undefined);
           const showDatePill =
             msg.dateLabel && (!prevMsg || prevMsg.dateLabel !== msg.dateLabel);
 
@@ -1845,8 +1851,8 @@ export const ChatArea: React.FC<Props> = ({
                 }`}
               >
                 <div className={`flex w-full items-end gap-1.5 ${isMe ? 'justify-end' : 'justify-start'}`}>
-                {!isMe && isGroupMessage && msg.senderName && <div className="mb-0.5 grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-full text-[9px] font-bold text-white" style={{ backgroundColor: msg.senderColor || participantColor(msg.senderIdentity || msg.senderName) }}>
-                  {participantAvatar ? <img src={participantAvatar} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : msg.senderName.split('·')[0].trim().split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toUpperCase()}
+                {!isMe && isGroupMessage && senderName && <div className="mb-0.5 grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-full text-[9px] font-bold text-white" style={{ backgroundColor: msg.senderColor || participantColor(msg.senderIdentity || senderName) }}>
+                  {participantAvatar ? <img src={participantAvatar} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : senderName.split('·')[0].trim().split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toUpperCase()}
                 </div>}
                 <div
                   onContextMenu={(e) => handleMessageContextMenu(e, msg)}
@@ -1879,14 +1885,14 @@ export const ChatArea: React.FC<Props> = ({
                   {msg.isForwarded && <div className="mb-1 flex items-center gap-1 text-[11px] text-[#8696a0]"><CornerUpRight className="h-3.5 w-3.5" />Encaminhada</div>}
 
                   {/* Sender Name in Group Chat (only if not an audio note card, which has its own header) */}
-                  {!isMe && msg.senderName && !(msg.audioAuthor || msg.attachments?.some((a) => a.type === 'audio')) && (
+                  {!isMe && senderName && !(msg.audioAuthor || msg.attachments?.some((a) => a.type === 'audio')) && (
                     <div
                       className={`text-xs font-semibold mb-1 ${
                         msg.senderColor ? '' : isDarkMode ? 'text-[#00a884]' : 'text-[#008069]'
                       }`}
                       style={msg.senderColor ? { color: msg.senderColor } : undefined}
                     >
-                      {msg.senderName}
+                      {senderName}
                     </div>
                   )}
 
@@ -1899,10 +1905,10 @@ export const ChatArea: React.FC<Props> = ({
                   {/* Audio Note Card */}
                   {(msg.audioAuthor || msg.attachments?.some((a) => a.type === 'audio')) && (
                     <AudioNoteCard
-                      audioAuthor={msg.audioAuthor || (msg.sender === 'them' ? msg.senderName : undefined)}
-                      audioPhone={msg.audioPhone || (msg.sender === 'them' ? '+55 44 9937-6314' : undefined)}
+                      audioAuthor={msg.audioAuthor || (msg.sender === 'them' ? senderName : undefined)}
+                      audioPhone={msg.audioPhone || (msg.sender === 'them' ? senderPhone : undefined)}
                       audioDuration={msg.audioDuration}
-                      audioAvatar={msg.audioAvatar || (msg.sender === 'them' ? chat.avatar : undefined)}
+                      audioAvatar={msg.audioAvatar || (msg.sender === 'them' ? participantAvatar || msg.senderAvatarUrl : undefined)}
                       audioUrl={msg.attachments?.find((attachment) => attachment.type === 'audio')?.url}
                       isDarkMode={isDarkMode}
                       isMe={isMe}
