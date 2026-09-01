@@ -227,8 +227,8 @@ export const ContactAttributesPanel: React.FC<Props> = ({
 
   return (
     <div
-      style={{ width: `${panelWidth}px` }}
-      className={`h-full border-l flex flex-col z-30 shrink-0 select-none relative transition-all duration-75 ${
+      style={{ '--panel-width': `${panelWidth}px` } as React.CSSProperties}
+      className={`fixed inset-0 z-[80] flex h-[100dvh] w-screen flex-col overflow-hidden overscroll-contain border-l select-none transition-all duration-75 md:relative md:z-30 md:h-full md:w-[var(--panel-width)] md:shrink-0 ${
         isDarkMode
           ? 'bg-[#111b21] border-[#222d34] text-[#e9edef]'
           : 'bg-white border-[#d1d7db] text-[#111b21]'
@@ -238,7 +238,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
       <div
         onMouseDown={handleMouseDown}
         title="Arrastar para redimensionar painel"
-        className={`absolute -left-1.5 top-0 bottom-0 w-3 cursor-col-resize z-50 flex items-center justify-center group transition-colors ${
+        className={`absolute -left-1.5 top-0 bottom-0 z-50 hidden w-3 cursor-col-resize items-center justify-center group transition-colors md:flex ${
           isResizing ? 'bg-[#00a884]' : 'hover:bg-[#00a884]/40'
         }`}
       >

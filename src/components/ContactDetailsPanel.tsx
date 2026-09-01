@@ -124,7 +124,7 @@ export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, i
     } catch { setFeedback('Não foi possível adicionar a nota.'); }
   };
 
-  return <div className={`fixed inset-0 z-[80] flex h-full w-full flex-col ${surface} md:relative md:z-30 md:w-[380px] md:max-w-[90vw] md:shrink-0 md:border-l`}>
+  return <div className={`fixed inset-0 z-[80] flex h-[100dvh] w-screen flex-col overflow-hidden overscroll-contain ${surface} md:relative md:z-30 md:h-full md:w-[380px] md:max-w-[90vw] md:shrink-0 md:border-l`}>
     <div className={`h-14 px-3 flex items-center justify-between gap-2 border-b shrink-0 ${isDarkMode ? 'bg-[#151717] border-[#1e1f1f]' : 'bg-[#f0f2f5] border-[#d1d7db]'}`}>
       <div className="flex min-w-0 items-center gap-2"><button type="button" onClick={onClose} title="Fechar painel" className="shrink-0 p-1.5 rounded-full hover:bg-white/10"><X className="w-5 h-5 text-[#8696a0]" /></button><span className="truncate font-bold text-sm">{panelTitle}</span></div>
       <div className={`flex shrink-0 items-center gap-1 rounded-lg border p-0.5 ${isDarkMode ? 'bg-[#202c33] border-[#2a3942]' : 'bg-gray-200 border-gray-300'}`}>
