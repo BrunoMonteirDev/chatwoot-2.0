@@ -361,6 +361,18 @@ export const chatwootBridge = {
     if (!phoneNumber || !/^\d{8,15}$/.test(phoneNumber)) throw new Error('A conversa não possui um contato individual WhatsApp válido.');
     return phoneNumber;
   },
+  async conversationGroupTarget(conversationId: number, inboxId: number) {
+    const conversation = await request<ConversationTarget>(`/api/v1/accounts/${currentAccountId()}/conversations/${conversationId}`, {}, true);
+    if (conversation.inbox_id !== inboxId) throw new Error('A conversa não pertence à inbox informada.');
+    const sourceId = conversation.contact_inbox?.source_id;
+    const encoded = typeof sourceId === 'string' && sourceId.match(/^whatsapp:group:(.+)$/)?.[1];
+    if (!encoded) throw new Error('A conversa não é um grupo WhatsApp válido.');
+    try {
+      const groupJid = decodeURIComponent(encoded);
+      if (!groupJid.endsWith('@g.us')) throw new Error('invalid group');
+      return groupJid;
+    } catch { throw new Error('A conversa não é um grupo WhatsApp válido.'); }
+  },
   createSentMetaTemplateMessage: (conversationId: number, messageId: string, template: { name: string; language: string }) => request(`/api/v1/accounts/${currentAccountId()}/conversations/${conversationId}/messages`, {
     method: 'POST', body: JSON.stringify({
       content: `Template: ${template.name}`, idempotent: true,

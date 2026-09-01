@@ -42,4 +42,9 @@ describe('bridge provider routing', () => {
     expect(resolveTransportRoute({ configuration: transportConfigurationForInbox({ whatsapp_transports: ['meta_cloud'] })!, operation: 'group_message', chatType: 'group' })).toEqual({ transport: null, reason: 'transport_unavailable' });
     expect(resolveTransportRoute({ configuration, operation: 'edit', target: { sourceId: 'meta:wamid.1' } })).toEqual({ transport: null, reason: 'unsupported_operation' });
   });
+
+  it('não deixa Meta assumir grupos numa inbox híbrida sem transporte explícito', () => {
+    const configuration = transportConfigurationForInbox({ whatsapp_transports: ['meta_cloud', 'waha'] })!;
+    expect(resolveTransportRoute({ configuration, operation: 'group_message', chatType: 'group' })).toEqual({ transport: 'waha' });
+  });
 });

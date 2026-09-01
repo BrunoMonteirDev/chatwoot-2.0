@@ -1862,8 +1862,9 @@ export const ChatArea: React.FC<Props> = ({
                   {!isMe && msg.senderName && !(msg.audioAuthor || msg.attachments?.some((a) => a.type === 'audio')) && (
                     <div
                       className={`text-xs font-semibold mb-1 ${
-                        isDarkMode ? 'text-[#00a884]' : 'text-[#008069]'
+                        msg.senderColor ? '' : isDarkMode ? 'text-[#00a884]' : 'text-[#008069]'
                       }`}
+                      style={msg.senderColor ? { color: msg.senderColor } : undefined}
                     >
                       {msg.senderName}
                     </div>
@@ -2660,6 +2661,9 @@ export const ChatArea: React.FC<Props> = ({
           isDarkMode={isDarkMode}
           onClose={() => setIsContactPanelOpen(false)}
           activeTab={contactPanelTab}
+          conversationId={conversation?.id}
+          inboxId={conversation?.inboxId}
+          groupTransport={chat.messages.slice().reverse().find(message => message.whatsappTransport && message.whatsappTransport !== 'meta_cloud')?.whatsappTransport || null}
         />
       )}
 

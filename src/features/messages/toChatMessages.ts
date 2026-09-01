@@ -1,5 +1,6 @@
 import type { ConversationMessage } from '../../domain/currentUser';
 import type { Attachment, Message, MessageReaction } from '../../types';
+import { participantColor, participantIdentity, participantLabel, participantPhone } from '../groups/participant';
 
 const dateLabel = (timestamp: number) => new Date(timestamp * 1000).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 const formatSize = (size: number | null) => size ? `${(size / 1024 / 1024).toFixed(size >= 1024 * 1024 ? 1 : 2)} MB` : undefined;
@@ -14,15 +15,19 @@ const toAttachment = (attachment: ConversationMessage['attachments'][number]): A
   size: formatSize(attachment.size),
 });
 
-export const toChatMessages = (items: ConversationMessage[]): Message[] => items.map((message) => ({
+export const toChatMessages = (items: ConversationMessage[]): Message[] => items.map((message) => {
+  const jid = typeof message.contentAttributes.whatsapp_participant_jid === 'string' ? message.contentAttributes.whatsapp_participant_jid : null;
+  const phone = typeof message.contentAttributes.whatsapp_participant_phone === 'string' ? message.contentAttributes.whatsapp_participant_phone : null;
+  const name = typeof message.contentAttributes.whatsapp_participant_name === 'string' ? message.contentAttributes.whatsapp_participant_name : message.senderName || undefined;
+  const identity = participantIdentity(jid, phone);
+  return ({
   id: String(message.id),
   sender: message.kind === 'outgoing' || message.kind === 'private_note' ? 'me' : 'them',
   // Chatwoot correctly identifies the group as the conversation contact. The
   // real author of an incoming group message is carried separately by the
   // bridge so a group does not look like a direct conversation with itself.
-  senderName: typeof message.contentAttributes.whatsapp_participant_name === 'string'
-    ? message.contentAttributes.whatsapp_participant_name
-    : message.senderName || undefined,
+  senderName: jid || phone ? participantLabel(name, jid, phone) : name,
+  ...(jid || phone ? { senderPhone: participantPhone(jid, phone), senderIdentity: identity, senderColor: participantColor(identity) } : {}),
   senderEmail: message.senderEmail || undefined,
   senderAvatarUrl: message.senderAvatarUrl || undefined,
   origin: message.origin || undefined,
@@ -49,7 +54,8 @@ export const toChatMessages = (items: ConversationMessage[]): Message[] => items
   isDeleted: message.contentAttributes.deleted === true,
   isTemplate: message.kind === 'template',
   whatsappPreviousContent: typeof message.contentAttributes.whatsapp_previous_content === 'string' ? message.contentAttributes.whatsapp_previous_content : null,
-}));
+  });
+});
 
 const reactionsForMessage = (message: ConversationMessage): MessageReaction[] => {
   const value = message.contentAttributes.whatsapp_reactions;

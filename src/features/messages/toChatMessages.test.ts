@@ -31,4 +31,18 @@ describe('toChatMessages reactions', () => {
     const item = baseMessage({ content: 'Texto corrigido', contentAttributes: { whatsapp_edited: true, whatsapp_previous_content: 'Texto original' } });
     expect(toChatMessages([item])[0]).toMatchObject({ isEdited: true, whatsappPreviousContent: 'Texto original' });
   });
+
+  it('identifica participante de grupo por JID, mantém cor estável e mostra nome e número', () => {
+    const item = baseMessage({ contentAttributes: { whatsapp_participant_jid: '5511999999999@s.whatsapp.net', whatsapp_participant_name: 'Ana' } });
+    const [first] = toChatMessages([item]); const [second] = toChatMessages([item]);
+    expect(first.senderName).toBe('Ana · +5511999999999');
+    expect(first.senderColor).toBe(second.senderColor);
+    expect(first.senderIdentity).toBe('5511999999999@s.whatsapp.net');
+  });
+
+  it('trata LID sem número resolvido sem inventar telefone', () => {
+    const [item] = toChatMessages([baseMessage({ contentAttributes: { whatsapp_participant_jid: '12345@lid', whatsapp_participant_name: 'Ana' } })]);
+    expect(item.senderName).toBe('Ana · Número não disponível');
+    expect(item.senderIdentity).toBe('12345@lid');
+  });
 });

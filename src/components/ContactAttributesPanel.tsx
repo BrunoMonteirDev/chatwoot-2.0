@@ -41,6 +41,9 @@ import {
   Minus,
 } from 'lucide-react';
 import { Chat } from '../types';
+import { groupMetadataClient, type GroupMetadata } from '../features/groups/metadata';
+import { participantColor, participantPhone } from '../features/groups/participant';
+import type { WhatsAppTransport } from '../integrations/whatsapp/provider';
 
 interface GroupMember {
   id: string;
@@ -61,6 +64,9 @@ interface Props {
   isDarkMode: boolean;
   onClose: () => void;
   activeTab?: 'contact' | 'attributes';
+  conversationId?: number;
+  inboxId?: number;
+  groupTransport?: WhatsAppTransport | null;
 }
 
 export const ContactAttributesPanel: React.FC<Props> = ({
@@ -70,6 +76,9 @@ export const ContactAttributesPanel: React.FC<Props> = ({
   isDarkMode,
   onClose,
   activeTab = 'contact',
+  conversationId,
+  inboxId,
+  groupTransport,
 }) => {
   const [currentTab, setCurrentTab] = useState<'contact' | 'attributes'>(activeTab);
 
@@ -147,6 +156,30 @@ export const ContactAttributesPanel: React.FC<Props> = ({
       avatarBg: '#8b5cf6',
     },
   ]);
+  const [groupMetadata, setGroupMetadata] = useState<GroupMetadata | null>(null);
+  const [groupError, setGroupError] = useState<string | null>(null);
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [descriptionDraft, setDescriptionDraft] = useState('');
+  const [savingDescription, setSavingDescription] = useState(false);
+
+  useEffect(() => {
+    if (!chat.isGroup || !conversationId || !inboxId) return;
+    let active = true;
+    void groupMetadataClient.get(inboxId, conversationId, groupTransport).then(({ group }) => {
+      if (!active) return;
+      setGroupMetadata(group); setDescriptionDraft(group.description || '');
+      setGroupMembers(group.participants.map(member => ({ id: member.jid, name: member.name || (member.jid.endsWith('@lid') ? 'Participante' : 'Sem nome'), phone: participantPhone(member.jid, member.phoneNumber), isAdmin: Boolean(member.admin), status: member.admin ? 'Administrador' : undefined, avatarBg: participantColor(member.jid) })));
+    }).catch(error => { if (active) setGroupError(error instanceof Error ? error.message : 'Não foi possível carregar o grupo.'); });
+    return () => { active = false; };
+  }, [chat.isGroup, conversationId, inboxId, groupTransport]);
+
+  const saveDescription = async () => {
+    if (!conversationId || !inboxId || !groupMetadata?.transport) return;
+    setSavingDescription(true); setGroupError(null);
+    try { const { group } = await groupMetadataClient.updateDescription(inboxId, conversationId, groupMetadata.transport, descriptionDraft); setGroupMetadata(group); setDescriptionDraft(group.description || descriptionDraft); setEditingDescription(false); }
+    catch (error) { setGroupError(error instanceof Error ? error.message : 'Não foi possível editar a descrição.'); }
+    finally { setSavingDescription(false); }
+  };
 
   useEffect(() => {
     localStorage.setItem('wa_contact_panel_width', String(panelWidth));
@@ -612,6 +645,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
                 <p className="text-xs text-[#8696a0] mt-1 font-medium">
                   Grupo · <span className="text-[#00a884] font-semibold">{groupMembers.length} membros</span>
                 </p>
+                {groupError && <p className="mt-2 text-xs text-red-400">{groupError}</p>}
               </div>
 
               {/* Action Buttons below group name: Adicionar, Pesquisar */}
@@ -638,6 +672,11 @@ export const ContactAttributesPanel: React.FC<Props> = ({
                   <span className="text-[11px]">Pesquisar</span>
                 </button>
               </div>
+            </div>
+
+            <div className="border-b border-black/5 p-4 dark:border-white/5">
+              <div className="mb-2 flex items-center justify-between"><span className="text-xs font-bold text-[#8696a0]">Descrição</span>{groupMetadata?.canEditDescription && !editingDescription && <button type="button" onClick={() => setEditingDescription(true)} className="text-xs font-semibold text-[#00a884]">Editar descrição</button>}</div>
+              {editingDescription ? <><textarea value={descriptionDraft} onChange={event => setDescriptionDraft(event.target.value)} className={`min-h-20 w-full rounded-lg border p-2 text-xs ${isDarkMode ? 'border-[#2a3942] bg-[#202c33]' : 'border-[#d1d7db] bg-white'}`} /><div className="mt-2 flex justify-end gap-2"><button type="button" onClick={() => setEditingDescription(false)} className="text-xs">Cancelar</button><button type="button" disabled={savingDescription} onClick={() => void saveDescription()} className="text-xs font-semibold text-[#00a884]">{savingDescription ? 'Salvando…' : 'Salvar'}</button></div></> : <p className="whitespace-pre-wrap text-xs text-[#8696a0]">{groupMetadata?.description || 'Sem descrição.'}</p>}
             </div>
 
             {/* 2. Media, links e docs Preview */}

@@ -16,6 +16,7 @@ export interface SentWahaMessage { messageId: string; chatId: string; fromMe: bo
 export interface DownloadedWahaMedia { buffer: Buffer; contentType: string; fileName: string; }
 export interface WahaHistoryQuery { limit: number; offset: number; timestampGte?: number; timestampLte?: number; }
 export interface WahaChatProfile { id: string; name?: string; }
+export interface WhatsAppGroupMetadata { id: string; subject?: string; description?: string; participants: Array<{ jid: string; name?: string; phoneNumber?: string; admin?: string | null }>; }
 
 export class WahaApiError extends Error {
   constructor(readonly kind: 'not_configured' | 'timeout' | 'network' | 'invalid_response' | 'api', readonly status?: number, details?: string) {
@@ -96,6 +97,17 @@ const binaryRequest = async (path: string): Promise<{ contentType: string; buffe
 
 const namePath = (name: string) => encodeURIComponent(name);
 const phoneFromJid = (value: unknown) => typeof value === 'string' ? value.match(/^(\d{8,15})@(c\.us|s\.whatsapp\.net)$/)?.[1] : undefined;
+const groupMetadata = (payload: unknown, fallbackId: string): WhatsAppGroupMetadata => {
+  const root = record(payload); const group = record(root?.group) || root || {};
+  const rawParticipants = Array.isArray(group.participants) ? group.participants : Array.isArray(group.Participants) ? group.Participants : [];
+  const participants = rawParticipants.flatMap((item): WhatsAppGroupMetadata['participants'] => {
+    const member = record(item); const jid = typeof member?.id === 'string' ? member.id : typeof member?.jid === 'string' ? member.jid : typeof member?.JID === 'string' ? member.JID : '';
+    if (!jid) return [];
+    const phoneNumber = phoneFromJid(jid) || (typeof member.phoneNumber === 'string' ? member.phoneNumber.replace(/\D/g, '') : typeof member.PhoneNumber === 'string' ? member.PhoneNumber.replace(/\D/g, '') : undefined);
+    return [{ jid, ...(typeof member.name === 'string' ? { name: member.name } : typeof member.pushName === 'string' ? { name: member.pushName } : typeof member.DisplayName === 'string' ? { name: member.DisplayName } : {}), ...(phoneNumber ? { phoneNumber } : {}), ...(typeof member.admin === 'string' ? { admin: member.admin } : member.admin === null ? { admin: null } : member.isAdmin === true || member.IsAdmin === true || member.IsSuperAdmin === true ? { admin: 'admin' } : {}) }];
+  });
+  return { id: typeof group.id === 'string' ? group.id : typeof group.JID === 'string' ? group.JID : fallbackId, ...(typeof group.subject === 'string' ? { subject: group.subject } : typeof group.name === 'string' ? { subject: group.name } : typeof group.Name === 'string' ? { subject: group.Name } : {}), ...(typeof group.description === 'string' ? { description: group.description } : typeof group.Topic === 'string' ? { description: group.Topic } : {}), participants };
+};
 export const normalizeWahaChatId = (value: string) => {
   if (value.endsWith('@g.us') || value.endsWith('@lid') || value.endsWith('@newsletter') || value === 'status@broadcast') return value;
   const digits = value.replace(/@s\.whatsapp\.net$|@c\.us$/i, '').replace(/\D/g, '');
@@ -172,6 +184,12 @@ export const wahaTransport = {
   async resolveLid(session: string, lid: string) {
     const payload = record(await request(`/api/${namePath(session)}/lids/${encodeURIComponent(lid.replace(/@lid$/i, ''))}`));
     return phoneFromJid(payload?.pn);
+  },
+  async getGroupMetadata(session: string, groupId: string) {
+    return groupMetadata(await request(`/api/${namePath(session)}/groups/${encodeURIComponent(groupId)}`), groupId);
+  },
+  async updateGroupDescription(session: string, groupId: string, description: string) {
+    return groupMetadata(await request(`/api/${namePath(session)}/groups/${encodeURIComponent(groupId)}`, { method: 'PUT', body: JSON.stringify({ description }) }), groupId);
   },
   async sendText(session: string, chatId: string, text: string, replyTo?: string) {
     return sent(await request('/api/sendText', { method: 'POST', body: JSON.stringify({ session, chatId: normalizeWahaChatId(chatId), text, ...(replyTo ? { reply_to: replyTo } : {}) }) }));

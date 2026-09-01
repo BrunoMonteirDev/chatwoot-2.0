@@ -26,6 +26,7 @@ import { normalizeWahaMessageId, parseIncomingWahaGroupLifecycle, parseIncomingW
 import { createTrackId } from './track.js';
 import { WahaHistoryStore, type WahaHistoryJob, type WahaHistoryRange } from './wahaHistoryStore.js';
 import { connectionStatusPatch, evolutionConnectionStatus, metaConnectionStatus, type ConnectionStatus } from './connectionStatus.js';
+import { groupMetadataCache, type GroupMetadata } from './groupMetadata.js';
 
 const app = express();
 const templateHeaderUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: config.maxMediaBytes, files: 1 } });
@@ -99,6 +100,61 @@ const requireBridgeUser = async (request: express.Request, response: express.Res
   response.status(401).json({ error: 'Unauthorized' });
   return false;
 };
+const groupTransport = (configuration: { transports: Array<'evolution' | 'waha' | 'meta_cloud'> }, requested: unknown) => {
+  if (requested === 'evolution' || requested === 'waha' || requested === 'meta_cloud') return configuration.transports.includes(requested) ? requested : null;
+  // A hybrid inbox must state the transport that owns this group. The browser
+  // gets it from the conversation's latest group message; never assume Meta.
+  return configuration.transports.length === 1 ? configuration.transports[0] : null;
+};
+const loadGroupMetadata = async (transport: 'evolution' | 'waha', configuration: { evolutionInstanceName: string | null; wahaSessionName: string | null }, groupJid: string): Promise<GroupMetadata> => {
+  if (transport === 'waha') {
+    if (!configuration.wahaSessionName) throw new Error('A sessão WAHA desta inbox não está configurada.');
+    return { ...(await wahaTransport.getGroupMetadata(configuration.wahaSessionName, groupJid)), transport, canEditDescription: true };
+  }
+  if (!configuration.evolutionInstanceName) throw new Error('A instância Evolution desta inbox não está configurada.');
+  return { ...(await evolutionBridge.getGroupMetadata(configuration.evolutionInstanceName, groupJid)), transport, canEditDescription: true };
+};
+
+app.get('/groups/metadata', async (request, response) => {
+  if (!(await requireBridgeUser(request, response))) return;
+  const inboxId = Number(request.query.inboxId); const conversationId = Number(request.query.conversationId);
+  if (!Number.isInteger(inboxId) || !Number.isInteger(conversationId)) return response.status(400).json({ error: 'Inbox e conversa são obrigatórias.' });
+  try {
+    const inbox = await chatwootBridge.findWhatsAppInboxById(inboxId);
+    const groupJid = await chatwootBridge.conversationGroupTarget(conversationId, inboxId);
+    const transport = groupTransport(inbox.configuration, request.query.transport);
+    if (!transport) return response.status(409).json({ error: 'Não foi possível determinar o transporte deste grupo.', category: 'transport_unavailable' });
+    if (transport === 'meta_cloud') return response.status(422).json({ error: 'Metadados de grupos não estão disponíveis na Meta Cloud.', category: 'unsupported_operation' });
+    const cached = groupMetadataCache.get(transport, groupJid);
+    const metadata = cached || groupMetadataCache.set(await loadGroupMetadata(transport, inbox.configuration, groupJid));
+    return response.json({ group: metadata, cached: Boolean(cached) });
+  } catch (error) { return response.status(502).json({ error: error instanceof Error ? error.message : 'Não foi possível carregar o grupo.' }); }
+});
+
+app.patch('/groups/description', async (request, response) => {
+  if (!(await requireBridgeUser(request, response))) return;
+  const body = request.body as { inboxId?: unknown; conversationId?: unknown; transport?: unknown; description?: unknown };
+  if (!Number.isInteger(body.inboxId) || !Number.isInteger(body.conversationId) || typeof body.description !== 'string') return response.status(400).json({ error: 'Descrição de grupo inválida.' });
+  try {
+    const inbox = await chatwootBridge.findWhatsAppInboxById(body.inboxId as number);
+    const groupJid = await chatwootBridge.conversationGroupTarget(body.conversationId as number, body.inboxId as number);
+    const transport = groupTransport(inbox.configuration, body.transport);
+    if (!transport) return response.status(409).json({ error: 'Não foi possível determinar o transporte deste grupo.', category: 'transport_unavailable' });
+    if (transport === 'meta_cloud') return response.status(422).json({ error: 'A Meta Cloud não permite editar descrição de grupos.', category: 'unsupported_operation' });
+    let group: GroupMetadata;
+    if (transport === 'waha') {
+      if (!inbox.configuration.wahaSessionName) throw new Error('A sessão WAHA desta inbox não está configurada.');
+      group = { ...(await wahaTransport.updateGroupDescription(inbox.configuration.wahaSessionName, groupJid, body.description)), transport, canEditDescription: true };
+    } else {
+      if (!inbox.configuration.evolutionInstanceName) throw new Error('A instância Evolution desta inbox não está configurada.');
+      group = { ...(await evolutionBridge.updateGroupDescription(inbox.configuration.evolutionInstanceName, groupJid, body.description)), transport, canEditDescription: true };
+    }
+    return response.json({ group: groupMetadataCache.set({ ...group, description: group.description ?? body.description }) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Não foi possível editar a descrição do grupo.';
+    return response.status(/\b(401|403)\b|admin|permission|not authorized/i.test(message) ? 403 : 502).json({ error: message });
+  }
+});
 const saveConnectionStatus = (accountId: number, inboxId: number, transport: 'evolution' | 'waha' | 'meta_cloud', status: ConnectionStatus) =>
   chatwootBridge.withAccount(accountId, () => chatwootBridge.updateInboxAdditionalAttributes(inboxId, connectionStatusPatch(transport, status)));
 

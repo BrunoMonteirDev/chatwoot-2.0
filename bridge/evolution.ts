@@ -51,6 +51,7 @@ export interface SentEvolutionMessage {
   remoteJid: string;
   fromMe: boolean;
 }
+export interface EvolutionGroupMetadata { id: string; subject?: string; description?: string; participants: Array<{ jid: string; name?: string; phoneNumber?: string; admin?: string | null }>; }
 
 // Evolution v2.3 validates one Unicode code point, whereas WhatsApp's red
 // heart from the browser is normally `U+2764 U+FE0F`. Strip presentation and
@@ -128,7 +129,26 @@ const managementResponse = async (path: string, init: RequestInit = {}) => {
   return response.json().catch(() => ({}));
 };
 
+const evolutionGroupMetadata = (payload: unknown, groupJid: string): EvolutionGroupMetadata => {
+  const root = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+  const group = root.group && typeof root.group === 'object' ? root.group as Record<string, unknown> : root;
+  const participants = Array.isArray(group.participants) ? group.participants.flatMap((value): EvolutionGroupMetadata['participants'] => {
+    const item = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+    const jid = typeof item.id === 'string' ? item.id : typeof item.jid === 'string' ? item.jid : '';
+    if (!jid) return [];
+    const phoneNumber = jid.match(/^(\d{8,15})@/)?.[1];
+    return [{ jid, ...(typeof item.name === 'string' ? { name: item.name } : typeof item.pushName === 'string' ? { name: item.pushName } : {}), ...(phoneNumber ? { phoneNumber } : {}), ...(typeof item.admin === 'string' ? { admin: item.admin } : item.admin === null ? { admin: null } : item.admin === true ? { admin: 'admin' } : {}) }];
+  }) : [];
+  return { id: typeof group.id === 'string' ? group.id : groupJid, ...(typeof group.subject === 'string' ? { subject: group.subject } : {}), ...(typeof group.desc === 'string' ? { description: group.desc } : typeof group.description === 'string' ? { description: group.description } : {}), participants };
+};
+
 export const evolutionBridge = {
+  async getGroupMetadata(instance: string, groupJid: string) {
+    return evolutionGroupMetadata(await managementResponse(`/group/findGroupInfos/${encodeURIComponent(instance)}`, { method: 'POST', body: JSON.stringify({ groupJid }) }), groupJid);
+  },
+  async updateGroupDescription(instance: string, groupJid: string, description: string) {
+    return evolutionGroupMetadata(await managementResponse(`/group/updateGroupDescription/${encodeURIComponent(instance)}`, { method: 'POST', body: JSON.stringify({ groupJid, description }) }), groupJid);
+  },
   async createInstance(instanceName: string) {
     try {
       return await managementResponse('/instance/create', { method: 'POST', body: JSON.stringify({ instanceName, integration: 'WHATSAPP-BAILEYS', qrcode: true }) });

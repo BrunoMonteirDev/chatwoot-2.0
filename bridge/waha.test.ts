@@ -57,6 +57,21 @@ describe('WAHA session transport', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('http://waha.test/api/empresa/lids/123');
   });
 
+  it('lê e atualiza descrição e participantes de grupo WAHA', async () => {
+    const groupResponse = () => new Response(JSON.stringify({ id: '1@g.us', subject: 'Equipe', description: 'Antes', participants: [{ id: '5511999999999@c.us', name: 'Ana', admin: 'admin' }] }));
+    const fetchMock = vi.fn().mockImplementation(groupResponse);
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(wahaTransport.getGroupMetadata('empresa', '1@g.us')).resolves.toMatchObject({ description: 'Antes', participants: [{ jid: '5511999999999@c.us', admin: 'admin' }] });
+    await wahaTransport.updateGroupDescription('empresa', '1@g.us', 'Depois');
+    expect(fetchMock.mock.calls[1][0]).toBe('http://waha.test/api/empresa/groups/1%40g.us');
+    expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toEqual({ description: 'Depois' });
+  });
+
+  it('normaliza o contrato GOWS atual com campos em maiúsculas', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ JID: '1@g.us', Name: 'Equipe', Topic: 'Descrição', Participants: [{ JID: '5511999999999@c.us', PhoneNumber: '5511999999999', DisplayName: 'Ana', IsAdmin: true }] }))));
+    await expect(wahaTransport.getGroupMetadata('empresa', '1@g.us')).resolves.toMatchObject({ id: '1@g.us', subject: 'Equipe', description: 'Descrição', participants: [{ jid: '5511999999999@c.us', name: 'Ana', phoneNumber: '5511999999999', admin: 'admin' }] });
+  });
+
   it('uses the WAHA GOWS reaction endpoint and payload', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('{}'));
     vi.stubGlobal('fetch', fetchMock);
