@@ -3,8 +3,16 @@ import type { ConversationMessage, ConversationSummary } from '../../domain/curr
 import { errorMessageForUser } from '../../integrations/chatwoot/errors';
 import { conversationService, type ConversationServerFilters } from '../../integrations/chatwoot/conversations';
 
-export const matchesConversationFilters = (conversation: ConversationSummary, filters: ConversationServerFilters) =>
-  (!filters.teamId || conversation.teamId === filters.teamId) && (filters.labels || []).every((label) => conversation.labels.includes(label));
+export const matchesConversationFilters = (
+  conversation: ConversationSummary,
+  selectedInbox: string,
+  filters: ConversationServerFilters,
+) => {
+  const inboxId = /^\d+$/.test(selectedInbox) ? Number(selectedInbox) : null;
+  return (!inboxId || conversation.inboxId === inboxId) &&
+    (!filters.teamId || conversation.teamId === filters.teamId) &&
+    (filters.labels || []).every((label) => conversation.labels.includes(label));
+};
 
 const phoneLikeName = (name: string) => /^[+\d\s().-]+$/.test(name) && name.replace(/\D/g, '').length >= 8;
 const preserveResolvedContact = (current: ConversationSummary, incoming: ConversationSummary): ConversationSummary => ({
@@ -21,7 +29,7 @@ export const mergeFilteredRealtimeConversation = (
 ): ConversationSummary[] => {
   const previous = current.find((conversation) => conversation.id === updated.id);
   const merged = previous ? preserveResolvedContact(previous, { ...previous, ...updated }) : updated;
-  if (!matchesConversationFilters(merged, filters)) return previous ? current.filter((conversation) => conversation.id !== updated.id) : current;
+  if (!matchesConversationFilters(merged, selectedInbox, filters)) return previous ? current.filter((conversation) => conversation.id !== updated.id) : current;
   return mergeRealtimeConversation(current, updated, selectedInbox);
 };
 
@@ -45,12 +53,17 @@ export const useConversations = (accountId: number | null, selectedInbox: string
   const [error, setError] = useState<string | null>(null);
   const [hasNextPage, setHasNextPage] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const refreshAbortRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
+  const refreshRequestIdRef = useRef(0);
   const pageRef = useRef(1);
   const loadedAccountRef = useRef<number | null>(null);
 
   const inboxId = /^\d+$/.test(selectedInbox) ? Number(selectedInbox) : undefined;
   const filterKey = `${filters.teamId || ''}:${(filters.labels || []).join('|')}`;
+  const scopeKey = `${accountId ?? ''}:${selectedInbox}:${filterKey}`;
+  const scopeKeyRef = useRef(scopeKey);
+  scopeKeyRef.current = scopeKey;
   const load = useCallback(async (page: number, append: boolean) => {
     if (!accountId) return;
     abortRef.current?.abort();
@@ -65,7 +78,9 @@ export const useConversations = (accountId: number | null, selectedInbox: string
     try {
       const result = await conversationService.list({ accountId, inboxId, ...filters, page, signal: controller.signal });
       if (controller.signal.aborted || requestId !== requestIdRef.current) return;
-      setConversations((current) => append ? result.conversations.reduce((items, conversation) => mergeRealtimeConversation(items, conversation, selectedInbox), current) : (current.length ? result.conversations.reduce((items, conversation) => mergeRealtimeConversation(items, conversation, selectedInbox), current) : result.conversations));
+      setConversations((current) => append
+        ? result.conversations.reduce((items, conversation) => mergeRealtimeConversation(items, conversation, selectedInbox), current)
+        : result.conversations);
       pageRef.current = page;
       setHasNextPage(result.hasNextPage);
       loadedAccountRef.current = accountId;
@@ -86,8 +101,18 @@ export const useConversations = (accountId: number | null, selectedInbox: string
 
   useEffect(() => {
     if (!accountId) { loadedAccountRef.current = null; setConversations([]); setStatus('idle'); setIsRefreshing(false); return; }
+    refreshAbortRef.current?.abort();
+    pageRef.current = 1;
+    setHasNextPage(false);
+    setConversations([]);
+    setStatus('loading');
+    setIsRefreshing(false);
+    setIsLoadingMore(false);
     void load(1, false);
-    return () => abortRef.current?.abort();
+    return () => {
+      abortRef.current?.abort();
+      refreshAbortRef.current?.abort();
+    };
   }, [accountId, inboxId, filterKey, load]);
 
   const loadMore = useCallback(() => {
@@ -121,22 +146,42 @@ export const useConversations = (accountId: number | null, selectedInbox: string
   }, []);
 
   const replaceConversation = useCallback((updated: ConversationSummary) => {
-    setConversations(current => current.map((conversation) => conversation.id === updated.id ? updated : conversation));
-  }, []);
+    setConversations(current => mergeFilteredRealtimeConversation(current, updated, selectedInbox, filters));
+  }, [filterKey, selectedInbox]);
 
   const upsertRealtimeConversation = useCallback((updated: ConversationSummary) => {
     setConversations(current => mergeFilteredRealtimeConversation(current, updated, selectedInbox, filters));
   }, [filterKey, selectedInbox]);
 
-  const refreshRecentConversations = useCallback(async () => {
+  const refreshRecentConversations = useCallback(() => {
     if (!accountId) return;
-    try {
-      const result = await conversationService.list({ accountId, inboxId, ...filters, page: 1 });
-      setConversations((current) => result.conversations.reduce((items, conversation) => mergeRealtimeConversation(items, conversation, selectedInbox), current));
-    } catch {
-      // The websocket invalidation is advisory; retain the visible list.
-    }
-  }, [accountId, inboxId, filterKey, selectedInbox]);
+
+    refreshAbortRef.current?.abort();
+    const controller = new AbortController();
+    refreshAbortRef.current = controller;
+    const refreshId = ++refreshRequestIdRef.current;
+    const requestScope = scopeKey;
+
+    void conversationService.list({
+      accountId,
+      inboxId,
+      ...filters,
+      page: 1,
+      signal: controller.signal,
+    }).then((result) => {
+      if (
+        controller.signal.aborted ||
+        refreshId !== refreshRequestIdRef.current ||
+        requestScope !== scopeKeyRef.current
+      ) return;
+      setConversations((current) => result.conversations.reduce(
+        (items, conversation) => mergeFilteredRealtimeConversation(items, conversation, selectedInbox, filters),
+        current,
+      ));
+    }).catch((cause) => {
+      if (cause?.name !== 'AbortError') console.error('Failed to refresh conversations:', cause);
+    });
+  }, [accountId, filterKey, inboxId, scopeKey, selectedInbox]);
 
   const addCreatedConversation = useCallback((created: ConversationSummary) => {
     setConversations(current => mergeFilteredRealtimeConversation(current, created, selectedInbox, filters));

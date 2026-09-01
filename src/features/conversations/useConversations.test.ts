@@ -29,14 +29,23 @@ describe('mergeRealtimeConversation', () => {
 describe('matchesConversationFilters', () => {
   it('combina time e múltiplas etiquetas com lógica AND', () => {
     const filters = { teamId: 9, labels: ['vip', 'urgente'] };
-    expect(matchesConversationFilters(conversation({ teamId: 9, labels: ['vip', 'urgente', 'novo'] }), filters)).toBe(true);
-    expect(matchesConversationFilters(conversation({ teamId: 8, labels: ['vip', 'urgente'] }), filters)).toBe(false);
-    expect(matchesConversationFilters(conversation({ teamId: 9, labels: ['vip'] }), filters)).toBe(false);
+    expect(matchesConversationFilters(conversation({ teamId: 9, labels: ['vip', 'urgente', 'novo'] }), 'todas', filters)).toBe(true);
+    expect(matchesConversationFilters(conversation({ teamId: 8, labels: ['vip', 'urgente'] }), 'todas', filters)).toBe(false);
+    expect(matchesConversationFilters(conversation({ teamId: 9, labels: ['vip'] }), 'todas', filters)).toBe(false);
+  });
+  it('isola a inbox selecionada junto com time e etiquetas', () => {
+    const filters = { teamId: 9, labels: ['vip'] };
+    expect(matchesConversationFilters(conversation({ inboxId: 7, teamId: 9, labels: ['vip'] }), '7', filters)).toBe(true);
+    expect(matchesConversationFilters(conversation({ inboxId: 8, teamId: 9, labels: ['vip'] }), '7', filters)).toBe(false);
   });
   it('remove ou insere pontualmente a conversa quando um evento realtime muda o filtro', () => {
     const filters = { teamId: 9, labels: ['vip'] };
     const current = [conversation({ id: 1, teamId: 9, labels: ['vip'] })];
     expect(mergeFilteredRealtimeConversation(current, conversation({ id: 1, teamId: 9, labels: [] }), 'todas', filters)).toEqual([]);
     expect(mergeFilteredRealtimeConversation([], conversation({ id: 2, teamId: 9, labels: ['vip'] }), 'todas', filters).map((item) => item.id)).toEqual([2]);
+  });
+  it('remove uma conversa realtime que deixa a inbox selecionada', () => {
+    const current = [conversation({ id: 1, inboxId: 7 })];
+    expect(mergeFilteredRealtimeConversation(current, conversation({ id: 1, inboxId: 8, updatedAt: 101 }), '7', {})).toEqual([]);
   });
 });
