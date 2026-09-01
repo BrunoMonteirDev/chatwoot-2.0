@@ -5,7 +5,7 @@ import { errorMessageForUser } from '../../integrations/chatwoot/errors';
 
 export type ContactConversationsStatus = 'idle' | 'loading' | 'ready' | 'error';
 
-export const useContactConversations = (accountId: number | null, contactId: number | null) => {
+export const useContactConversations = (accountId: number | null, contactId: number | null, enabled = true) => {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [status, setStatus] = useState<ContactConversationsStatus>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -14,7 +14,7 @@ export const useContactConversations = (accountId: number | null, contactId: num
 
   const load = useCallback(async () => {
     abortRef.current?.abort();
-    if (!accountId || !contactId) {
+    if (!enabled || !accountId || !contactId) {
       setConversations([]);
       setStatus('idle');
       setError(null);
@@ -37,7 +37,7 @@ export const useContactConversations = (accountId: number | null, contactId: num
       setError(errorMessageForUser(cause));
       setStatus('error');
     }
-  }, [accountId, contactId]);
+  }, [accountId, contactId, enabled]);
 
   useEffect(() => {
     void load();

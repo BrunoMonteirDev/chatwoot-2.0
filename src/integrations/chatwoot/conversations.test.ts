@@ -79,6 +79,11 @@ describe('conversationService', () => {
     expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/v1/accounts/2/contacts/9/conversations');
   });
 
+  it('propaga erro de permissão ao buscar o histórico do contato', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ message: 'Forbidden' }), { status: 403, statusText: 'Forbidden' }));
+    await expect(conversationService.listByContact(2, 9)).rejects.toMatchObject({ status: 403 });
+  });
+
   it('reutiliza a conversa mais recente da mesma inbox', async () => {
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ payload: [
       { id: 31, inbox_id: 7, status: 'resolved', priority: null, unread_count: 0, last_activity_at: 100, labels: [], messages: [], meta: { sender: { id: 9, name: 'Maria' } } },

@@ -1,7 +1,9 @@
-import { Check, FileText, Loader2, Mail, Phone, RefreshCw, Save, Tag, User, X } from 'lucide-react';
+import { Check, Clock, FileText, History, Loader2, Mail, Phone, RefreshCw, Save, Tag, User, X } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import type { AccountLabel, AssignableAgent, ContactNote, ContactProfile, ConversationPriority, ConversationSummary, ConversationTeam } from '../domain/currentUser';
 import type { ContactUpdate } from '../integrations/chatwoot/contacts';
+import { contactConversationHistoryItem, previousContactConversations } from '../features/contacts/contactConversationHistory';
+import type { Inbox } from '../domain/currentUser';
 
 interface Props {
   contact: ContactProfile | null;
@@ -27,6 +29,11 @@ interface Props {
   onRetry: () => void;
   onUpdate: (update: ContactUpdate) => Promise<ContactProfile | null>;
   onCreateNote: (content: string) => Promise<ContactNote | null>;
+  contactConversations?: ConversationSummary[];
+  contactConversationsStatus?: 'idle' | 'loading' | 'ready' | 'error';
+  contactConversationsError?: string | null;
+  inboxes?: Inbox[];
+  onOpenConversation?: (conversationId: number) => void;
 }
 
 const stringify = (value: Record<string, unknown>) => JSON.stringify(value, null, 2);
@@ -39,7 +46,7 @@ const priorityOptions: { value: ConversationPriority; label: string }[] = [
   { value: 'urgent', label: 'Urgente' },
 ];
 
-export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, isCreatingNote, isDarkMode, initialTab = 'contact', conversation = null, conversationLabels = [], conversationAgents = [], conversationTeams = [], conversationParticipants = [], managementPendingAction = null, onSetConversationPriority, onAssignConversationAgent, onAssignConversationTeam, onSetConversationLabels, onSetConversationParticipants, onClose, onRetry, onUpdate, onCreateNote }: Props) => {
+export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, isCreatingNote, isDarkMode, initialTab = 'contact', conversation = null, conversationLabels = [], conversationAgents = [], conversationTeams = [], conversationParticipants = [], managementPendingAction = null, onSetConversationPriority, onAssignConversationAgent, onAssignConversationTeam, onSetConversationLabels, onSetConversationParticipants, onClose, onRetry, onUpdate, onCreateNote, contactConversations = [], contactConversationsStatus = 'idle', contactConversationsError = null, inboxes = [], onOpenConversation }: Props) => {
   const [tab, setTab] = useState<'contact' | 'attributes'>(initialTab);
   const [draft, setDraft] = useState({ name: '', email: '', phoneNumber: '', identifier: '', companyName: '' });
   const [additionalText, setAdditionalText] = useState('{}');
@@ -75,6 +82,7 @@ export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, i
     onSetConversationLabels([...next]);
   };
   const participantIds = conversationParticipants.map((participant) => participant.id);
+  const previousConversations = previousContactConversations(contactConversations, conversation?.id || null);
   const toggleConversationParticipant = async (agentId: number) => {
     if (!onSetConversationParticipants || managementBusy) return;
     const next = new Set(participantIds);
@@ -120,6 +128,7 @@ export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, i
             <Field label="Empresa" icon={<User className="w-4 h-4" />} value={draft.companyName} onChange={value => setDraft({ ...draft, companyName: value })} inputClass={input} />
           </div>
           <div className="border-t border-white/10 pt-3"><div className="mb-2 flex items-center gap-1 text-xs font-bold"><FileText className="w-4 h-4 text-[#00a884]" />Notas</div><textarea value={noteText} onChange={event => setNoteText(event.target.value)} disabled={isCreatingNote} placeholder="Adicionar nota interna sobre o contato…" className={`${input} min-h-16 resize-y`} /><button type="button" disabled={!noteText.trim() || isCreatingNote} onClick={() => void addNote()} className="mt-2 rounded-lg bg-[#00a884] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">{isCreatingNote ? 'Salvando…' : 'Adicionar nota'}</button><div className="mt-3 space-y-2">{notes.length ? notes.map(note => <div key={note.id} className="rounded-lg bg-black/10 p-2.5 text-xs"><p className="whitespace-pre-wrap">{note.content}</p><span className="mt-1 block text-[10px] text-[#8696a0]">{note.authorName || 'Agente'} · {new Date(note.createdAt * 1000).toLocaleString()}</span></div>) : <p className="text-xs text-[#8696a0]">Nenhuma nota para este contato.</p>}</div></div>
+          <section className="border-t border-white/10 pt-3"><div className="mb-2 flex items-center gap-1 text-xs font-bold"><History className="w-4 h-4 text-[#00a884]" />Conversas anteriores</div>{contactConversationsStatus === 'loading' ? <p className="text-xs text-[#8696a0]">Carregando conversas…</p> : contactConversationsStatus === 'error' ? <p className="text-xs text-red-400">{contactConversationsError || 'Não foi possível carregar as conversas deste contato.'}</p> : previousConversations.length ? <div className="space-y-2">{previousConversations.map((item) => { const summary = contactConversationHistoryItem(item, inboxes); return <button key={item.id} type="button" onClick={() => onOpenConversation?.(item.id)} className={`w-full rounded-lg border p-2.5 text-left text-xs transition-colors ${isDarkMode ? 'border-[#2a3942] bg-[#182229] hover:border-[#00a884]' : 'border-[#d1d7db] bg-[#f8f9fa] hover:border-[#00a884]'}`}><div className="flex items-center justify-between gap-2"><span className="truncate font-semibold text-[#00a884]">{summary.inboxName}</span><span className="shrink-0 capitalize text-[#8696a0]">{summary.status}</span></div><p className="mt-1 truncate text-[#8696a0]">{summary.preview}</p><span className="mt-1.5 flex items-center gap-1 text-[10px] text-[#8696a0]"><Clock className="h-3 w-3" />{new Date(summary.lastActivityAt * 1000).toLocaleString()}</span></button>; })}</div> : contactConversationsStatus === 'ready' ? <p className="text-xs text-[#8696a0]">Nenhuma conversa anterior para este contato.</p> : null}</section>
         </>}
         {tab === 'attributes' && <div className="space-y-4">
           {conversation && <section className={`rounded-xl border p-3 ${isDarkMode ? 'border-[#222d34] bg-[#182229]/60' : 'border-gray-200 bg-gray-50'}`}>

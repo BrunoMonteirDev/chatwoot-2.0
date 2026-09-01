@@ -41,6 +41,7 @@ import { errorMessageForUser } from './integrations/chatwoot/errors';
 import { useConversations } from './features/conversations/useConversations';
 import { copyConversationLink } from './features/conversations/copyConversationLink';
 import { toChatListItem } from './features/conversations/toChatListItem';
+import { conversationForActiveRoute } from './features/conversations/directConversation';
 import { cacheRealtimeMessage, useConversationMessages } from './features/messages/useConversationMessages';
 import { messageHistoryCache, messageHistoryPrefetcher } from './features/messages/MessageHistoryCache';
 import { showSystemMessagesFrom, uiSettingsWithSystemMessageVisibility, visibleConversationMessages } from './features/messages/systemMessageVisibility';
@@ -56,7 +57,7 @@ import { messageService } from './integrations/chatwoot/messages';
 import { canSendWhatsAppMessage, whatsappConnectionService, type OperationalWhatsAppConnection } from './integrations/whatsapp/connection';
 import { authService } from './integrations/chatwoot/auth';
 import { browserNotifications } from './features/notifications/browserNotifications';
-import type { ConversationMessage } from './domain/currentUser';
+import type { ConversationMessage, ConversationSummary } from './domain/currentUser';
 import { appRouteFromUrl, urlForAppRoute, type AppRoute } from './routing/appRoute';
 
 const emptyUser: UserProfile = { name: '', phone: '', about: '', avatar: '' };
@@ -210,6 +211,7 @@ export default function App() {
   const [selectedInbox, setSelectedInbox] = useState<string>(() => initialRoute.inbox || 'todas');
   const [routeAccountId, setRouteAccountId] = useState<string>(() => initialRoute.accountId || '');
   const [conversationServerFilters, setConversationServerFilters] = useState<ConversationServerFilters>({ teamId: null, labels: [] });
+  const [directlyLoadedConversation, setDirectlyLoadedConversation] = useState<ConversationSummary | null>(null);
   const { conversations, status: conversationsStatus, error: conversationsError, hasNextPage, isLoadingMore, isRefreshing: conversationsRefreshing, retry: retryConversations, loadMore, applyOutgoingMessage, applyConversationUpdate, removeConversation, replaceConversation, upsertRealtimeConversation, addCreatedConversation, applyRealtimeMessage, refreshRecentConversations } = useConversations(currentAccount?.id ?? null, selectedInbox, conversationServerFilters);
   const [activeFilter, setActiveFilter] = useState<FilterCategory>('minhas');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -367,6 +369,17 @@ export default function App() {
   const openConversation = useCallback((conversationId: string) => {
     navigate({ tab: 'chats', conversationId, ...(selectedInbox !== 'todas' ? { inbox: selectedInbox } : {}) });
   }, [navigate, selectedInbox]);
+  const openConversationDirectly = useCallback((conversationId: number) => {
+    const accountId = String(currentAccount?.id || routeAccountId);
+    const target = urlForAppRoute({ accountId, tab: 'chats', conversationId: String(conversationId) });
+    if (`${window.location.pathname}${window.location.search}` !== target) window.history.pushState({}, '', target);
+    // The URL is canonical (without inbox), but this in-place action must not
+    // clear the user's current inbox/team/label filters.
+    setRouteAccountId(accountId);
+    setActiveNavTab('chats');
+    setActiveChatId(String(conversationId));
+    setShowMobileChat(true);
+  }, [currentAccount?.id, routeAccountId]);
 
   const navigateToTab = useCallback((tab: NavTab) => {
     if (tab === 'chats') navigate({ tab: 'chats', ...(selectedInbox !== 'todas' ? { inbox: selectedInbox } : {}) });
@@ -409,9 +422,15 @@ export default function App() {
   // O painel principal só pode abrir uma conversa obtida do Chatwoot. Os chats
   // de protótipo continuam restritos às telas ainda não integradas (contatos,
   // status e chamadas), sem contaminar o atendimento real.
-  const activeChat = listChats.find((c) => c.id === activeChatId);
-  const selectedConversationId = useMemo(() => conversations.some((conversation) => String(conversation.id) === activeChatId) ? Number(activeChatId) : null, [activeChatId, conversations]);
-  const selectedConversation = useMemo(() => conversations.find((conversation) => conversation.id === selectedConversationId) || null, [conversations, selectedConversationId]);
+  const selectedConversation = useMemo(() => conversationForActiveRoute(conversations, directlyLoadedConversation, activeChatId), [activeChatId, conversations, directlyLoadedConversation]);
+  const selectedConversationId = selectedConversation?.id ?? null;
+  const activeChat = useMemo(() => listChats.find((chat) => chat.id === activeChatId)
+    || (selectedConversation ? toChatListItem(selectedConversation, inboxes) : undefined), [activeChatId, inboxes, listChats, selectedConversation]);
+
+  useEffect(() => {
+    if (!directlyLoadedConversation || String(directlyLoadedConversation.id) !== activeChatId) return;
+    if (conversations.some((conversation) => conversation.id === directlyLoadedConversation.id)) setDirectlyLoadedConversation(null);
+  }, [activeChatId, conversations, directlyLoadedConversation]);
   useEffect(() => {
     const inboxId = selectedConversation?.inboxId;
     if (!currentAccount || !inboxId) { setWhatsappConnection(null); return; }
@@ -539,10 +558,10 @@ export default function App() {
     if (!currentAccount || !Number.isInteger(conversationId) || conversationId < 1 || selectedConversation || conversationsStatus !== 'ready') return;
     let cancelled = false;
     void conversationService.get(currentAccount.id, conversationId)
-      .then((conversation) => { if (!cancelled) addCreatedConversation(conversation); })
+      .then((conversation) => { if (!cancelled) setDirectlyLoadedConversation(conversation); })
       .catch((cause) => { if (!cancelled) addToast(`Não foi possível abrir esta conversa: ${errorMessageForUser(cause)}`, 'error'); });
     return () => { cancelled = true; };
-  }, [activeChatId, addCreatedConversation, conversationsStatus, currentAccount, selectedConversation]);
+  }, [activeChatId, conversationsStatus, currentAccount, selectedConversation]);
 
   useEffect(() => {
     if (!selectedConversationId || !selectedConversation || openedReadConversationRef.current === selectedConversationId) return;
@@ -1267,6 +1286,7 @@ export default function App() {
                   whatsappConnection={whatsappConnection}
                   sendMessageShortcut={sendMessageShortcut}
                   onCopyConversationLink={() => void handleCopyConversationLink()}
+                  onOpenDirectConversation={openConversationDirectly}
                   managementCatalogs={conversationManagement.catalogs}
                   managementCatalogStatus={conversationManagement.catalogStatus}
                   managementCatalogError={conversationManagement.catalogError}

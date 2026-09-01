@@ -67,6 +67,7 @@ import { canSendWhatsAppMessage, type OperationalWhatsAppConnection } from '../i
 import { finiteAudioDuration, recordingFile, recordingMimeType, releaseRecordingResources, type AudioRecordingPhase } from '../features/audio/recording';
 import { documentPresentation, filesFromTransfer, hasFilesInTransfer, triggerAttachmentDownload } from '../features/attachments/fileUtils';
 import { shouldSendMessageOnEnter, type SendMessageShortcut } from '../features/messages/sendMessageShortcut';
+import { useContactConversations } from '../features/contacts/useContactConversations';
 
 
 // Helper to format WhatsApp Markdown, URLs, Mentions, Bold (*), Italic (_), Strikethrough (~), Code (`)
@@ -622,6 +623,7 @@ interface Props {
   whatsappConnection?: OperationalWhatsAppConnection | null;
   sendMessageShortcut?: SendMessageShortcut;
   onCopyConversationLink?: () => void;
+  onOpenDirectConversation?: (conversationId: number) => void;
 }
 
 export const ChatArea: React.FC<Props> = ({
@@ -681,6 +683,7 @@ export const ChatArea: React.FC<Props> = ({
   whatsappConnection = null,
   sendMessageShortcut = 'enter',
   onCopyConversationLink,
+  onOpenDirectConversation,
 }) => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isContactPanelOpen, setIsContactPanelOpen] = useState(false);
@@ -688,6 +691,7 @@ export const ChatArea: React.FC<Props> = ({
   const [conversationParticipants, setConversationParticipants] = useState<AssignableAgent[]>([]);
   const [inputText, setInputText] = useState('');
   const [messageMode, setMessageMode] = useState<'responder' | 'privada'>('responder');
+  const contactConversations = useContactConversations(accountId, conversation?.contactId ?? null, isContactPanelOpen);
   const [ticketStatus, setTicketStatus] = useState<'resolver' | 'resolvido' | 'adiado' | 'pendente'>('resolver');
   const [showResolverMenu, setShowResolverMenu] = useState(false);
 
@@ -2630,6 +2634,11 @@ export const ChatArea: React.FC<Props> = ({
           onRetry={onRetryContact}
           onUpdate={onUpdateContact}
           onCreateNote={onCreateContactNote}
+          contactConversations={contactConversations.conversations}
+          contactConversationsStatus={contactConversations.status}
+          contactConversationsError={contactConversations.error}
+          inboxes={inboxes}
+          onOpenConversation={onOpenDirectConversation}
           onClose={() => setIsContactPanelOpen(false)}
         />
       ) : isContactPanelOpen && (
