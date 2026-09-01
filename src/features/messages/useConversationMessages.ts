@@ -219,12 +219,14 @@ export const useConversationMessages = (accountId: number | null, conversationId
   const mutate = useCallback(async (operation: 'edit' | 'revoke', messageId: number, content?: string) => {
     if (!inboxId || messageId < 1) return false;
     const target = messages.find(message => message.id === messageId);
-    if (!target?.sourceId || target.contentAttributes.whatsapp_transport !== 'evolution') return false;
+    const external = parseExternalMessageId(target?.sourceId);
+    const transport = external?.provider;
+    if (!target?.sourceId || !external || (transport !== 'evolution' && transport !== 'waha') || target.kind !== 'outgoing' || target.contentAttributes.whatsapp_from_me === false) return false;
     const remoteJid = typeof target.contentAttributes.whatsapp_remote_jid === 'string' ? target.contentAttributes.whatsapp_remote_jid : fallbackRemoteJid(fallbackPhoneNumber);
     if (!remoteJid) return false;
     try {
       const updated = await whatsappMessageMutationService.send(operation, {
-        accountId, inboxId, sourceId: target.sourceId, remoteJid, targetFromMe: typeof target.contentAttributes.whatsapp_from_me === 'boolean' ? target.contentAttributes.whatsapp_from_me : target.kind === 'outgoing', participantJid: typeof target.contentAttributes.whatsapp_participant_jid === 'string' ? target.contentAttributes.whatsapp_participant_jid : null, transport: 'evolution', ...(content ? { content } : {}),
+        accountId, inboxId, sourceId: target.sourceId, remoteJid, targetFromMe: typeof target.contentAttributes.whatsapp_from_me === 'boolean' ? target.contentAttributes.whatsapp_from_me : target.kind === 'outgoing', participantJid: typeof target.contentAttributes.whatsapp_participant_jid === 'string' ? target.contentAttributes.whatsapp_participant_jid : null, transport, ...(content ? { content } : {}),
       });
       setMessages(current => current.map(message => message.id === messageId ? { ...message, content: updated.content, contentAttributes: updated.content_attributes } : message));
       return true;

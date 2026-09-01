@@ -25,6 +25,14 @@ export interface MessageHistoryPage {
   hasOlderMessages: boolean;
 }
 
+export interface ForwardMessageParams {
+  accountId: number;
+  sourceConversationId: number;
+  sourceMessageId: number;
+  destinationConversationId: number;
+  idempotencyToken: string;
+}
+
 // MessageFinder returns 20 items for the latest and for `before`, ordered oldest → newest.
 const MESSAGE_PAGE_SIZE = 20;
 
@@ -53,6 +61,13 @@ export const messageService = {
   },
   async remove(accountId: number, conversationId: number, messageId: number): Promise<void> {
     await chatwootApiClient.delete(`/api/v1/accounts/${accountId}/conversations/${conversationId}/messages/${messageId}`);
+  },
+  async forward({ accountId, sourceConversationId, sourceMessageId, destinationConversationId, idempotencyToken }: ForwardMessageParams): Promise<ConversationMessage> {
+    const response = await chatwootApiClient.post<ChatwootMessageDto>(
+      `/api/v1/accounts/${accountId}/conversations/${sourceConversationId}/messages/forward`,
+      { id: sourceMessageId, destination_conversation_id: destinationConversationId, idempotency_token: idempotencyToken }
+    );
+    return normalizeMessage(response);
   },
 };
 

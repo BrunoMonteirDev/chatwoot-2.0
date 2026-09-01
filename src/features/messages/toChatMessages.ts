@@ -46,6 +46,9 @@ export const toChatMessages = (items: ConversationMessage[]): Message[] => items
     : message.kind === 'outgoing',
   isEdited: message.contentAttributes.whatsapp_edited === true,
   isRevoked: message.contentAttributes.whatsapp_revoked === true,
+  isDeleted: message.contentAttributes.deleted === true,
+  isTemplate: message.kind === 'template',
+  whatsappPreviousContent: typeof message.contentAttributes.whatsapp_previous_content === 'string' ? message.contentAttributes.whatsapp_previous_content : null,
 }));
 
 const reactionsForMessage = (message: ConversationMessage): MessageReaction[] => {

@@ -26,4 +26,9 @@ describe('toChatMessages reactions', () => {
     const reply = baseMessage({ contentAttributes: { in_reply_to: 4 } });
     expect(toChatMessages([original, reply])[1].replyTo).toMatchObject({ id: '4', text: 'Foto', mediaPreviewUrl: 'https://example.test/thumb.jpg' });
   });
+
+  it('preserva o conteúdo anterior de uma mensagem editada para consulta', () => {
+    const item = baseMessage({ content: 'Texto corrigido', contentAttributes: { whatsapp_edited: true, whatsapp_previous_content: 'Texto original' } });
+    expect(toChatMessages([item])[0]).toMatchObject({ isEdited: true, whatsappPreviousContent: 'Texto original' });
+  });
 });

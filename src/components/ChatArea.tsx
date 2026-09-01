@@ -49,6 +49,7 @@ import { MentionsPopup, defaultGroupMembers, GroupMember } from './MentionsPopup
 import { ContextMenu } from './ContextMenu';
 import { useContextMenu } from '../hooks/useContextMenu';
 import { getMessageContextMenuItems } from '../utils/contextMenuActions';
+import { capabilitiesForMessage } from '../features/messages/capabilities';
 import { ConversationManagementMenu } from './ConversationManagementMenu';
 import { ContactDetailsPanel } from './ContactDetailsPanel';
 import { conversationManagementService, type ConversationManagementCatalogs } from '../integrations/chatwoot/conversationManagement';
@@ -59,6 +60,7 @@ import type { ContactUpdate } from '../integrations/chatwoot/contacts';
 import { useCannedResponses } from '../features/cannedResponses/useCannedResponses';
 import { quickNotesStorage, QUICK_NOTES_UPDATED_EVENT } from '../features/quickNotes/storage';
 import { MetaTemplatePicker } from './MetaTemplatePicker';
+import { ForwardMessageModal } from './ForwardMessageModal';
 import { metaCloudMetadataForInbox } from '../integrations/whatsapp/provider';
 import { canSendWhatsAppMessage, type OperationalWhatsAppConnection } from '../integrations/whatsapp/connection';
 import { finiteAudioDuration, recordingFile, recordingMimeType, releaseRecordingResources, type AudioRecordingPhase } from '../features/audio/recording';
@@ -186,7 +188,7 @@ const TextMessageContent: React.FC<{
   const displayText = isLongText && !isExpanded ? text.slice(0, maxLength) : text;
 
   return (
-    <div className="text-[14.5px] leading-relaxed whitespace-pre-wrap break-words pr-2">
+    <div className="select-text cursor-text text-[14.5px] leading-relaxed whitespace-pre-wrap break-words pr-2">
       {renderFormattedText(displayText)}
       {isLongText && !isExpanded && (
         <button
@@ -237,7 +239,7 @@ const QuotedReplyBox: React.FC<{
 const MessageReactions: React.FC<{
   reactions: MessageReaction[];
   isDarkMode: boolean;
-  onSelect: (emoji: string) => void;
+  onSelect?: (emoji: string) => void;
 }> = ({ reactions, isDarkMode, onSelect }) => {
   const grouped: Array<{ emoji: string; count: number; own: boolean }> = [];
   reactions.forEach((reaction) => {
@@ -251,19 +253,17 @@ const MessageReactions: React.FC<{
   });
   return (
     <div className="-mt-1 flex flex-wrap gap-1 px-1">
-      {grouped.map((reaction) => (
-        <button
-          key={reaction.emoji}
-          type="button"
-          onClick={(event) => { event.stopPropagation(); onSelect(reaction.emoji); }}
-          title={reaction.own ? 'Remover sua reação' : 'Reagir com este emoji'}
-          className={`rounded-full border px-1.5 py-0.5 text-xs shadow-sm transition-colors ${reaction.own
-            ? 'border-[#00a884] bg-[#00a884]/15'
-            : isDarkMode ? 'border-[#37464f] bg-[#202c33] hover:bg-[#2a3942]' : 'border-[#d1d7db] bg-white hover:bg-[#f0f2f5]'}`}
-        >
-          <span>{reaction.emoji}</span>{reaction.count > 1 && <span className="ml-1 text-[10px] text-[#667781] dark:text-[#aebac1]">{reaction.count}</span>}
-        </button>
-      ))}
+      {grouped.map((reaction) => {
+        const className = `rounded-full border px-1.5 py-0.5 text-xs shadow-sm transition-colors ${reaction.own
+          ? 'border-[#00a884] bg-[#00a884]/15'
+          : isDarkMode ? 'border-[#37464f] bg-[#202c33]' : 'border-[#d1d7db] bg-white'}`;
+        const content = <><span>{reaction.emoji}</span>{reaction.count > 1 && <span className="ml-1 text-[10px] text-[#667781] dark:text-[#aebac1]">{reaction.count}</span>}</>;
+        return onSelect ? (
+          <button key={reaction.emoji} type="button" onClick={(event) => { event.stopPropagation(); onSelect(reaction.emoji); }} title={reaction.own ? 'Remover sua reação' : 'Reagir com este emoji'} className={`${className} hover:bg-[#2a3942]`}>
+            {content}
+          </button>
+        ) : <span key={reaction.emoji} className={className}>{content}</span>;
+      })}
     </div>
   );
 };
@@ -586,6 +586,7 @@ interface Props {
   onEditMessage?: (messageId: string, content: string) => Promise<boolean>;
   onRevokeMessage?: (messageId: string) => Promise<boolean>;
   onReactMessage?: (messageId: string, emoji: string) => Promise<boolean> | boolean;
+  onForwardMessage?: (messageId: string, destinationConversationId: string) => Promise<{ ok: boolean; error?: string }>;
   conversation?: ConversationSummary | null;
   managementCatalogs?: ConversationManagementCatalogs;
   managementCatalogStatus?: 'idle' | 'loading' | 'ready' | 'error';
@@ -639,6 +640,7 @@ export const ChatArea: React.FC<Props> = ({
   onEditMessage,
   onRevokeMessage,
   onReactMessage,
+  onForwardMessage,
   conversation,
   managementCatalogs,
   managementCatalogStatus = 'idle' as const,
@@ -768,7 +770,9 @@ export const ChatArea: React.FC<Props> = ({
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [editFailure, setEditFailure] = useState<string | null>(null);
   const [reactionFailureId, setReactionFailureId] = useState<string | null>(null);
-  const [, forceUpdate] = useState(0);
+  const [messageToForward, setMessageToForward] = useState<Message | null>(null);
+  const [isForwardingMessage, setIsForwardingMessage] = useState(false);
+  const [forwardError, setForwardError] = useState<string | null>(null);
 
   // Actions are reflected directly in the UI; avoid persistent pop-up notices.
   const addToast = (_title: string, _type: 'success' | 'info' | 'error' = 'success') => undefined;
@@ -794,6 +798,7 @@ export const ChatArea: React.FC<Props> = ({
       onEditMessage: (m) => { setEditingMessage(m); setEditingText(m.text || ''); setEditFailure(null); },
       onRevokeMessage: (m) => setMessagePendingRevoke(m),
       onReact: (m, emoji) => void handleReaction(m, emoji),
+      onForward: (m) => { setMessageToForward(m); setForwardError(null); },
     });
 
     openContextMenu(e, items, 'Ações da Mensagem');
@@ -805,6 +810,16 @@ export const ChatArea: React.FC<Props> = ({
       setReactionFailureId(message.id);
       window.setTimeout(() => setReactionFailureId((current) => current === message.id ? null : current), 3_500);
     }
+  };
+
+  const forwardMessage = async (destinationConversationId: string) => {
+    if (!messageToForward || !onForwardMessage) return;
+    setIsForwardingMessage(true);
+    setForwardError(null);
+    const result = await onForwardMessage(messageToForward.id, destinationConversationId);
+    setIsForwardingMessage(false);
+    if (result.ok) setMessageToForward(null);
+    else setForwardError(result.error || 'Não foi possível encaminhar a mensagem.');
   };
 
   // Derived group members for mentions popup
@@ -1915,6 +1930,12 @@ export const ChatArea: React.FC<Props> = ({
                   {msg.text && (
                     <TextMessageContent text={msg.text} isDarkMode={isDarkMode} />
                   )}
+                  {msg.whatsappPreviousContent && (
+                    <details className="mt-2 select-text text-xs text-[#8696a0]">
+                      <summary className="cursor-pointer select-none hover:text-[#00a884]">Ver texto original</summary>
+                      <p className="mt-1 whitespace-pre-wrap break-words rounded bg-black/10 p-2">{msg.whatsappPreviousContent}</p>
+                    </details>
+                  )}
 
                   {/* Timestamp & Status Icon (for non-audio or mixed messages) */}
                   {(msg.text || !msg.attachments?.some((a) => a.type === 'audio')) && (
@@ -1976,7 +1997,7 @@ export const ChatArea: React.FC<Props> = ({
                 )}
                 </div>
                 {msg.reactions && msg.reactions.length > 0 && (
-                  <MessageReactions reactions={msg.reactions} isDarkMode={isDarkMode} onSelect={(emoji) => void handleReaction(msg, emoji)} />
+                  <MessageReactions reactions={msg.reactions} isDarkMode={isDarkMode} onSelect={capabilitiesForMessage(msg).canReact ? (emoji) => void handleReaction(msg, emoji) : undefined} />
                 )}
                 {reactionFailureId === msg.id && (
                   <div className="mt-1 px-1 text-[11px] text-red-400">Não foi possível enviar a reação.</div>
@@ -2651,10 +2672,11 @@ export const ChatArea: React.FC<Props> = ({
 
       {messagePendingDeletion && <div className="fixed inset-0 z-[10001] grid place-items-center bg-black/65 p-4" role="dialog" aria-modal="true" aria-labelledby="delete-message-title">
         <div className={`w-full max-w-sm rounded-2xl border p-5 shadow-2xl ${isDarkMode ? 'border-[#2a3942] bg-[#182228] text-[#e9edef]' : 'border-[#d1d7db] bg-white text-[#111b21]'}`}>
-          <div className="flex items-start gap-3"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-red-500/15 text-red-400"><Trash2 className="h-5 w-5" /></div><div><h3 id="delete-message-title" className="text-sm font-bold">Excluir mensagem?</h3><p className="mt-1 text-xs leading-5 text-[#8696a0]">Esta ação removerá a mensagem desta conversa.</p></div></div>
-          <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setMessagePendingDeletion(null)} className="rounded-lg px-3 py-2 text-xs font-bold text-[#aebac1] hover:bg-white/5">Cancelar</button><button type="button" onClick={() => { const message = messagePendingDeletion; setMessagePendingDeletion(null); if (onDeleteMessage) void onDeleteMessage(message.id); else { const idx = chat.messages.findIndex(item => item.id === message.id); if (idx >= 0) { chat.messages.splice(idx, 1); forceUpdate(value => value + 1); } } }} className="rounded-lg bg-red-500 px-3 py-2 text-xs font-bold text-white hover:bg-red-600">Excluir</button></div>
+          <div className="flex items-start gap-3"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-red-500/15 text-red-400"><Trash2 className="h-5 w-5" /></div><div><h3 id="delete-message-title" className="text-sm font-bold">Excluir do Chatwoot?</h3><p className="mt-1 text-xs leading-5 text-[#8696a0]">Esta ação remove a mensagem somente desta conversa no Chatwoot.</p></div></div>
+          <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setMessagePendingDeletion(null)} className="rounded-lg px-3 py-2 text-xs font-bold text-[#aebac1] hover:bg-white/5">Cancelar</button><button type="button" onClick={() => { const message = messagePendingDeletion; setMessagePendingDeletion(null); if (onDeleteMessage) void onDeleteMessage(message.id); }} className="rounded-lg bg-red-500 px-3 py-2 text-xs font-bold text-white hover:bg-red-600">Excluir do Chatwoot</button></div>
         </div>
       </div>}
+      {messageToForward && <ForwardMessageModal message={messageToForward} accountId={accountId} sourceConversationId={chat.id} chats={allChats} inboxes={inboxes} isDarkMode={isDarkMode} isSubmitting={isForwardingMessage} error={forwardError} onClose={() => { if (!isForwardingMessage) setMessageToForward(null); }} onForward={(destinationConversationId) => void forwardMessage(destinationConversationId)} />}
       {messagePendingRevoke && <div className="fixed inset-0 z-[10001] grid place-items-center bg-black/65 p-4" role="dialog" aria-modal="true" aria-labelledby="revoke-message-title">
         <div className={`w-full max-w-sm rounded-2xl border p-5 shadow-2xl ${isDarkMode ? 'border-[#2a3942] bg-[#182228] text-[#e9edef]' : 'border-[#d1d7db] bg-white text-[#111b21]'}`}>
           <div className="flex items-start gap-3"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-red-500/15 text-red-400"><Trash2 className="h-5 w-5" /></div><div><h3 id="revoke-message-title" className="text-sm font-bold">Apagar para todos?</h3><p className="mt-1 text-xs leading-5 text-[#8696a0]">A mensagem será apagada no WhatsApp para todos os participantes.</p></div></div>

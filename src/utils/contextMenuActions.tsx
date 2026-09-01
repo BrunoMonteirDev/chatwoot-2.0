@@ -26,11 +26,13 @@ import {
   Ban,
   RefreshCw,
   CopyPlus,
+  Forward,
   SlidersHorizontal,
   SmilePlus,
 } from 'lucide-react';
 import { ContextMenuItem } from '../components/ContextMenu';
 import { Chat, Message } from '../types';
+import { capabilitiesForMessage } from '../features/messages/capabilities';
 
 export const QUICK_REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'] as const;
 
@@ -145,24 +147,29 @@ export function getMessageContextMenuItems(
     onEditMessage?: (msg: Message) => void;
     onRevokeMessage?: (msg: Message) => void;
     onReact?: (msg: Message, emoji: string) => void;
+    onForward?: (msg: Message) => void;
   }
 ): ContextMenuItem[] {
+  const capabilities = capabilitiesForMessage(msg);
   return [
     {
       label: 'Responder Mensagem',
       icon: <CornerUpRight />,
       action: () => options.onReply?.(msg),
     },
+    ...(!msg.isPrivate && !msg.isActivity && !msg.isTemplate && !msg.isRevoked && !msg.isDeleted && (Boolean(msg.text?.trim()) || Boolean(msg.attachments?.length)) && options.onForward ? [{
+      label: 'Encaminhar', icon: <Forward />, action: () => options.onForward?.(msg),
+    }] : []),
     {
       label: 'Copiar Texto da Mensagem',
       icon: <Copy />,
       action: () => {
-        if (msg.text) navigator.clipboard.writeText(msg.text);
-        options.onCopyText?.(msg);
+        if (options.onCopyText) options.onCopyText(msg);
+        else if (msg.text) navigator.clipboard.writeText(msg.text);
       },
       shortcut: 'Ctrl+C',
     },
-    ...(options.onReact ? [
+    ...(capabilities.canReact && options.onReact ? [
       { divider: true, label: '' },
       ...QUICK_REACTION_EMOJIS.map((emoji) => ({
         label: `Reagir ${emoji}`,
@@ -170,10 +177,10 @@ export function getMessageContextMenuItems(
         action: () => options.onReact?.(msg, emoji),
       })),
     ] : []),
-    ...(msg.sender === 'me' && msg.whatsappTransport === 'evolution' && !msg.isRevoked && !msg.attachments?.length ? [{
+    ...(capabilities.canEdit ? [{
       label: 'Editar no WhatsApp', icon: <Edit2 />, action: () => options.onEditMessage?.(msg),
     }] : []),
-    ...(msg.sender === 'me' && msg.whatsappTransport === 'evolution' && !msg.isRevoked ? [{
+    ...(capabilities.canRevoke ? [{
       label: 'Apagar para todos', icon: <Trash2 />, danger: true, action: () => options.onRevokeMessage?.(msg),
     }] : []),
     ...(msg.attachments?.length ? [{
@@ -190,7 +197,7 @@ export function getMessageContextMenuItems(
       },
     }, { divider: true, label: '' }] : []),
     {
-      label: 'Excluir somente aqui',
+      label: 'Excluir do Chatwoot',
       icon: <Trash2 />,
       danger: true,
       action: () => options.onDeleteMessage?.(msg),

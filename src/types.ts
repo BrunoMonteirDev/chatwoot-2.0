@@ -71,6 +71,9 @@ export interface Message {
   whatsappFromMe?: boolean | null;
   isEdited?: boolean;
   isRevoked?: boolean;
+  isDeleted?: boolean;
+  isTemplate?: boolean;
+  whatsappPreviousContent?: string | null;
 }
 
 export interface Tag {
@@ -80,6 +83,7 @@ export interface Tag {
 
 export interface Chat {
   id: string;
+  inboxId?: number;
   name: string;
   avatar: string;
   avatarType?: 'initials' | 'image' | 'logo' | 'group';

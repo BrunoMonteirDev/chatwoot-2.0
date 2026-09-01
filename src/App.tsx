@@ -792,6 +792,26 @@ export default function App() {
     );
   };
 
+  const handleForwardMessage = async (messageId: string, destinationConversationId: string) => {
+    if (!currentAccount || !selectedConversationId || !/^\d+$/.test(messageId) || !/^\d+$/.test(destinationConversationId)) return { ok: false, error: 'Conversa ou mensagem inválida.' };
+    try {
+      const message = await messageService.forward({
+        accountId: currentAccount.id,
+        sourceConversationId: selectedConversationId,
+        sourceMessageId: Number(messageId),
+        destinationConversationId: Number(destinationConversationId),
+        idempotencyToken: globalThis.crypto?.randomUUID?.() || 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (value) => {
+          const random = Math.floor(Math.random() * 16);
+          return (value === 'x' ? random : (random & 0x3) | 0x8).toString(16);
+        }),
+      });
+      applyOutgoingMessage(message);
+      return { ok: true };
+    } catch (cause) {
+      return { ok: false, error: errorMessageForUser(cause) };
+    }
+  };
+
   // Compute counts for filter pills
   const unreadCountTotal = conversations.reduce((total, conversation) => total + conversation.unreadCount, 0);
   // Favoritos/fixação não fazem parte do DTO da lista do Chatwoot nesta fase.
@@ -1195,6 +1215,7 @@ export default function App() {
                   })}
                   onDeleteMessage={(messageId) => messageHistory.remove(Number(messageId))}
                   onReactMessage={(messageId, emoji) => messageHistory.react(Number(messageId), emoji)}
+                  onForwardMessage={handleForwardMessage}
                   onEditMessage={(messageId, content) => messageHistory.edit(Number(messageId), content)}
                   onRevokeMessage={(messageId) => messageHistory.revoke(Number(messageId))}
                   conversation={selectedConversation}

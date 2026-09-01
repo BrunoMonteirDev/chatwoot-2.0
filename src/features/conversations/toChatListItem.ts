@@ -7,7 +7,7 @@ const priorityMap: Record<string, NonNullable<Chat['priority']>> = { high: 'alta
 export const toChatListItem = (conversation: ConversationSummary, inboxes: Inbox[]): Chat => {
   const inbox = inboxes.find((item) => item.id === conversation.inboxId);
   return {
-    id: String(conversation.id), name: conversation.contactName, avatar: conversation.contactAvatarUrl || conversation.contactName.slice(0, 2).toUpperCase(),
+    id: String(conversation.id), inboxId: conversation.inboxId, name: conversation.contactName, avatar: conversation.contactAvatarUrl || conversation.contactName.slice(0, 2).toUpperCase(),
     avatarType: conversation.contactAvatarUrl ? 'image' : conversation.isGroup ? 'group' : 'initials', avatarBg: '#00a884', isGroup: conversation.isGroup, lastMessage: conversation.lastMessage,
     lastMessageByMe: conversation.lastMessageByCurrentUser, time: new Date(conversation.lastActivityAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     lastActivityAt: new Date(conversation.lastActivityAt * 1000).toISOString(), unreadCount: conversation.unreadCount,
