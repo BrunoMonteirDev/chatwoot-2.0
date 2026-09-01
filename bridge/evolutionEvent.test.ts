@@ -42,6 +42,10 @@ describe('parseIncomingEvolutionMessage', () => {
     })).toMatchObject({ messageId: 'reply-id', quotedMessageId: 'original-id' });
   });
 
+  it('normaliza a marca de encaminhada do contextInfo Baileys', () => {
+    expect(parseIncomingEvolutionMessage({ event: 'messages.upsert', instance: 'cw-1', data: { key: { remoteJid: '5511999999999@s.whatsapp.net', id: 'forwarded', fromMe: false }, message: { imageMessage: { mimetype: 'image/jpeg', contextInfo: { isForwarded: true, forwardingScore: 1 } } } } })).toMatchObject({ isForwarded: true, forwardingScore: 1 });
+  });
+
   it('aceita a referência de reply no wrapper messageContextInfo do Evolution v2', () => {
     expect(parseIncomingEvolutionMessage({
       event: 'messages.upsert', instance: 'cw-1',

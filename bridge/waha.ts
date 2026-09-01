@@ -16,7 +16,7 @@ export interface SentWahaMessage { messageId: string; chatId: string; fromMe: bo
 export interface DownloadedWahaMedia { buffer: Buffer; contentType: string; fileName: string; }
 export interface WahaHistoryQuery { limit: number; offset: number; timestampGte?: number; timestampLte?: number; }
 export interface WahaChatProfile { id: string; name?: string; }
-export interface WhatsAppGroupMetadata { id: string; subject?: string; description?: string; participants: Array<{ jid: string; name?: string; phoneNumber?: string; admin?: string | null }>; }
+export interface WhatsAppGroupMetadata { id: string; subject?: string; description?: string; participants: Array<{ jid: string; name?: string; phoneNumber?: string; avatarUrl?: string; admin?: string | null }>; }
 
 export class WahaApiError extends Error {
   constructor(readonly kind: 'not_configured' | 'timeout' | 'network' | 'invalid_response' | 'api', readonly status?: number, details?: string) {

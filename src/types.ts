@@ -77,6 +77,7 @@ export interface Message {
   isDeleted?: boolean;
   isTemplate?: boolean;
   whatsappPreviousContent?: string | null;
+  isForwarded?: boolean;
 }
 
 export interface Tag {

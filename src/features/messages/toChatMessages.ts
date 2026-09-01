@@ -54,6 +54,7 @@ export const toChatMessages = (items: ConversationMessage[]): Message[] => items
   isDeleted: message.contentAttributes.deleted === true,
   isTemplate: message.kind === 'template',
   whatsappPreviousContent: typeof message.contentAttributes.whatsapp_previous_content === 'string' ? message.contentAttributes.whatsapp_previous_content : null,
+  isForwarded: message.contentAttributes.whatsapp_is_forwarded === true,
   });
 });
 

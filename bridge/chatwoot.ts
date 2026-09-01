@@ -9,7 +9,7 @@ import type { EvolutionGroupParticipant } from './evolutionEvent.js';
 export type ApiInbox = { id: number; channel_type: string; inbox_identifier?: string; additional_attributes?: Record<string, unknown>; secret?: string };
 type Contact = { id: number; source_id: string };
 type Conversation = { id: number; internal_id?: number; status: string; inbox_id?: number; last_activity_at?: number };
-type ConversationTarget = { id: number; inbox_id: number; meta?: { sender?: { phone_number?: string | null } }; contact_inbox?: { source_id?: string | null } };
+type ConversationTarget = { id: number; inbox_id: number; meta?: { sender?: { phone_number?: string | null; additional_attributes?: Record<string, unknown> | null } }; contact_inbox?: { source_id?: string | null } };
 type AccountContact = {
   id: number;
   phone_number?: string;
@@ -38,6 +38,8 @@ export interface EvolutionMessageContext {
   chatType?: 'private' | 'group';
   participantJid?: string;
   participantName?: string;
+  isForwarded?: boolean;
+  forwardingScore?: number;
 }
 
 export interface HistoricalMetaImportInput {
@@ -163,6 +165,8 @@ const transportMessageAttributes = (transport: WhatsAppTransport, messageType: '
   ...(context.chatType === 'group' ? { whatsapp_chat_type: 'group' } : {}),
   ...(context.participantJid ? { whatsapp_participant_jid: context.participantJid } : {}),
   ...(context.participantName ? { whatsapp_participant_name: context.participantName } : {}),
+  ...(context.isForwarded ? { whatsapp_is_forwarded: true } : {}),
+  ...(typeof context.forwardingScore === 'number' ? { whatsapp_forwarding_score: context.forwardingScore } : {}),
   // An outgoing message received from a linked WhatsApp session was written
   // on the phone, rather than by an agent in Chatwoot. Keep this provider
   // neutral so WAHA and Evolution have identical behaviour in the UI.
@@ -184,6 +188,8 @@ const evolutionMessageAttributes = (messageType: 'incoming' | 'outgoing', remote
   ...(context.chatType === 'group' ? { whatsapp_chat_type: 'group' } : {}),
   ...(context.participantJid ? { whatsapp_participant_jid: context.participantJid } : {}),
   ...(context.participantName ? { whatsapp_participant_name: context.participantName } : {}),
+  ...(context.isForwarded ? { whatsapp_is_forwarded: true } : {}),
+  ...(typeof context.forwardingScore === 'number' ? { whatsapp_forwarding_score: context.forwardingScore } : {}),
   ...(messageType === 'outgoing' ? { evolution_origin: 'mobile' } : {}),
   ...(inReplyTo ? { in_reply_to: inReplyTo } : {}),
   ...replyAttributes(quotedMessageId),
@@ -365,10 +371,15 @@ export const chatwootBridge = {
     const conversation = await request<ConversationTarget>(`/api/v1/accounts/${currentAccountId()}/conversations/${conversationId}`, {}, true);
     if (conversation.inbox_id !== inboxId) throw new Error('A conversa não pertence à inbox informada.');
     const sourceId = conversation.contact_inbox?.source_id;
+    // The account conversation serializer omits contact_inbox on some
+    // Chatwoot versions. Groups still carry their canonical JID on the
+    // sender's additional attributes, so use it as the authoritative fallback.
     const encoded = typeof sourceId === 'string' && sourceId.match(/^whatsapp:group:(.+)$/)?.[1];
-    if (!encoded) throw new Error('A conversa não é um grupo WhatsApp válido.');
+    const declaredJid = conversation.meta?.sender?.additional_attributes?.whatsapp_group_jid;
+    const rawGroupJid = encoded || (typeof declaredJid === 'string' ? declaredJid : null);
+    if (!rawGroupJid) throw new Error('A conversa não é um grupo WhatsApp válido.');
     try {
-      const groupJid = decodeURIComponent(encoded);
+      const groupJid = decodeURIComponent(rawGroupJid);
       if (!groupJid.endsWith('@g.us')) throw new Error('invalid group');
       return groupJid;
     } catch { throw new Error('A conversa não é um grupo WhatsApp válido.'); }

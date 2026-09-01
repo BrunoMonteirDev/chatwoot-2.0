@@ -2,7 +2,7 @@ import { authenticatedBridgeHeaders } from '../../integrations/bridge/auth';
 import { BridgeApiError } from '../../integrations/chatwoot/errors';
 import type { WhatsAppTransport } from '../../integrations/whatsapp/provider';
 
-export interface GroupParticipant { jid: string; name?: string; phoneNumber?: string; admin?: string | null; }
+export interface GroupParticipant { jid: string; name?: string; phoneNumber?: string; avatarUrl?: string; admin?: string | null; }
 export interface GroupMetadata { id: string; subject?: string; description?: string; participants: GroupParticipant[]; transport: WhatsAppTransport; canEditDescription: boolean; }
 const bridgeUrl = (import.meta.env.VITE_BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
 const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {

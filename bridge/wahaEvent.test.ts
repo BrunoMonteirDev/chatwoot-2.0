@@ -42,6 +42,10 @@ describe('WAHA webhook normalization', () => {
     });
   });
 
+  it('normaliza encaminhamento do contexto real GOWS para texto e mídia', () => {
+    expect(parseIncomingWahaMessage({ event: 'message', session: 'empresa', payload: { id: 'forwarded', chatId: '5511999999999@c.us', from: '5511999999999@c.us', body: 'encaminhada', _data: { Message: { documentMessage: { contextInfo: { isForwarded: true, forwardingScore: 2 } } } } } })).toMatchObject({ isForwarded: true, forwardingScore: 2 });
+  });
+
   it('mantém mensagens próprias do histórico GOWS mesmo quando `to` vem vazio', () => {
     expect(parseWahaHistoryMessage('empresa', { id: 'true_123@lid_3EB0OWN', from: '123@lid', to: null, fromMe: true, body: 'enviada pelo aparelho' }))
       .toMatchObject({ externalId: '3EB0OWN', chatId: '123@lid', remoteJid: '123@lid', fromMe: true, lid: '123', content: 'enviada pelo aparelho' });

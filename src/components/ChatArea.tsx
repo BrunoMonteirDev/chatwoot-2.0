@@ -69,6 +69,8 @@ import { documentPresentation, filesFromTransfer, hasFilesInTransfer, triggerAtt
 import { shouldSendMessageOnEnter, type SendMessageShortcut } from '../features/messages/sendMessageShortcut';
 import { useContactConversations } from '../features/contacts/useContactConversations';
 import { useConversationAttachments } from '../features/attachments/useConversationAttachments';
+import { groupMetadataClient } from '../features/groups/metadata';
+import { participantColor } from '../features/groups/participant';
 
 
 // Helper to format WhatsApp Markdown, URLs, Mentions, Bold (*), Italic (_), Strikethrough (~), Code (`)
@@ -776,6 +778,17 @@ export const ChatArea: React.FC<Props> = ({
   }, []);
   const [replyTo, setReplyTo] = useState<ReplyTo | null>(null);
   const conversationInbox = conversation ? inboxes.find((inbox) => inbox.id === conversation.inboxId) : undefined;
+  const [groupParticipantAvatars, setGroupParticipantAvatars] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const isGroup = chat.isGroup || conversation?.isGroup || chat.messages.some(message => message.whatsappRemoteJid?.endsWith('@g.us'));
+    const transport = chat.messages.slice().reverse().find(message => message.whatsappTransport && message.whatsappTransport !== 'meta_cloud')?.whatsappTransport;
+    if (!isGroup || !conversation || !transport) { setGroupParticipantAvatars({}); return; }
+    let active = true;
+    void groupMetadataClient.get(conversation.inboxId, conversation.id, transport).then(({ group }) => {
+      if (active) setGroupParticipantAvatars(Object.fromEntries(group.participants.flatMap(participant => participant.avatarUrl ? [[participant.jid, participant.avatarUrl]] : [])));
+    }).catch(() => { if (active) setGroupParticipantAvatars({}); });
+    return () => { active = false; };
+  }, [chat.id, chat.isGroup, conversation?.id, conversation?.inboxId]);
   const externalSendBlocked = !canSendWhatsAppMessage(whatsappConnection, messageMode === 'privada');
   const canUseMetaTemplates = !externalSendBlocked && Boolean(conversationInbox && metaCloudMetadataForInbox(conversationInbox));
 
@@ -1798,6 +1811,8 @@ export const ChatArea: React.FC<Props> = ({
         {chat.messages.map((msg, index) => {
           const isMe = msg.sender === 'me';
           const prevMsg = chat.messages[index - 1];
+          const isGroupMessage = Boolean(chat.isGroup || conversation?.isGroup || msg.whatsappRemoteJid?.endsWith('@g.us'));
+          const participantAvatar = msg.senderIdentity ? groupParticipantAvatars[msg.senderIdentity] : undefined;
           const showDatePill =
             msg.dateLabel && (!prevMsg || prevMsg.dateLabel !== msg.dateLabel);
 
@@ -1830,6 +1845,9 @@ export const ChatArea: React.FC<Props> = ({
                 }`}
               >
                 <div className={`flex w-full items-end gap-1.5 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                {!isMe && isGroupMessage && msg.senderName && <div className="mb-0.5 grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-full text-[9px] font-bold text-white" style={{ backgroundColor: msg.senderColor || participantColor(msg.senderIdentity || msg.senderName) }}>
+                  {participantAvatar ? <img src={participantAvatar} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : msg.senderName.split('·')[0].trim().split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toUpperCase()}
+                </div>}
                 <div
                   onContextMenu={(e) => handleMessageContextMenu(e, msg)}
                   className={`max-w-[85%] sm:max-w-[75%] lg:max-w-[65%] w-fit rounded-lg px-3 py-1.5 shadow-xs relative group border select-none ${
@@ -1857,6 +1875,8 @@ export const ChatArea: React.FC<Props> = ({
                       <span>Mensagem Privada (Nota Interna)</span>
                     </div>
                   )}
+
+                  {msg.isForwarded && <div className="mb-1 flex items-center gap-1 text-[11px] text-[#8696a0]"><CornerUpRight className="h-3.5 w-3.5" />Encaminhada</div>}
 
                   {/* Sender Name in Group Chat (only if not an audio note card, which has its own header) */}
                   {!isMe && msg.senderName && !(msg.audioAuthor || msg.attachments?.some((a) => a.type === 'audio')) && (

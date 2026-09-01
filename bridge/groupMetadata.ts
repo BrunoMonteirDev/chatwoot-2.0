@@ -4,7 +4,7 @@ export interface GroupMetadata {
   id: string;
   subject?: string;
   description?: string;
-  participants: Array<{ jid: string; name?: string; phoneNumber?: string; admin?: string | null }>;
+  participants: Array<{ jid: string; name?: string; phoneNumber?: string; avatarUrl?: string; admin?: string | null }>;
   transport: WhatsAppTransport;
   canEditDescription: boolean;
 }

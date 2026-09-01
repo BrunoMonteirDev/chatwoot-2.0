@@ -109,7 +109,12 @@ const groupTransport = (configuration: { transports: Array<'evolution' | 'waha' 
 const loadGroupMetadata = async (transport: 'evolution' | 'waha', configuration: { evolutionInstanceName: string | null; wahaSessionName: string | null }, groupJid: string): Promise<GroupMetadata> => {
   if (transport === 'waha') {
     if (!configuration.wahaSessionName) throw new Error('A sessão WAHA desta inbox não está configurada.');
-    return { ...(await wahaTransport.getGroupMetadata(configuration.wahaSessionName, groupJid)), transport, canEditDescription: true };
+    const metadata = await wahaTransport.getGroupMetadata(configuration.wahaSessionName, groupJid);
+    // Signed WhatsApp profile URLs are provider data. Resolve each distinct
+    // participant once while the group metadata cache is cold, never during a
+    // React render or once per individual message bubble.
+    const participants = await Promise.all(metadata.participants.map(async participant => ({ ...participant, ...(await wahaTransport.getChatAvatarUrl(configuration.wahaSessionName!, participant.jid).then(avatarUrl => avatarUrl ? { avatarUrl } : {}).catch(() => ({}))) })));
+    return { ...metadata, participants, transport, canEditDescription: true };
   }
   if (!configuration.evolutionInstanceName) throw new Error('A instância Evolution desta inbox não está configurada.');
   return { ...(await evolutionBridge.getGroupMetadata(configuration.evolutionInstanceName, groupJid)), transport, canEditDescription: true };
@@ -654,7 +659,7 @@ const importWahaHistoricalMessage = async (job: WahaHistoryJob, raw: unknown, co
       sourceId: key, threadId: message.chatId, timestamp: Math.floor(new Date(message.timestamp).getTime() / 1000),
       content: message.content, transport: 'waha', direction: message.fromMe ? 'outgoing' : 'incoming', remoteJid: message.remoteJid,
       quotedMessageId: message.quotedMessageId, status: wahaStatusForAck(message.ack), mediaType: message.media?.kind,
-      mediaUnavailable, media, context: { chatType: message.chatType, participantJid: message.participantJid, participantName: message.participantName },
+      mediaUnavailable, media, context: { chatType: message.chatType, participantJid: message.participantJid, participantName: message.participantName, isForwarded: message.isForwarded, forwardingScore: message.forwardingScore },
     }));
     if (needsMediaBackfill && !media) {
       // Keep this retryable: WAHA may make a historical attachment available
@@ -1353,7 +1358,7 @@ app.post('/webhooks/waha', (request, response) => {
           // reply id from provider metadata reliably. Resolve the namespaced
           // WAHA key first and send both the internal and external identity.
           const inReplyTo = await replyTargetId(conversation.id, 'waha', message.quotedMessageId);
-          const context = { chatType: message.chatType, participantJid: message.participantJid, participantName: message.participantName };
+          const context = { chatType: message.chatType, participantJid: message.participantJid, participantName: message.participantName, isForwarded: message.isForwarded, forwardingScore: message.forwardingScore };
           if (message.media) {
             const media = await wahaTransport.downloadMedia(message.media);
             if (message.fromMe) await chatwootBridge.createMobileOutgoingTransportMediaMessage(conversation.id, 'waha', message.content, message.externalId, media, message.quotedMessageId, message.remoteJid, inReplyTo, context);

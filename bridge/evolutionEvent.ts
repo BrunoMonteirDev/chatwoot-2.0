@@ -13,7 +13,7 @@ export interface IncomingEvolutionMedia {
   message: Record<string, unknown>;
 }
 
-export interface IncomingEvolutionMessage { instance: string; messageId: string; sourceId: string; remoteJid: string; phoneNumber?: string; lid?: string; fromMe: boolean; name: string; contactName?: string; content: string; chatType?: 'private' | 'group'; participantJid?: string; participantName?: string; media?: IncomingEvolutionMedia; quotedMessageId?: string; }
+export interface IncomingEvolutionMessage { instance: string; messageId: string; sourceId: string; remoteJid: string; phoneNumber?: string; lid?: string; fromMe: boolean; name: string; contactName?: string; content: string; chatType?: 'private' | 'group'; participantJid?: string; participantName?: string; isForwarded?: boolean; forwardingScore?: number; media?: IncomingEvolutionMedia; quotedMessageId?: string; }
 
 export interface IncomingEvolutionReaction {
   instance: string;
@@ -183,13 +183,15 @@ export const parseIncomingEvolutionMessage = (payload: unknown): IncomingEvoluti
     record(extended.contextInfo), record(image.contextInfo), record(audio.contextInfo), record(video.contextInfo), record(document.contextInfo),
     record(message.contextInfo), record(message.messageContextInfo), record(data.contextInfo), record(data.messageContextInfo),
   ];
+  const forwardingScore = contexts.map(value => number(value.forwardingScore)).find((value): value is number => value !== null);
+  const isForwarded = contexts.some(value => value.isForwarded === true) || (forwardingScore !== undefined && forwardingScore > 0);
   const context = text(...contexts.map(value => value.stanzaId), ...contexts.map(value => record(value.quotedMessage).key ? text(record(record(value.quotedMessage).key).id) : null));
   const id = text(key.id, data.id);
   const instance = text(root.instance, data.instance);
   if (!instance || !id || (!content && !media)) return null;
   const identity = remoteJid.endsWith('@g.us') ? groupIdentityFor(key, data, remoteJid) : identityFor(key, data, remoteJid);
   if (!identity) return null;
-  return { instance, messageId: id, remoteJid, ...identity, content: content || '', ...(media ? { media } : {}), ...(context ? { quotedMessageId: context } : {}) };
+  return { instance, messageId: id, remoteJid, ...identity, content: content || '', ...(isForwarded ? { isForwarded: true } : {}), ...(forwardingScore !== undefined ? { forwardingScore } : {}), ...(media ? { media } : {}), ...(context ? { quotedMessageId: context } : {}) };
 };
 
 export const parseIncomingEvolutionReaction = (payload: unknown): IncomingEvolutionReaction | null => {

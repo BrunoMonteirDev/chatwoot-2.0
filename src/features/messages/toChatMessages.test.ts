@@ -46,4 +46,9 @@ describe('toChatMessages reactions', () => {
     expect(item.senderIdentity).toBe('12345@lid');
     expect(toChatMessages([baseMessage({ senderName: null, contentAttributes: { whatsapp_participant_jid: '12345@lid' } })])[0].senderName).toBe('12345@lid');
   });
+
+  it('expõe o marcador normalizado de mensagem encaminhada', () => {
+    expect(toChatMessages([baseMessage({ contentAttributes: { whatsapp_is_forwarded: true } })])[0].isForwarded).toBe(true);
+    expect(toChatMessages([baseMessage({ contentAttributes: {} })])[0].isForwarded).toBe(false);
+  });
 });

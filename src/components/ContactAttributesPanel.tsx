@@ -138,7 +138,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
       setGroupMetadata(group); setDescriptionDraft(group.description || '');
       setGroupMembers(group.participants.map(member => {
         const phone = participantPhone(member.jid, member.phoneNumber);
-        return { id: member.jid, name: member.name || phone || member.jid, phone: phone || member.jid, isAdmin: Boolean(member.admin), status: member.admin ? 'Administrador' : undefined, avatarBg: participantColor(member.jid) };
+        return { id: member.jid, name: member.name || phone || member.jid, phone: phone || member.jid, avatar: member.avatarUrl, isAdmin: Boolean(member.admin), status: member.admin ? 'Administrador' : undefined, avatarBg: participantColor(member.jid) };
       }));
     }).catch(error => { if (active) setGroupError(error instanceof Error ? error.message : 'Não foi possível carregar o grupo.'); });
     return () => { active = false; };
@@ -188,7 +188,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
     setGroupMetadata(group); setDescriptionDraft(group.description || '');
     setGroupMembers(group.participants.map(member => {
       const phone = participantPhone(member.jid, member.phoneNumber);
-      return { id: member.jid, name: member.name || phone || member.jid, phone: phone || member.jid, isAdmin: Boolean(member.admin), status: member.admin ? 'Administrador' : undefined, avatarBg: participantColor(member.jid) };
+      return { id: member.jid, name: member.name || phone || member.jid, phone: phone || member.jid, avatar: member.avatarUrl, isAdmin: Boolean(member.admin), status: member.admin ? 'Administrador' : undefined, avatarBg: participantColor(member.jid) };
     }));
   };
   const handleAddMember = async (e: React.FormEvent) => {
