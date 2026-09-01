@@ -37,6 +37,26 @@ export const normalizeInbox = (inbox: ChatwootInboxDto): Inbox => ({
   additionalAttributes: inbox.additional_attributes ?? {},
 });
 
+const phoneFallback = (phoneNumber?: string | null, attributes?: Record<string, unknown> | null) => {
+  if (typeof phoneNumber === 'string' && phoneNumber.trim()) return phoneNumber;
+  for (const key of ['waha_phone', 'evolution_phone', 'whatsapp_phone_number']) {
+    const value = attributes?.[key];
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return null;
+};
+
+const displayContactName = (name: string | null | undefined, phoneNumber?: string | null, attributes?: Record<string, unknown> | null) => {
+  const fallback = phoneFallback(phoneNumber, attributes);
+  const trimmed = name?.trim();
+  const digits = trimmed?.replace(/\D/g, '') || '';
+  const fallbackDigits = fallback?.replace(/\D/g, '') || '';
+  // WAHA/Evolution may initially expose a LID as a bare numeric name. Once
+  // its real phone is known, it is the human-readable fallback everywhere.
+  if (!trimmed || trimmed.endsWith('@lid') || (digits.length >= 12 && Boolean(fallbackDigits) && digits !== fallbackDigits)) return fallback || trimmed || 'Contato sem nome';
+  return trimmed;
+};
+
 export const normalizeConversation = (conversation: ChatwootConversationDto): ConversationSummary => {
   const preview = conversation.messages[0];
   const message = preview?.content?.trim() || (preview?.attachments?.length ? 'Anexo' : 'Sem mensagens');
@@ -44,7 +64,7 @@ export const normalizeConversation = (conversation: ChatwootConversationDto): Co
     id: conversation.id,
     inboxId: conversation.inbox_id,
     channelType: conversation.meta?.channel ?? null,
-    contactName: conversation.meta?.sender?.name || 'Contato sem nome',
+    contactName: displayContactName(conversation.meta?.sender?.name, conversation.meta?.sender?.phone_number, conversation.meta?.sender?.additional_attributes),
     contactId: conversation.meta?.sender?.id ?? null,
     contactAvatarUrl: conversation.meta?.sender?.thumbnail ?? null,
     lastMessage: preview?.private ? `🔒 Nota: ${message}` : message,
@@ -102,7 +122,7 @@ export const normalizeCannedResponse = (response: ChatwootCannedResponseDto): Ca
 
 export const normalizeContact = (contact: ChatwootContactDto): ContactProfile => ({
   id: contact.id,
-  name: contact.name || 'Contato sem nome',
+  name: displayContactName(contact.name, contact.phone_number, contact.additional_attributes),
   avatarUrl: contact.thumbnail || null,
   phoneNumber: contact.phone_number || null,
   email: contact.email || null,

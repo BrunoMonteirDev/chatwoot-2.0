@@ -1000,7 +1000,7 @@ const conversationForEvolutionIdentity = async (event: EvolutionIdentityEvent) =
   // The current inbox is the source of truth. It also covers contacts created
   // manually before their first WhatsApp message.
   const existingSource = await chatwootBridge.findContactSourceByPhone(inbox.id, event.phoneNumber) || await identities.find(identityKeys);
-  const contact = await chatwootBridge.createOrFindContact(inbox.identifier, { ...event, sourceId: existingSource || event.sourceId });
+  const contact = await chatwootBridge.createOrFindContact(inbox.identifier, { ...event, sourceId: existingSource || event.sourceId, name: event.contactName || event.phoneNumber || event.name });
   // Creation is idempotent in Chatwoot and does not refresh an existing
   // contact's display name. Keep a name supplied by WhatsApp, but never
   // replace a manually chosen name with the phone/LID fallback.
@@ -1055,7 +1055,7 @@ const conversationForWahaIdentity = async (inbox: { id: number; identifier: stri
   const existingSource = await chatwootBridge.findContactSourceByPhone(inbox.id, phoneNumber) || await identities.find(identityKeys);
   const contact = await chatwootBridge.createOrFindContact(inbox.identifier, {
     sourceId: existingSource || event.sourceId,
-    name: event.name,
+    name: event.contactName || phoneNumber || event.name,
     ...(phoneNumber ? { phoneNumber } : {}),
     ...(event.avatarUrl ? { avatarUrl: event.avatarUrl } : {}),
   });
