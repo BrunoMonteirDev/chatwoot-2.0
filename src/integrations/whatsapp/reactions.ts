@@ -1,5 +1,6 @@
 const bridgeUrl = (import.meta.env.VITE_BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
 import { authenticatedBridgeHeaders } from '../bridge/auth';
+import { chatwootApiClient } from '../chatwoot/client';
 
 export type WhatsAppReactionTransport = 'evolution' | 'waha' | 'meta_cloud';
 
@@ -32,6 +33,11 @@ export const whatsappReactionService = {
       : 'Não foi possível enviar a reação ao WhatsApp.';
     throw new WhatsAppReactionError(message);
   },
+};
+
+export const nativeMetaReactionService = {
+  send: (accountId: number, conversationId: number, messageId: number, emoji: string) =>
+    chatwootApiClient.post(`/api/v1/accounts/${accountId}/conversations/${conversationId}/messages/${messageId}/native_whatsapp_reaction`, { emoji }),
 };
 
 export const fallbackRemoteJid = (phoneNumber: string | null | undefined) => {

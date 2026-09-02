@@ -3,7 +3,7 @@ import type { ConversationMessage } from '../../domain/currentUser';
 import { errorMessageForUser } from '../../integrations/chatwoot/errors';
 import { messageService } from '../../integrations/chatwoot/messages';
 import { parseExternalMessageId } from '../../integrations/whatsapp/provider';
-import { fallbackRemoteJid, whatsappReactionService, type WhatsAppReactionTransport } from '../../integrations/whatsapp/reactions';
+import { fallbackRemoteJid, nativeMetaReactionService, whatsappReactionService, type WhatsAppReactionTransport } from '../../integrations/whatsapp/reactions';
 import { whatsappMessageMutationService } from '../../integrations/whatsapp/messageMutations';
 import { mergeMessage, messageHistoryCache } from './MessageHistoryCache';
 
@@ -189,7 +189,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
     const remoteJid = typeof target.contentAttributes.whatsapp_remote_jid === 'string'
       ? target.contentAttributes.whatsapp_remote_jid
       : fallbackRemoteJid(fallbackPhoneNumber);
-    if (!transport || !remoteJid) return false;
+    if (!transport || (transport !== 'meta_cloud' && !remoteJid)) return false;
     const operationId = `${messageId}:self:${transport}`;
     if (reactionInFlight.current.has(operationId)) return false;
     const beforeAttributes = target.contentAttributes;
@@ -198,7 +198,11 @@ export const useConversationMessages = (accountId: number | null, conversationId
     reactionInFlight.current.add(operationId);
     setMessages(current => current.map((message) => message.id === messageId ? { ...message, contentAttributes: expectedAttributes } : message));
     try {
-      await whatsappReactionService.send({
+      const emoji = nextReactions.find((reaction) => reaction.sender_id === 'self' && reaction.transport === transport)?.emoji || '';
+      if (transport === 'meta_cloud' && target.sourceId.startsWith('wamid.')) {
+        if (!accountId) return false;
+        await nativeMetaReactionService.send(accountId, conversationId, messageId, emoji);
+      } else await whatsappReactionService.send({
         accountId,
         inboxId,
         conversationId,
@@ -207,7 +211,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
         targetFromMe: typeof target.contentAttributes.whatsapp_from_me === 'boolean' ? target.contentAttributes.whatsapp_from_me : target.kind === 'outgoing',
         participantJid: typeof target.contentAttributes.whatsapp_participant_jid === 'string' ? target.contentAttributes.whatsapp_participant_jid : null,
         transport,
-        emoji: nextReactions.find((reaction) => reaction.sender_id === 'self' && reaction.transport === transport)?.emoji || '',
+        emoji,
       });
       return true;
     } catch {

@@ -12,11 +12,11 @@ export type MessageCapabilities = {
 // for a message. This matters for hybrid inboxes, where the inbox default may
 // differ from the provider that actually sent this particular message.
 export const transportForMessage = (message: Pick<Message, 'sourceId' | 'whatsappTransport'>): WhatsAppTransport | null =>
-  parseExternalMessageId(message.sourceId)?.provider || message.whatsappTransport || null;
+  parseExternalMessageId(message.sourceId)?.provider || (message.sourceId?.startsWith('wamid.') ? 'meta_cloud' : null) || message.whatsappTransport || null;
 
 export const capabilitiesForMessage = (message: Message): MessageCapabilities => {
   const transport = transportForMessage(message);
-  const hasExternalTarget = Boolean(message.sourceId && parseExternalMessageId(message.sourceId) && message.whatsappRemoteJid);
+  const hasExternalTarget = Boolean((message.sourceId && parseExternalMessageId(message.sourceId) && message.whatsappRemoteJid) || message.sourceId?.startsWith('wamid.'));
   const canMutate = hasExternalTarget && !message.isPrivate && !message.isActivity && !message.isRevoked;
   const isOwnWhatsAppMessage = message.sender === 'me' && message.whatsappFromMe !== false;
 
