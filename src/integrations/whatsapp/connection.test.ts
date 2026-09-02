@@ -2,6 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { authSession } from '../chatwoot/authSession';
 import { canSendWhatsAppMessage, whatsappConnectionService } from './connection';
+import type { Inbox } from '../../domain/currentUser';
+
+const nativeMetaInbox: Inbox = { id: 5, name: 'Meta', avatarUrl: null, channelType: 'Channel::Whatsapp', channelId: 5, webhookUrl: null, inboxIdentifier: null, additionalAttributes: {} };
 
 describe('operational WhatsApp connection', () => {
   beforeEach(() => {
@@ -22,5 +25,10 @@ describe('operational WhatsApp connection', () => {
     expect(canSendWhatsAppMessage(offline, false)).toBe(false);
     expect(canSendWhatsAppMessage(offline, true)).toBe(true);
     expect(canSendWhatsAppMessage({ applicable: false, sendAllowed: true }, false)).toBe(true);
+  });
+
+  it('does not preflight the bridge for a native Meta inbox', async () => {
+    await expect(whatsappConnectionService.getForInbox(1, nativeMetaInbox)).resolves.toEqual({ applicable: false, sendAllowed: true });
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

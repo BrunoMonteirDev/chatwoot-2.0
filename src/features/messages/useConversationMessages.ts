@@ -5,6 +5,7 @@ import { messageService } from '../../integrations/chatwoot/messages';
 import { parseExternalMessageId } from '../../integrations/whatsapp/provider';
 import { fallbackRemoteJid, nativeMetaReactionService, whatsappReactionService, type WhatsAppReactionTransport } from '../../integrations/whatsapp/reactions';
 import { whatsappMessageMutationService } from '../../integrations/whatsapp/messageMutations';
+import { transportForMessage } from './capabilities';
 import { mergeMessage, messageHistoryCache } from './MessageHistoryCache';
 
 export const mergeRealtimeMessage = mergeMessage;
@@ -183,9 +184,12 @@ export const useConversationMessages = (accountId: number | null, conversationId
     if (!inboxId || !conversationId || messageId < 1) return false;
     const target = messages.find((message) => message.id === messageId);
     if (!target || !target.sourceId) return false;
-    const sourceTransport = target.contentAttributes.whatsapp_transport;
-    const externalTransport = parseExternalMessageId(target.sourceId)?.provider;
-    const transport = sourceTransport === 'evolution' || sourceTransport === 'waha' || sourceTransport === 'meta_cloud' ? sourceTransport : externalTransport;
+    const transport = transportForMessage({
+      sourceId: target.sourceId,
+      whatsappTransport: target.contentAttributes.whatsapp_transport === 'evolution' || target.contentAttributes.whatsapp_transport === 'waha' || target.contentAttributes.whatsapp_transport === 'meta_cloud'
+        ? target.contentAttributes.whatsapp_transport
+        : null,
+    });
     const remoteJid = typeof target.contentAttributes.whatsapp_remote_jid === 'string'
       ? target.contentAttributes.whatsapp_remote_jid
       : fallbackRemoteJid(fallbackPhoneNumber);

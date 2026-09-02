@@ -1,4 +1,6 @@
 import { authenticatedBridgeHeaders } from '../bridge/auth';
+import type { Inbox } from '../../domain/currentUser';
+import { isNativeWhatsAppInbox } from './provider';
 
 export type OperationalWhatsAppConnection = {
   applicable: boolean;
@@ -21,5 +23,9 @@ export const whatsappConnectionService = {
     const response = await fetch(`${bridgeUrl}/providers/whatsapp/inboxes/${inboxId}/connection?${query}`, { headers: authenticatedBridgeHeaders() });
     if (!response.ok) throw new Error('Não foi possível verificar a conexão do WhatsApp.');
     return response.json() as Promise<OperationalWhatsAppConnection>;
+  },
+  getForInbox(accountId: number, inbox: Inbox, chatType: 'private' | 'group' = 'private'): Promise<OperationalWhatsAppConnection> {
+    if (isNativeWhatsAppInbox(inbox)) return Promise.resolve({ applicable: false, sendAllowed: true });
+    return this.get(accountId, inbox.id, chatType);
   },
 };

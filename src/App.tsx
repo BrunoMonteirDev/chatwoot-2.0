@@ -433,9 +433,10 @@ export default function App() {
   }, [activeChatId, conversations, directlyLoadedConversation]);
   useEffect(() => {
     const inboxId = selectedConversation?.inboxId;
-    if (!currentAccount || !inboxId) { setWhatsappConnection(null); return; }
+    const inbox = inboxes.find(item => item.id === inboxId);
+    if (!currentAccount || !inboxId || !inbox) { setWhatsappConnection(null); return; }
     let active = true;
-    const refresh = () => whatsappConnectionService.get(currentAccount.id, inboxId, selectedConversation.isGroup ? 'group' : 'private')
+    const refresh = () => whatsappConnectionService.getForInbox(currentAccount.id, inbox, selectedConversation.isGroup ? 'group' : 'private')
       .then((status) => { if (active) setWhatsappConnection(status); })
       .catch(() => { if (active) setWhatsappConnection(null); });
     void refresh();
@@ -443,7 +444,7 @@ export default function App() {
     // check for proxies/providers that drop a callback while reconnecting.
     const interval = window.setInterval(() => void refresh(), 120_000);
     return () => { active = false; window.clearInterval(interval); };
-  }, [currentAccount?.id, selectedConversation?.id, selectedConversation?.inboxId, selectedConversation?.isGroup]);
+  }, [currentAccount?.id, inboxes, selectedConversation?.id, selectedConversation?.inboxId, selectedConversation?.isGroup]);
   const contactDetails = useContactDetails(currentAccount?.id ?? null, selectedConversation?.contactId ?? null);
   const messageHistory = useConversationMessages(currentAccount?.id ?? null, selectedConversationId, selectedConversation?.inboxId ?? null, contactDetails.contact?.phoneNumber);
   const showSystemMessages = showSystemMessagesFrom(authenticatedUser?.uiSettings);
