@@ -27,8 +27,17 @@ describe('operational WhatsApp connection', () => {
     expect(canSendWhatsAppMessage({ applicable: false, sendAllowed: true }, false)).toBe(true);
   });
 
-  it('does not preflight the bridge for a native Meta inbox', async () => {
-    await expect(whatsappConnectionService.getForInbox(1, nativeMetaInbox)).resolves.toEqual({ applicable: false, sendAllowed: true });
+  it('uses native Meta state without preflighting the bridge', async () => {
+    await expect(whatsappConnectionService.getForInbox(1, nativeMetaInbox)).resolves.toEqual({ applicable: true, transport: 'meta_cloud', status: 'connected', sendAllowed: true });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('blocks external sends for disconnected native Meta while retaining private notes', async () => {
+    const disconnected = { ...nativeMetaInbox, additionalAttributes: { meta_connection_status: 'disconnected' } };
+    const connection = await whatsappConnectionService.getForInbox(1, disconnected);
+    expect(connection).toMatchObject({ transport: 'meta_cloud', status: 'disconnected', sendAllowed: false });
+    expect(canSendWhatsAppMessage(connection, false)).toBe(false);
+    expect(canSendWhatsAppMessage(connection, true)).toBe(true);
     expect(fetch).not.toHaveBeenCalled();
   });
 });

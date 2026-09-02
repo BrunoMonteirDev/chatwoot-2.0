@@ -1584,9 +1584,9 @@ export const ChatArea: React.FC<Props> = ({
                 isDarkMode ? 'text-[#8696a0]' : 'text-[#667781]'
               }`}
             >
-              {externalSendBlocked ? `WhatsApp ${whatsappConnection?.transport || ''} desconectado — envio bloqueado` : typingName ? `${typingName} está digitando…` : chat.about || (chat.isGroup ? 'Clique para dados do grupo' : realtimeConnectionStatus === 'connected' ? 'online' : 'reconectando…')}
+              {externalSendBlocked ? `WhatsApp ${whatsappConnection?.status === 'connecting' ? 'conectando' : whatsappConnection?.status === 'error' ? 'com erro' : 'desconectado'} — envio bloqueado` : typingName ? `${typingName} está digitando…` : chat.about || (chat.isGroup ? 'Clique para dados do grupo' : realtimeConnectionStatus === 'connected' ? 'online' : 'reconectando…')}
             </span>
-            {externalSendBlocked && <span className="mt-1 inline-flex w-fit rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-500">Sessão WhatsApp desconectada</span>}
+            {externalSendBlocked && <span className="mt-1 inline-flex w-fit rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-500">{whatsappConnection?.status === 'connecting' ? 'Sessão WhatsApp conectando' : whatsappConnection?.status === 'error' ? 'Sessão WhatsApp com erro' : 'Sessão WhatsApp desconectada'}</span>}
           </div>
         </div>
 

@@ -12,4 +12,12 @@ describe('mergeRealtimeInbox', () => {
     expect(merged.find((item) => item.id === 1)?.additionalAttributes.waha_connection_status).toBe('disconnected');
     expect(merged.find((item) => item.id === 2)?.additionalAttributes.waha_connection_status).toBe('connected');
   });
+
+  it('aplica inbox.updated de Meta nativo sem afetar inboxes WAHA', () => {
+    const nativeMeta = { id: 3, name: 'Meta', avatarUrl: null, channelType: 'Channel::Whatsapp', channelId: 3, webhookUrl: null, inboxIdentifier: null, additionalAttributes: { meta_connection_status: 'connected' } };
+    const offline = { ...nativeMeta, additionalAttributes: { meta_connection_status: 'disconnected', meta_connection_last_error: 'Partner removed' } };
+    const merged = mergeRealtimeInbox([inbox(1, 'Suporte', 'connected'), nativeMeta], offline);
+    expect(merged.find((item) => item.id === 3)?.additionalAttributes.meta_connection_status).toBe('disconnected');
+    expect(merged.find((item) => item.id === 1)?.additionalAttributes.waha_connection_status).toBe('connected');
+  });
 });

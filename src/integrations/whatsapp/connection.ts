@@ -25,7 +25,11 @@ export const whatsappConnectionService = {
     return response.json() as Promise<OperationalWhatsAppConnection>;
   },
   getForInbox(accountId: number, inbox: Inbox, chatType: 'private' | 'group' = 'private'): Promise<OperationalWhatsAppConnection> {
-    if (isNativeWhatsAppInbox(inbox)) return Promise.resolve({ applicable: false, sendAllowed: true });
+    if (isNativeWhatsAppInbox(inbox)) {
+      const value = inbox.additionalAttributes.meta_connection_status;
+      const status = value === 'connected' || value === 'connecting' || value === 'disconnected' || value === 'error' ? value : 'connected';
+      return Promise.resolve({ applicable: true, transport: 'meta_cloud', status, sendAllowed: status === 'connected' });
+    }
     return this.get(accountId, inbox.id, chatType);
   },
 };
