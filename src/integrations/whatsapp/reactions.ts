@@ -12,6 +12,7 @@ export interface SendWhatsAppReactionInput {
   remoteJid: string;
   targetFromMe: boolean;
   participantJid?: string | null;
+  providerMessageKey?: string | null;
   transport: WhatsAppReactionTransport;
   emoji: string;
 }

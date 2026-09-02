@@ -28,7 +28,7 @@ describe('WAHA webhook normalization', () => {
   it('usa a chave da mensagem, e não o JID do evento, como identidade WAHA', () => {
     expect(normalizeWahaMessageId('true_5511999999999@c.us_3EB01234')).toBe('3EB01234');
     expect(normalizeWahaMessageId('true_123456@lid_3EB01234')).toBe('3EB01234');
-    expect(parseIncomingWahaMessage({ event: 'message.any', session: 'empresa', payload: { id: 'true_123@lid_3EB01234', from: '123@lid', chatId: '123@lid' } })).toMatchObject({ externalId: '3EB01234' });
+    expect(parseIncomingWahaMessage({ event: 'message.any', session: 'empresa', payload: { id: 'true_123@lid_3EB01234', from: '123@lid', chatId: '123@lid' } })).toMatchObject({ externalId: '3EB01234', providerMessageKey: 'true_123@lid_3EB01234' });
   });
 
   it('normaliza lifecycle group.v2 sem transformar o grupo em contato individual', () => {

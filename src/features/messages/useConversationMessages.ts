@@ -210,6 +210,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
         remoteJid,
         targetFromMe: typeof target.contentAttributes.whatsapp_from_me === 'boolean' ? target.contentAttributes.whatsapp_from_me : target.kind === 'outgoing',
         participantJid: typeof target.contentAttributes.whatsapp_participant_jid === 'string' ? target.contentAttributes.whatsapp_participant_jid : null,
+        providerMessageKey: typeof target.contentAttributes.whatsapp_provider_message_key === 'string' ? target.contentAttributes.whatsapp_provider_message_key : null,
         transport,
         emoji,
       });

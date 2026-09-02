@@ -1405,7 +1405,7 @@ app.post('/webhooks/waha', (request, response) => {
           // reply id from provider metadata reliably. Resolve the namespaced
           // WAHA key first and send both the internal and external identity.
           const inReplyTo = await replyTargetId(conversation.id, 'waha', message.quotedMessageId);
-          const context = { chatType: message.chatType, participantJid: message.participantJid, participantName: message.participantName, isForwarded: message.isForwarded, forwardingScore: message.forwardingScore };
+          const context = { chatType: message.chatType, participantJid: message.participantJid, participantName: message.participantName, isForwarded: message.isForwarded, forwardingScore: message.forwardingScore, providerMessageKey: message.providerMessageKey };
           if (message.media) {
             const media = await wahaTransport.downloadMedia(message.media);
             if (message.fromMe) await chatwootBridge.createMobileOutgoingTransportMediaMessage(conversation.id, 'waha', message.content, message.externalId, media, message.quotedMessageId, message.remoteJid, inReplyTo, context);
@@ -1633,9 +1633,10 @@ app.post('/operations/reactions', async (request, response) => {
   const remoteJid = body.remoteJid;
   const targetFromMe = body.targetFromMe;
   const participantJid = body.participantJid;
+  const providerMessageKey = body.providerMessageKey;
   const emoji = body.emoji;
   const declaredTransport = body.transport;
-  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !Number.isInteger(conversationId) || typeof sourceId !== 'string' || typeof remoteJid !== 'string' || typeof targetFromMe !== 'boolean' || typeof emoji !== 'string' || (participantJid !== undefined && typeof participantJid !== 'string' && participantJid !== null) || (declaredTransport !== 'evolution' && declaredTransport !== 'waha' && declaredTransport !== 'meta_cloud')) {
+  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !Number.isInteger(conversationId) || typeof sourceId !== 'string' || typeof remoteJid !== 'string' || typeof targetFromMe !== 'boolean' || typeof emoji !== 'string' || (participantJid !== undefined && typeof participantJid !== 'string' && participantJid !== null) || (providerMessageKey !== undefined && typeof providerMessageKey !== 'string' && providerMessageKey !== null) || (declaredTransport !== 'evolution' && declaredTransport !== 'waha' && declaredTransport !== 'meta_cloud')) {
     return response.status(400).json({ error: 'Invalid reaction operation' });
   }
   const external = parseExternalMessageId(sourceId);
@@ -1648,6 +1649,7 @@ app.post('/operations/reactions', async (request, response) => {
     const metaConfig = transport === 'meta_cloud' ? await metaConfigs.get(inbox.id) : null;
     if (transport === 'waha') {
       if (!inbox.configuration.wahaSessionName) return response.status(409).json({ error: 'WAHA is not available for this inbox.' });
+      if (typeof providerMessageKey !== 'string' || !providerMessageKey) return response.status(422).json({ error: 'Esta mensagem antiga não possui o identificador necessário para reação.' });
       await adoptLegacyWahaOwnership(accountId as number, inbox.id);
       await wahaSessions.assertOwned(accountId as number, inbox.id, inbox.configuration.wahaSessionName);
     }
@@ -1656,7 +1658,7 @@ app.post('/operations/reactions', async (request, response) => {
       evolutionInstanceName: inbox.configuration.evolutionInstanceName,
       wahaSessionName: inbox.configuration.wahaSessionName,
       metaConfig,
-      target: { remoteJid, messageId: external.id, fromMe: targetFromMe, ...(typeof participantJid === 'string' ? { participant: participantJid } : {}), emoji },
+      target: { remoteJid, messageId: transport === 'waha' ? providerMessageKey as string : external.id, fromMe: targetFromMe, ...(typeof participantJid === 'string' ? { participant: participantJid } : {}), emoji },
     });
     await chatwootBridge.updateWhatsAppReaction(conversationId as number, sourceId, {
       senderId: 'self', emoji, transport, origin: 'platform',
@@ -1766,7 +1768,7 @@ app.post('/webhooks/chatwoot', async (request, response) => {
         const sentMessage = sentMessages[0];
         if (!sentMessage) throw new Error('WAHA não retornou o ID da mensagem enviada.');
         const providerMessageId = normalizeWahaMessageId(sentMessage.messageId);
-        await chatwootBridge.updateWhatsAppMessageTransport(event.conversationId, event.messageId, { sourceId: externalMessageId('waha', providerMessageId), transport: 'waha', remoteJid: sentMessage.chatId || event.number, fromMe: true });
+        await chatwootBridge.updateWhatsAppMessageTransport(event.conversationId, event.messageId, { sourceId: externalMessageId('waha', providerMessageId), transport: 'waha', remoteJid: sentMessage.chatId || event.number, fromMe: true, providerMessageKey: sentMessage.messageId });
         pendingKeys.forEach(key => pendingWahaOutgoing.delete(key));
         await Promise.all(sentMessages.map(sent => dedup.commit(externalMessageId('waha', normalizeWahaMessageId(sent.messageId)))));
         await dedup.commit(dedupId);

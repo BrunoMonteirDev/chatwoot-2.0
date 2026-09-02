@@ -31,6 +31,7 @@ export interface WhatsAppMessageTransportMetadata {
   transport: WhatsAppTransport;
   remoteJid: string;
   fromMe: boolean;
+  providerMessageKey?: string;
 }
 export interface WhatsAppMessageTarget { id: number; conversation_id: number; source_id: string; content_attributes: Record<string, unknown>; attachments_count?: number }
 
@@ -40,6 +41,7 @@ export interface EvolutionMessageContext {
   participantName?: string;
   isForwarded?: boolean;
   forwardingScore?: number;
+  providerMessageKey?: string;
 }
 
 export interface HistoricalMetaImportInput {
@@ -167,6 +169,7 @@ const transportMessageAttributes = (transport: WhatsAppTransport, messageType: '
   ...(context.participantName ? { whatsapp_participant_name: context.participantName } : {}),
   ...(context.isForwarded ? { whatsapp_is_forwarded: true } : {}),
   ...(typeof context.forwardingScore === 'number' ? { whatsapp_forwarding_score: context.forwardingScore } : {}),
+  ...(transport === 'waha' && context.providerMessageKey ? { whatsapp_provider_message_key: context.providerMessageKey } : {}),
   // An outgoing message received from a linked WhatsApp session was written
   // on the phone, rather than by an agent in Chatwoot. Keep this provider
   // neutral so WAHA and Evolution have identical behaviour in the UI.
@@ -457,7 +460,7 @@ export const chatwootBridge = {
     method: 'POST', body: JSON.stringify({ source_id: sourceId, reaction: { sender_id: reaction.senderId, emoji: reaction.emoji, transport: reaction.transport, origin: reaction.origin, ...(reaction.eventId ? { event_id: reaction.eventId } : {}) } }),
   }, true),
   updateWhatsAppMessageTransport: (conversationId: number, messageId: number, metadata: WhatsAppMessageTransportMetadata) => request(`/api/v1/accounts/${currentAccountId()}/conversations/${conversationId}/messages/${messageId}/whatsapp_transport_metadata`, {
-    method: 'POST', body: JSON.stringify({ source_id: metadata.sourceId, transport: metadata.transport, remote_jid: metadata.remoteJid, from_me: metadata.fromMe }),
+    method: 'POST', body: JSON.stringify({ source_id: metadata.sourceId, transport: metadata.transport, remote_jid: metadata.remoteJid, from_me: metadata.fromMe, ...(metadata.providerMessageKey ? { provider_message_key: metadata.providerMessageKey } : {}) }),
   }, true),
   updateWhatsAppMessageStatus: (sourceId: string, status: 'sent' | 'delivered' | 'read' | 'failed', externalError?: string | null) => request(`/api/v1/accounts/${currentAccountId()}/whatsapp/messages/status`, {
     method: 'POST', body: JSON.stringify({ source_id: sourceId, status, ...(externalError ? { external_error: externalError.slice(0, 500) } : {}) }),
