@@ -5,6 +5,7 @@ import type { WhatsAppTransport } from '../whatsapp/provider';
 import { chatwootApiClient } from './client';
 import { normalizeAssignableAgent, normalizeCustomRole, normalizeInbox, normalizeTeam } from './normalizers';
 import type { ChatwootAgentDto, ChatwootAgentPermissionAssignmentDto, ChatwootAutomationRuleDto, ChatwootAutomationRulesResponse, ChatwootCustomRoleDto, ChatwootInboxesResponse, ChatwootInboxDto, ChatwootPermissionProfileDto, ChatwootTeamDto } from './types';
+import type { MetaOnboardingMode } from '../meta/embeddedSignup';
 
 const root = (accountId: number) => `/api/v1/accounts/${accountId}`;
 
@@ -33,11 +34,12 @@ export const inboxService = {
     };
   },
 
-  async createNativeWhatsAppInbox(accountId: number, params: { code: string; businessId: string; wabaId: string; phoneNumberId?: string | null }): Promise<Inbox> {
+  async createNativeWhatsAppInbox(accountId: number, params: { code: string; businessId: string; wabaId: string; phoneNumberId?: string | null; onboardingMode: MetaOnboardingMode }): Promise<Inbox> {
     const response = await chatwootApiClient.post<{ success?: unknown; id?: unknown }>(`${root(accountId)}/whatsapp/authorization`, {
       code: params.code,
       business_id: params.businessId,
       waba_id: params.wabaId,
+      onboarding_mode: params.onboardingMode,
       ...(params.phoneNumberId ? { phone_number_id: params.phoneNumberId } : {}),
     });
     if (response.success !== true || !Number.isInteger(response.id)) throw new Error('O Chatwoot não confirmou a criação da inbox oficial.');
@@ -46,12 +48,13 @@ export const inboxService = {
     return inbox;
   },
 
-  async reauthorizeNativeWhatsAppInbox(accountId: number, inboxId: number, params: { code: string; businessId: string; wabaId: string; phoneNumberId?: string | null }): Promise<Inbox> {
+  async reauthorizeNativeWhatsAppInbox(accountId: number, inboxId: number, params: { code: string; businessId: string; wabaId: string; phoneNumberId?: string | null; onboardingMode: MetaOnboardingMode }): Promise<Inbox> {
     const response = await chatwootApiClient.post<{ success?: unknown; id?: unknown }>(`${root(accountId)}/whatsapp/authorization`, {
       inbox_id: inboxId,
       code: params.code,
       business_id: params.businessId,
       waba_id: params.wabaId,
+      onboarding_mode: params.onboardingMode,
       ...(params.phoneNumberId ? { phone_number_id: params.phoneNumberId } : {}),
     });
     if (response.success !== true || response.id !== inboxId) throw new Error('O Chatwoot não confirmou a reautorização da inbox oficial.');

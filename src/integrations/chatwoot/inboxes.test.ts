@@ -39,11 +39,11 @@ describe('inboxService', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ payload: [{ id: 8, name: 'Oficial', avatar_url: null, channel_type: 'Channel::Whatsapp' }] }), { status: 200 }));
 
     await expect(inboxService.nativeWhatsAppEmbeddedSignupConfig(12)).resolves.toEqual({ appId: 'app-id', configurationId: 'config-id', graphApiVersion: 'v22.0' });
-    await expect(inboxService.createNativeWhatsAppInbox(12, { code: 'code', businessId: 'business', wabaId: 'waba', phoneNumberId: 'phone' })).resolves.toMatchObject({ id: 8, channelType: 'Channel::Whatsapp' });
+    await expect(inboxService.createNativeWhatsAppInbox(12, { code: 'code', businessId: 'business', wabaId: 'waba', phoneNumberId: 'phone', onboardingMode: 'coexistence' })).resolves.toMatchObject({ id: 8, channelType: 'Channel::Whatsapp' });
 
     expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/v1/accounts/12/whatsapp/authorization/config');
     expect(vi.mocked(fetch).mock.calls[1][0]).toBe('/api/v1/accounts/12/whatsapp/authorization');
-    expect(vi.mocked(fetch).mock.calls[1][1]).toMatchObject({ method: 'POST', body: JSON.stringify({ code: 'code', business_id: 'business', waba_id: 'waba', phone_number_id: 'phone' }) });
+    expect(vi.mocked(fetch).mock.calls[1][1]).toMatchObject({ method: 'POST', body: JSON.stringify({ code: 'code', business_id: 'business', waba_id: 'waba', onboarding_mode: 'coexistence', phone_number_id: 'phone' }) });
     expect(vi.mocked(fetch).mock.calls.filter(call => String(call[0]) === '/api/v1/accounts/12/inboxes' && (call[1] as RequestInit | undefined)?.method === 'POST')).toHaveLength(0);
   });
 

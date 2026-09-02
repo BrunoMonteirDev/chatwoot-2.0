@@ -39,7 +39,7 @@ export const MetaCloudSetup = ({ accountId, isDarkMode, inbox: existingInbox, on
     completingRef.current = true;
     setEmbeddedStage('creating');
     try {
-      const input = { code, businessId: result.businessId || '', wabaId: result.wabaId, phoneNumberId: result.phoneNumberId };
+      const input = { code, businessId: result.businessId || '', wabaId: result.wabaId, phoneNumberId: result.phoneNumberId, onboardingMode: result.onboardingMode };
       const saved = nativeInbox
         ? await inboxService.reauthorizeNativeWhatsAppInbox(accountId, existingInbox.id, input)
         : await inboxService.createNativeWhatsAppInbox(accountId, input);
