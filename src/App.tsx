@@ -530,7 +530,9 @@ export default function App() {
       if (selectedConversation?.inboxId !== inbox.id) return;
       setWhatsappConnection((current) => {
         if (!current?.applicable || !current.transport) return current;
-        const value = inbox.additionalAttributes[`${current.transport}_connection_status`];
+        const value = current.transport === 'meta_cloud' && inbox.channelType === 'Channel::Whatsapp'
+          ? inbox.additionalAttributes.meta_connection_status
+          : inbox.additionalAttributes[`${current.transport}_connection_status`];
         const status = value === 'connected' || value === 'connecting' || value === 'disconnected' || value === 'error' || value === 'pending' ? value : current.status;
         return { ...current, status, sendAllowed: status === 'connected' };
       });
