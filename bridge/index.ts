@@ -1403,14 +1403,28 @@ app.post('/internal/official-whatsapp/waha/operations', async (request, response
   }
 });
 
-const hybridBinding = async (request: express.Request, response: express.Response, action: 'bind' | 'unbind') => {
+const hybridBinding = async (request: express.Request, response: express.Response, action: 'bind' | 'unbind' | 'status') => {
   const path = `/internal/official-whatsapp/waha/binding/${action}`; const requestId = internalHybridRequestId(request, path);
   if (!requestId || await dedup.hasOrLock(`hybrid-internal:${requestId}`)) return response.status(401).json({ error: 'Unauthorized' });
   const body = request.body as Record<string, unknown>; const accountId = Number(body.account_id); const inboxId = Number(body.inbox_id); const sessionName = String(body.waha_session || '');
   if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !sessionName) { dedup.release(`hybrid-internal:${requestId}`); return response.status(422).json({ error: 'Invalid hybrid WAHA binding.' }); }
   try {
     if (action === 'bind') await wahaSessions.reserve({ accountId, inboxId, sessionName });
-    else await wahaSessions.remove(accountId, inboxId, sessionName);
+    else if (action === 'unbind') await wahaSessions.remove(accountId, inboxId, sessionName);
+    else {
+      await wahaSessions.assertOwned(accountId, inboxId, sessionName);
+      try {
+        const session = await wahaTransport.getSession(sessionName);
+        await wahaSessions.update(sessionName, { status: session.status, engine: session.engine, phone: session.me?.id });
+        await dedup.commit(`hybrid-internal:${requestId}`);
+        return response.json({ ok: true, account_id: accountId, inbox_id: inboxId, session: sessionName, status: session.connectionStatus });
+      } catch {
+        // A status lookup is observational. Do not release ownership or alter
+        // the configured transport merely because WAHA is temporarily down.
+        await dedup.commit(`hybrid-internal:${requestId}`);
+        return response.json({ ok: true, account_id: accountId, inbox_id: inboxId, session: sessionName, status: 'disconnected' });
+      }
+    }
     await dedup.commit(`hybrid-internal:${requestId}`);
     return response.json({ ok: true, account_id: accountId, inbox_id: inboxId, session: sessionName });
   } catch (error) {
@@ -1420,6 +1434,7 @@ const hybridBinding = async (request: express.Request, response: express.Respons
 };
 app.post('/internal/official-whatsapp/waha/binding/bind', (request, response) => { void hybridBinding(request, response, 'bind'); });
 app.post('/internal/official-whatsapp/waha/binding/unbind', (request, response) => { void hybridBinding(request, response, 'unbind'); });
+app.post('/internal/official-whatsapp/waha/binding/status', (request, response) => { void hybridBinding(request, response, 'status'); });
 
 app.post('/webhooks/waha', (request, response) => {
   if (!config.wahaWebhookSecret) return response.status(503).json({ error: 'WAHA webhook is not configured.' });
