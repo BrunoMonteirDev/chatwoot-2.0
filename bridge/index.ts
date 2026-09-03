@@ -28,6 +28,7 @@ import { WahaHistoryStore, type WahaHistoryJob, type WahaHistoryRange } from './
 import { connectionStatusPatch, evolutionConnectionStatus, metaConnectionStatus, type ConnectionStatus } from './connectionStatus.js';
 import { groupMetadataCache, type GroupMetadata } from './groupMetadata.js';
 import { contactProfileSyncPlan } from './contactProfile.js';
+import { verifyInternalHybridRequest } from './internalHybridAuth.js';
 
 const app = express();
 const templateHeaderUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: config.maxMediaBytes, files: 1 } });
@@ -1333,6 +1334,93 @@ const wahaInboxForWebhook = async (sessionName: string) => {
   return { ...inbox, accountId: ownership.accountId };
 };
 
+// This is deliberately checked before the legacy Channel::Api resolver. Rails
+// owns the official-channel binding and returns handled:false for legacy WAHA.
+// The bridge independently validates session ownership before forwarding data.
+const deliverOfficialHybridWahaInbound = async (message: IncomingWahaMessage) => {
+  if (!config.hybridWahaBridgeSecret) return { handled: false };
+  const ownership = await wahaSessions.get(message.session);
+  if (!ownership) return { handled: false };
+  const body = JSON.stringify({
+    account_id: ownership.accountId, inbox_id: ownership.inboxId, waha_session: message.session,
+    payload: {
+      external_id: message.externalId, provider_message_key: message.providerMessageKey,
+      remote_jid: message.remoteJid, group_name: message.groupName || message.name,
+      participant_jid: message.participantJid, participant_name: message.participantName,
+      quoted_message_id: message.quotedMessageId, from_me: message.fromMe, content: message.content,
+      media: message.media && { kind: message.media.kind, mimetype: message.media.mimetype, filename: message.media.filename }
+    }
+  });
+  const timestamp = String(Math.floor(Date.now() / 1000)); const requestId = randomUUID();
+  const signature = createHmac('sha256', config.hybridWahaBridgeSecret).update(`POST\n/internal/official_whatsapp/waha/inbound\n${timestamp}\n${requestId}\n${body}`).digest('hex');
+  const response = await fetch(`${config.chatwootBaseUrl}/internal/official_whatsapp/waha/inbound`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hybrid-Waha-Signature': signature, 'X-Hybrid-Waha-Timestamp': timestamp, 'X-Hybrid-Waha-Request-Id': requestId }, body
+  });
+  if (response.status === 404) return { handled: false };
+  if (!response.ok) throw new Error(`Official hybrid WAHA inbound rejected (${response.status}).`);
+  return await response.json() as { handled: boolean; ignored?: boolean; message_id?: number };
+};
+
+const internalHybridRequestId = (request: express.Request, path: string) => {
+  const raw = (request as express.Request & { rawBody?: string }).rawBody || '';
+  return verifyInternalHybridRequest({ secret: config.hybridWahaBridgeSecret, method: request.method, path, body: raw,
+    signature: request.header('x-hybrid-waha-signature') || undefined, timestamp: request.header('x-hybrid-waha-timestamp') || undefined, requestId: request.header('x-hybrid-waha-request-id') || undefined });
+};
+
+// Rails invokes this only after it selected WAHA. No browser/user token is
+// accepted here, and session ownership is checked against the bridge store.
+app.post('/internal/official-whatsapp/waha/operations', async (request, response) => {
+  const requestId = internalHybridRequestId(request, '/internal/official-whatsapp/waha/operations');
+  if (!requestId || await dedup.hasOrLock(`hybrid-internal:${requestId}`)) return response.status(401).json({ error: 'Unauthorized' });
+  const body = request.body as Record<string, unknown>;
+  const accountId = Number(body.account_id); const inboxId = Number(body.inbox_id); const session = String(body.waha_session || '');
+  const operation = String(body.operation || ''); const payload = body.payload && typeof body.payload === 'object' ? body.payload as Record<string, unknown> : {};
+  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !session || !['text', 'image', 'audio', 'video', 'document', 'reaction', 'reply'].includes(operation)) return response.status(422).json({ error: 'Invalid hybrid WAHA operation.' });
+  try {
+    await wahaSessions.assertOwned(accountId, inboxId, session);
+    const remoteJid = String(payload.remote_jid || '');
+    if (!remoteJid) return response.status(422).json({ error: 'Missing remote_jid.' });
+    if (operation === 'reaction') {
+      await wahaTransport.sendReaction(session, remoteJid, String(payload.target_message_id || ''), String(payload.emoji || ''));
+      await dedup.commit(`hybrid-internal:${requestId}`); return response.json({ ok: true, transport: 'waha' });
+    }
+    // Media bytes remain in the existing WAHA adapter contract. The router
+    // integration will supply the same attachment shape already used by the
+    // legacy outbound path; this endpoint deliberately does not use Chatwoot's
+    // public Channel::Api API.
+    const replyTo = typeof payload.reply_to === 'string' ? payload.reply_to : undefined;
+    const attachment = payload.attachment && typeof payload.attachment === 'object' ? payload.attachment as { url?: string; fileName?: string; contentType?: string } : null;
+    const sent = ['image', 'audio', 'video', 'document'].includes(operation)
+      ? await wahaTransport.sendMedia(session, remoteJid, {
+        fileType: operation, url: String(attachment?.url || ''), fileName: String(attachment?.fileName || 'attachment'), contentType: String(attachment?.contentType || 'application/octet-stream')
+      }, String(payload.content || ''), replyTo)
+      : await wahaTransport.sendText(session, remoteJid, String(payload.content || ''), replyTo);
+    await dedup.commit(`hybrid-internal:${requestId}`); return response.json({ ok: true, transport: 'waha', provider_message_key: sent.messageId, source_id: `waha:${normalizeWahaMessageId(sent.messageId)}` });
+  } catch (error) {
+    dedup.release(`hybrid-internal:${requestId}`);
+    const status = error instanceof WahaSessionOwnershipError ? 403 : 502;
+    return response.status(status).json({ error: error instanceof Error ? error.message : 'Hybrid WAHA operation failed.' });
+  }
+});
+
+const hybridBinding = async (request: express.Request, response: express.Response, action: 'bind' | 'unbind') => {
+  const path = `/internal/official-whatsapp/waha/binding/${action}`; const requestId = internalHybridRequestId(request, path);
+  if (!requestId || await dedup.hasOrLock(`hybrid-internal:${requestId}`)) return response.status(401).json({ error: 'Unauthorized' });
+  const body = request.body as Record<string, unknown>; const accountId = Number(body.account_id); const inboxId = Number(body.inbox_id); const sessionName = String(body.waha_session || '');
+  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !sessionName) { dedup.release(`hybrid-internal:${requestId}`); return response.status(422).json({ error: 'Invalid hybrid WAHA binding.' }); }
+  try {
+    if (action === 'bind') await wahaSessions.reserve({ accountId, inboxId, sessionName });
+    else await wahaSessions.remove(accountId, inboxId, sessionName);
+    await dedup.commit(`hybrid-internal:${requestId}`);
+    return response.json({ ok: true, account_id: accountId, inbox_id: inboxId, session: sessionName });
+  } catch (error) {
+    dedup.release(`hybrid-internal:${requestId}`);
+    return response.status(error instanceof WahaSessionOwnershipError ? 403 : 502).json({ error: error instanceof Error ? error.message : 'Hybrid WAHA binding failed.' });
+  }
+};
+app.post('/internal/official-whatsapp/waha/binding/bind', (request, response) => { void hybridBinding(request, response, 'bind'); });
+app.post('/internal/official-whatsapp/waha/binding/unbind', (request, response) => { void hybridBinding(request, response, 'unbind'); });
+
 app.post('/webhooks/waha', (request, response) => {
   if (!config.wahaWebhookSecret) return response.status(503).json({ error: 'WAHA webhook is not configured.' });
   const hmac = request.header('x-webhook-hmac');
@@ -1390,6 +1478,12 @@ app.post('/webhooks/waha', (request, response) => {
       const key = externalMessageId('waha', message.externalId);
       if (await dedup.hasOrLock(key)) return;
       try {
+        const official = await deliverOfficialHybridWahaInbound(message);
+        if (official.handled) {
+          await dedup.commit(key);
+          console.info('[waha] official hybrid inbound handled', { session: message.session, messageId: message.externalId, ignored: official.ignored });
+          return;
+        }
         const inbox = await wahaInboxForWebhook(message.session);
         if (message.fromMe && consumePendingWahaOutgoing(message.session, message)) {
           await dedup.commit(key);

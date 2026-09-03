@@ -33,6 +33,9 @@ export const config = {
   wahaBaseUrl: optionalUrl('WAHA_BASE_URL'),
   wahaApiKey: process.env.WAHA_API_KEY || '',
   wahaWebhookSecret: process.env.WAHA_WEBHOOK_SECRET || '',
+  // Private Rails↔bridge contract for official Channel::Whatsapp hybrid WAHA.
+  // It is intentionally distinct from browser/session authentication.
+  hybridWahaBridgeSecret: process.env.HYBRID_WAHA_BRIDGE_SECRET || '',
   wahaDefaultEngine: process.env.WAHA_DEFAULT_ENGINE || 'GOWS',
   wahaRequestTimeoutMs: Number(process.env.WAHA_REQUEST_TIMEOUT_MS || 15_000),
   wahaHistoryFile: process.env.BRIDGE_WAHA_HISTORY_FILE || './bridge/data/waha-history-imports.json',
@@ -79,3 +82,4 @@ if (!Number.isInteger(config.wahaHistoryMessageConcurrency) || config.wahaHistor
 if (process.env.NODE_ENV === 'production' && !config.allowedOrigins.length) throw new Error('BRIDGE_ALLOWED_ORIGINS é obrigatório em produção.');
 if (process.env.NODE_ENV === 'production' && !config.redisUrl) throw new Error('BRIDGE_REDIS_URL é obrigatório em produção.');
 if (process.env.NODE_ENV === 'production' && !config.encryptionKey) throw new Error('BRIDGE_ENCRYPTION_KEY é obrigatório em produção.');
+if (process.env.NODE_ENV === 'production' && !config.hybridWahaBridgeSecret) throw new Error('HYBRID_WAHA_BRIDGE_SECRET é obrigatório em produção.');
