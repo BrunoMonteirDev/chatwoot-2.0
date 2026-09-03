@@ -13,7 +13,7 @@ export interface CreateEvolutionInboxParams { name: string; webhookUrl: string; 
 export interface SaveAgentParams { name: string; email?: string; role: 'agent' | 'administrator'; availability: 'online' | 'offline' | 'busy'; customRoleId?: number | null; }
 export interface SaveCustomRoleParams { name: string; description: string; permissions: string[]; }
 export interface SavePermissionProfileParams { name: string; description: string; kind: 'inbox' | 'system'; inboxPermissions: string[]; systemPermissions: string[]; }
-export type HybridWahaStatus = 'connected' | 'connecting' | 'disconnected' | 'error' | 'not_bound';
+export type HybridWahaStatus = 'connected' | 'connecting' | 'disconnected' | 'error' | 'missing' | 'not_bound';
 export interface HybridWahaConfiguration {
   hybridEnabled: boolean;
   wahaSession: string | null;
@@ -153,7 +153,11 @@ export const inboxService = {
     return (await chatwootApiClient.post<{ session: HybridWahaSession }>(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_sessions`, {})).session;
   },
 
-  async operateHybridWahaSession(accountId: number, inboxId: number, session: string, operation: 'status' | 'start' | 'restart' | 'logout' | 'qr'): Promise<{ session?: HybridWahaSession; qr?: HybridWahaQr }> {
+  async hybridWahaSessionStatus(accountId: number, inboxId: number, session: string): Promise<HybridWahaSession> {
+    return (await chatwootApiClient.get<{ session: HybridWahaSession }>(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_sessions/${encodeURIComponent(session)}`)).session;
+  },
+
+  async operateHybridWahaSession(accountId: number, inboxId: number, session: string, operation: 'start' | 'restart' | 'logout' | 'qr'): Promise<{ session?: HybridWahaSession; qr?: HybridWahaQr }> {
     return chatwootApiClient.patch(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_sessions/${encodeURIComponent(session)}`, { operation });
   },
 

@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HybridWhatsAppInboxConfig } from './HybridWhatsAppInboxConfig';
-import { inboxService } from '../integrations/chatwoot/inboxes';
+import { inboxService, type HybridWahaStatus } from '../integrations/chatwoot/inboxes';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -14,7 +14,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-const render = async (configuration: { hybridEnabled: boolean; outOfWindowStrategy: 'template' | 'waha'; metaFailureStrategy: 'block' | 'waha' }, binding: { wahaSession: string | null; wahaStatus: 'connected' | 'disconnected' | 'not_bound' }) => {
+const render = async (configuration: { hybridEnabled: boolean; outOfWindowStrategy: 'template' | 'waha'; metaFailureStrategy: 'block' | 'waha' }, binding: { wahaSession: string | null; wahaStatus: HybridWahaStatus }) => {
   vi.spyOn(inboxService, 'hybridWahaConfiguration').mockResolvedValue({ ...configuration, wahaSession: binding.wahaSession });
   vi.spyOn(inboxService, 'hybridWahaBinding').mockResolvedValue({ hybridEnabled: configuration.hybridEnabled, ...binding });
   vi.spyOn(inboxService, 'listHybridWahaSessions').mockResolvedValue(binding.wahaSession ? [{ name: binding.wahaSession, status: 'STOPPED', connectionStatus: binding.wahaStatus }] : []);
@@ -40,5 +40,34 @@ describe('HybridWhatsAppInboxConfig', () => {
     expect(element.textContent).toContain('Usar WAHA quando o fallback for seguro');
     expect(element.textContent).toContain('Falhas ambíguas da Meta não usam WAHA automaticamente');
     expect(element.textContent).toContain('Grupos serão enviados e recebidos pelo WAHA.');
+  });
+
+  it('persists the hybrid toggle then renders the configuration returned by Rails', async () => {
+    const element = await render({ hybridEnabled: true, outOfWindowStrategy: 'template', metaFailureStrategy: 'block' }, { wahaSession: 'sessao-segura', wahaStatus: 'disconnected' });
+    vi.mocked(inboxService.hybridWahaConfiguration).mockResolvedValue({ hybridEnabled: false, wahaSession: 'sessao-segura', outOfWindowStrategy: 'template', metaFailureStrategy: 'block' });
+    const save = vi.spyOn(inboxService, 'saveHybridWahaConfiguration').mockResolvedValue({ hybridEnabled: false, wahaSession: 'sessao-segura', outOfWindowStrategy: 'template', metaFailureStrategy: 'block' });
+
+    const toggle = element.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    await act(async () => { toggle.click(); });
+
+    expect(save).toHaveBeenCalledWith(1, 5, { hybridEnabled: false, outOfWindowStrategy: 'template', metaFailureStrategy: 'block' });
+    expect(toggle.checked).toBe(false);
+  });
+
+  it('keeps the server binding visible when unbind fails', async () => {
+    const element = await render({ hybridEnabled: true, outOfWindowStrategy: 'template', metaFailureStrategy: 'block' }, { wahaSession: 'sessao-ausente', wahaStatus: 'disconnected' });
+    vi.spyOn(inboxService, 'unbindHybridWahaSession').mockRejectedValue(new Error('Falha ao desvincular'));
+
+    await act(async () => { (Array.from(element.querySelectorAll('button')).find(button => button.textContent?.includes('Desvincular')) as HTMLButtonElement).click(); });
+
+    expect(element.textContent).toContain('sessao-ausente');
+    expect(element.textContent).toContain('Ocorreu um erro inesperado');
+  });
+
+  it('shows a missing session as removable and does not offer reconnect', async () => {
+    const element = await render({ hybridEnabled: true, outOfWindowStrategy: 'template', metaFailureStrategy: 'block' }, { wahaSession: 'sessao-ausente', wahaStatus: 'missing' });
+    expect(element.textContent).toContain('Sessão não encontrada no WAHA');
+    expect(element.textContent).toContain('Desvincular');
+    expect((Array.from(element.querySelectorAll('button')).find(button => button.textContent?.includes('Reconectar')) as HTMLButtonElement).disabled).toBe(true);
   });
 });

@@ -103,6 +103,16 @@ describe('inboxService', () => {
     ]);
   });
 
+  it('consulta status WAHA por GET, sem enviar uma operação de mutação', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ session: { name: 'sessao-segura', status: 'SCAN_QR_CODE', connectionStatus: 'connecting' } }), { status: 200 }));
+
+    await expect(inboxService.hybridWahaSessionStatus(12, 5, 'sessao-segura')).resolves.toMatchObject({ connectionStatus: 'connecting' });
+
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/v1/accounts/12/inboxes/5/hybrid_waha_sessions/sessao-segura');
+    expect((vi.mocked(fetch).mock.calls[0][1] as RequestInit).method).toBe('GET');
+    expect((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body).toBeUndefined();
+  });
+
   it('exclui a inbox pelo endpoint da conta sem tentar apagar a instância Evolution', async () => {
     vi.mocked(fetch).mockResolvedValue(new Response('', { status: 200 }));
     await expect(inboxService.delete(12, 5)).resolves.toBeUndefined();
