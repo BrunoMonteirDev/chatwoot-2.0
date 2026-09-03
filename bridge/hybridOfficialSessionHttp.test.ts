@@ -27,11 +27,15 @@ beforeAll(async () => {
 afterAll(async () => { await rm(directory, { recursive: true, force: true }); });
 
 const buildWaha = () => {
+  let exists = false;
   fakeWaha = {
-    health: vi.fn().mockResolvedValue(true), createSession: vi.fn().mockResolvedValue(session('STARTING')),
+    health: vi.fn().mockResolvedValue(true), createSession: vi.fn().mockImplementation(async () => { exists = true; return session('STARTING'); }),
     startSession: vi.fn().mockResolvedValue(session('SCAN_QR_CODE')), restartSession: vi.fn().mockResolvedValue(session('SCAN_QR_CODE')),
-    logoutSession: vi.fn().mockResolvedValue(null), deleteSession: vi.fn().mockResolvedValue(null),
-    getSession: vi.fn().mockResolvedValue(session()), getQrCode: vi.fn().mockResolvedValue({ mimetype: 'image/png', data: 'qr-data' }),
+    logoutSession: vi.fn().mockResolvedValue(null), deleteSession: vi.fn().mockImplementation(async () => { exists = false; return null; }),
+    getSession: vi.fn().mockImplementation(async () => {
+      if (!exists) throw new WahaApiError('api', 404, 'Not Found');
+      return session();
+    }), getQrCode: vi.fn().mockResolvedValue({ mimetype: 'image/png', data: 'qr-data' }),
   };
   return fakeWaha;
 };
@@ -70,6 +74,28 @@ describe('official hybrid WAHA session HTTP contract', () => {
       expect(response.status).toBe(200); expect(fakeWaha.createSession).toHaveBeenCalledWith({ name: 'hybrid-a1-i10' });
       expect((await response.json()).session.name).toBe('hybrid-a1-i10');
       expect(fakeWaha.startSession).toHaveBeenCalledWith('hybrid-a1-i10');
+    });
+  });
+
+  it('makes a repeated create idempotent without releasing ownership', async () => {
+    await withApp(async base => {
+      expect((await signed(base, 'create', context())).status).toBe(200);
+      expect((await signed(base, 'create', context())).status).toBe(200);
+
+      expect(fakeWaha.createSession).toHaveBeenCalledTimes(1);
+      expect(fakeWaha.startSession).toHaveBeenCalledTimes(1);
+      expect((await signed(base, 'status', context({ waha_session: 'hybrid-a1-i10' }))).status).toBe(200);
+    });
+  });
+
+  it('replaces only a missing same-inbox ownership record before creating', async () => {
+    await withApp(async base => {
+      expect((await signed(base, 'create', context())).status).toBe(200);
+      fakeWaha.getSession.mockRejectedValueOnce(new WahaApiError('api', 404, 'Not Found'));
+
+      expect((await signed(base, 'create', context())).status).toBe(200);
+      expect(fakeWaha.createSession).toHaveBeenCalledTimes(2);
+      expect((await signed(base, 'status', context({ waha_session: 'hybrid-a1-i10' }))).status).toBe(200);
     });
   });
 

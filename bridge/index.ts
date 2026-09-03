@@ -1466,9 +1466,34 @@ const hybridSession = async (request: express.Request, response: express.Respons
     if (!validWahaSessionName(sessionName)) { dedup.release(`hybrid-internal:${requestId}`); return response.status(422).json({ error: 'Invalid hybrid WAHA session.' }); }
     let session;
     if (action === 'create') {
-      await wahaSessions.reserve({ accountId, inboxId, sessionName });
-      try { session = await wahaTransport.createSession({ name: sessionName }); session = await wahaTransport.startSession(sessionName); }
-      catch (error) { await wahaSessions.remove(accountId, inboxId, sessionName); throw error; }
+      // The name is generated exclusively from the signed account/inbox context.
+      // Treat a repeated create as idempotent: a prior request may have reached
+      // WAHA after its caller timed out, so creating again would return 422 and
+      // must never discard the ownership already reserved for this inbox.
+      const ownership = await wahaSessions.get(sessionName);
+      if (ownership && (ownership.accountId !== accountId || ownership.inboxId !== inboxId)) throw new WahaSessionOwnershipError('conflict');
+      try { session = await wahaTransport.getSession(sessionName); }
+      catch (error) {
+        if (!(error instanceof WahaApiError && error.status === 404)) throw error;
+        // A durable record whose WAHA session is gone is stale. Remove only the
+        // record owned by this exact inbox before making a new reservation.
+        if (ownership) await wahaSessions.remove(accountId, inboxId, sessionName);
+      }
+      if (!session) {
+        await wahaSessions.reserve({ accountId, inboxId, sessionName });
+        try { session = await wahaTransport.createSession({ name: sessionName }); }
+        catch (error) {
+          // Never release a reservation after a timeout or an ambiguous WAHA
+          // response: the remote create may already have succeeded. A future
+          // retry will reconcile the canonical, server-generated name above.
+          throw error;
+        }
+        session = await wahaTransport.startSession(sessionName);
+      } else if (!ownership) {
+        // Reclaim only the canonical server-generated name for this exact signed
+        // context; browser-provided names are ignored by this endpoint.
+        await wahaSessions.reserve({ accountId, inboxId, sessionName });
+      }
     } else {
       await wahaSessions.assertOwned(accountId, inboxId, sessionName);
       if (action === 'status') {
