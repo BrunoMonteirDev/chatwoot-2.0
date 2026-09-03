@@ -22,7 +22,7 @@ import { bridgeMetrics } from './metrics.js';
 import { enforceRateLimit } from './rateLimit.js';
 import { wahaTransport as defaultWahaTransport, WahaApiError } from './waha.js';
 import { WahaSessionOwnershipError, WahaSessionStore } from './wahaSessionStore.js';
-import { normalizeWahaMessageId, parseIncomingWahaGroupLifecycle, parseIncomingWahaMessage, parseIncomingWahaMutation, parseIncomingWahaReaction, parseWahaHistoryMessage, parseWahaWebhook, wahaGroupSourceId, type IncomingWahaMessage } from './wahaEvent.js';
+import { normalizeWahaMessageId, parseIncomingWahaGroupLifecycle, parseIncomingWahaMessage, parseIncomingWahaMutation, parseIncomingWahaReaction, parseWahaHistoryMessage, parseWahaWebhook, wahaGroupSourceId, type IncomingWahaMessage, type IncomingWahaReaction } from './wahaEvent.js';
 import { createTrackId } from './track.js';
 import { WahaHistoryStore, type WahaHistoryJob, type WahaHistoryRange } from './wahaHistoryStore.js';
 import { connectionStatusPatch, evolutionConnectionStatus, metaConnectionStatus, type ConnectionStatus } from './connectionStatus.js';
@@ -1389,6 +1389,26 @@ const deliverOfficialHybridWahaInbound = async (message: IncomingWahaMessage) =>
   return await response.json() as { handled: boolean; ignored?: boolean; message_id?: number };
 };
 
+const deliverOfficialHybridWahaReaction = async (reaction: IncomingWahaReaction) => {
+  if (!config.hybridWahaBridgeSecret) return { handled: false };
+  const ownership = await wahaSessions.get(reaction.session);
+  if (!ownership) return { handled: false };
+  const path = '/internal/official_whatsapp/waha/reaction';
+  const body = JSON.stringify({ account_id: ownership.accountId, inbox_id: ownership.inboxId, waha_session: reaction.session, payload: {
+    target_message_id: reaction.targetMessageId, remote_jid: reaction.chatId, sender_id: reaction.senderId,
+    emoji: reaction.emoji, from_me: reaction.fromMe, event_id: reaction.trackId
+  } });
+  const timestamp = String(Math.floor(Date.now() / 1000)); const requestId = randomUUID();
+  const signature = createHmac('sha256', config.hybridWahaBridgeSecret).update(`POST\n${path}\n${timestamp}\n${requestId}\n${body}`).digest('hex');
+  const response = await fetch(`${config.chatwootBaseUrl}${path}`, { method: 'POST', headers: {
+    'Content-Type': 'application/json', 'X-Forwarded-Proto': 'https', 'X-Forwarded-Ssl': 'on',
+    'X-Hybrid-Waha-Signature': signature, 'X-Hybrid-Waha-Timestamp': timestamp, 'X-Hybrid-Waha-Request-Id': requestId
+  }, body });
+  if (response.status === 404) return { handled: false };
+  if (!response.ok) throw new Error(`Official hybrid WAHA reaction rejected (${response.status}).`);
+  return await response.json() as { handled: boolean; message_id?: number };
+};
+
 const internalHybridRequestId = (request: express.Request, path: string) => {
   const raw = (request as express.Request & { rawBody?: string }).rawBody || '';
   return verifyInternalHybridRequest({ secret: config.hybridWahaBridgeSecret, method: request.method, path, body: raw,
@@ -1643,12 +1663,18 @@ app.post('/webhooks/waha', (request, response) => {
     }
     const reaction = parseIncomingWahaReaction(request.body);
     if (reaction) {
-      let routedInbox;
-      try { routedInbox = await wahaInboxForWebhook(reaction.session); } catch { return; }
       const key = `waha-reaction:${reaction.session}:${reaction.targetMessageId}:${reaction.senderId}:${reaction.emoji}`;
       if (await dedup.hasOrLock(key)) return;
-      try { await chatwootBridge.withAccount(routedInbox.accountId, () => chatwootBridge.updateWhatsAppReactionBySourceId(externalMessageId('waha', reaction.targetMessageId), { senderId: reaction.senderId, emoji: reaction.emoji, transport: 'waha', origin: reaction.fromMe ? 'mobile' : 'contact', eventId: reaction.trackId })); await dedup.commit(key); }
-      catch { dedup.release(key); }
+      try {
+        const legacyInbox = await legacyWahaInboxForWebhook(reaction.session);
+        if (legacyInbox) {
+          await chatwootBridge.withAccount(legacyInbox.accountId, () => chatwootBridge.updateWhatsAppReactionBySourceId(externalMessageId('waha', reaction.targetMessageId), { senderId: reaction.senderId, emoji: reaction.emoji, transport: 'waha', origin: reaction.fromMe ? 'mobile' : 'contact', eventId: reaction.trackId }));
+        } else {
+          const official = await deliverOfficialHybridWahaReaction(reaction);
+          if (!official.handled) throw new WahaSessionOwnershipError('not_found');
+        }
+        await dedup.commit(key);
+      } catch (error) { dedup.release(key); console.warn('[waha] reaction processing failed', { session: reaction.session, targetMessageId: reaction.targetMessageId, error: error instanceof Error ? error.message : 'unknown' }); }
       return;
     }
     const mutation = parseIncomingWahaMutation(request.body);

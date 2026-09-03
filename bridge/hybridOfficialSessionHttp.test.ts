@@ -279,6 +279,58 @@ describe('WAHA inbound routing', () => {
     } finally { vi.unstubAllGlobals(); }
   });
 
+  it('keeps a legacy WAHA reaction on the legacy handler', async () => {
+    const nativeFetch = globalThis.fetch;
+    const requests: Array<{ url: string; body?: string }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('http://127.0.0.1:')) return nativeFetch(input, init);
+      requests.push({ url, body: typeof init?.body === 'string' ? init.body : undefined });
+      if (url.endsWith('/api/v1/bridge/access_token')) return new Response(JSON.stringify({ api_access_token: 'test-token' }));
+      if (url.endsWith('/api/v1/accounts/1/inboxes')) return new Response(JSON.stringify({ payload: [{ id: 10, channel_type: 'Channel::Api', inbox_identifier: 'legacy-waha', additional_attributes: { waha_session_name: 'hybrid-a1-i10', whatsapp_transports: ['waha'] } }] }));
+      if (url.endsWith('/api/v1/accounts/1/whatsapp/messages/reaction')) return new Response(JSON.stringify({ ok: true }));
+      throw new Error(`Unexpected fetch ${url}`);
+    }));
+    try {
+      await withApp(async base => {
+        await signed(base, 'create', context());
+        expect((await webhook(base, { event: 'message.reaction', session: 'hybrid-a1-i10', payload: { chatId: '120@g.us', msgId: 'legacy-target', participant: '5511@c.us', reaction: { text: '👍' } } })).status).toBe(202);
+        for (let attempt = 0; attempt < 30 && !requests.some(request => request.url.endsWith('/whatsapp/messages/reaction')); attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
+      });
+      expect(requests.some(request => request.url.endsWith('/internal/official_whatsapp/waha/reaction'))).toBe(false);
+      expect(requests.find(request => request.url.endsWith('/whatsapp/messages/reaction'))?.body).toContain('legacy-target');
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('forwards an official Hybrid reaction through the signed internal Rails route', async () => {
+    const nativeFetch = globalThis.fetch;
+    const requests: Array<{ url: string; headers?: HeadersInit; body?: string }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('http://127.0.0.1:')) return nativeFetch(input, init);
+      requests.push({ url, headers: init?.headers, body: typeof init?.body === 'string' ? init.body : undefined });
+      if (url.endsWith('/api/v1/bridge/access_token')) return new Response(JSON.stringify({ api_access_token: 'test-token' }));
+      if (url.endsWith('/api/v1/accounts/1/inboxes')) return new Response(JSON.stringify({ payload: [] }));
+      if (url.endsWith('/internal/official_whatsapp/waha/reaction')) return new Response(JSON.stringify({ handled: true, message_id: 77 }));
+      throw new Error(`Unexpected fetch ${url}`);
+    }));
+    try {
+      await withApp(async base => {
+        await signed(base, 'create', context());
+        expect((await webhook(base, { event: 'message.reaction', session: 'hybrid-a1-i10', payload: { chatId: '120@g.us', msgId: 'official-target', participant: '5511@c.us', reaction: { text: '❤️' } } })).status).toBe(202);
+        for (let attempt = 0; attempt < 30 && !requests.some(request => request.url.endsWith('/internal/official_whatsapp/waha/reaction')); attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
+      });
+      const official = requests.find(request => request.url.endsWith('/internal/official_whatsapp/waha/reaction'));
+      expect(official).toBeDefined();
+      expect(new Headers(official?.headers).get('x-forwarded-proto')).toBe('https');
+      expect(new Headers(official?.headers).get('x-forwarded-ssl')).toBe('on');
+      expect(official?.body).toContain('official-target');
+      expect(official?.body).toContain('120@g.us');
+      expect(new Headers(official?.headers).get('x-hybrid-waha-signature')).toMatch(/^[-a-f0-9]{64}$/);
+      expect(requests.some(request => request.url.endsWith('/whatsapp/messages/reaction'))).toBe(false);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('does not let a matching provider message ID in another session suppress Hybrid routing', async () => {
     const nativeFetch = globalThis.fetch;
     const officialRequests: string[] = [];
