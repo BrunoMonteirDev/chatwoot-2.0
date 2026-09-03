@@ -54,7 +54,7 @@ import { useContacts } from './features/contacts/useContacts';
 import { toContactListItem } from './features/contacts/toContactListItem';
 import { conversationService, type ConversationServerFilters } from './integrations/chatwoot/conversations';
 import { messageService } from './integrations/chatwoot/messages';
-import { canSendWhatsAppMessage, whatsappConnectionService, type OperationalWhatsAppConnection } from './integrations/whatsapp/connection';
+import { canSendWhatsAppMessage, usesLegacyWhatsAppConnection, whatsappConnectionService, type OperationalWhatsAppConnection } from './integrations/whatsapp/connection';
 import { authService } from './integrations/chatwoot/auth';
 import { browserNotifications } from './features/notifications/browserNotifications';
 import type { ConversationMessage, ConversationSummary } from './domain/currentUser';
@@ -433,7 +433,8 @@ export default function App() {
   }, [activeChatId, conversations, directlyLoadedConversation]);
   useEffect(() => {
     const inboxId = selectedConversation?.inboxId;
-    if (!currentAccount || !inboxId) { setWhatsappConnection(null); return; }
+    const channelType = inboxes.find((inbox) => inbox.id === inboxId)?.channelType;
+    if (!currentAccount || !inboxId || !usesLegacyWhatsAppConnection(channelType)) { setWhatsappConnection(null); return; }
     let active = true;
     const refresh = () => whatsappConnectionService.get(currentAccount.id, inboxId, selectedConversation.isGroup ? 'group' : 'private')
       .then((status) => { if (active) setWhatsappConnection(status); })
@@ -443,7 +444,7 @@ export default function App() {
     // check for proxies/providers that drop a callback while reconnecting.
     const interval = window.setInterval(() => void refresh(), 120_000);
     return () => { active = false; window.clearInterval(interval); };
-  }, [currentAccount?.id, selectedConversation?.id, selectedConversation?.inboxId, selectedConversation?.isGroup]);
+  }, [currentAccount?.id, inboxes, selectedConversation?.id, selectedConversation?.inboxId, selectedConversation?.isGroup]);
   const contactDetails = useContactDetails(currentAccount?.id ?? null, selectedConversation?.contactId ?? null);
   const messageHistory = useConversationMessages(currentAccount?.id ?? null, selectedConversationId, selectedConversation?.inboxId ?? null, contactDetails.contact?.phoneNumber,
     inboxes.find((inbox) => inbox.id === selectedConversation?.inboxId)?.channelType);
