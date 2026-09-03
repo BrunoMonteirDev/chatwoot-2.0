@@ -20,7 +20,7 @@ import { bridgeCors, chatwootSessionHeaders, requireChatwootSession } from './au
 import { bridgeRedis } from './redis.js';
 import { bridgeMetrics } from './metrics.js';
 import { enforceRateLimit } from './rateLimit.js';
-import { wahaTransport, WahaApiError } from './waha.js';
+import { wahaTransport as defaultWahaTransport, WahaApiError } from './waha.js';
 import { WahaSessionOwnershipError, WahaSessionStore } from './wahaSessionStore.js';
 import { normalizeWahaMessageId, parseIncomingWahaGroupLifecycle, parseIncomingWahaMessage, parseIncomingWahaMutation, parseIncomingWahaReaction, parseWahaHistoryMessage, parseWahaWebhook, wahaGroupSourceId, type IncomingWahaMessage } from './wahaEvent.js';
 import { createTrackId } from './track.js';
@@ -30,6 +30,13 @@ import { groupMetadataCache, type GroupMetadata } from './groupMetadata.js';
 import { contactProfileSyncPlan } from './contactProfile.js';
 import { verifyInternalHybridRequest } from './internalHybridAuth.js';
 
+/**
+ * Builds the bridge without opening a port.  The production entrypoint below
+ * supplies the real WAHA transport; tests can inject the narrow dependency
+ * that reaches WAHA while exercising the actual Express routes.
+ */
+export const createBridgeApp = (dependencies: { wahaTransport?: typeof defaultWahaTransport } = {}) => {
+const wahaTransport = dependencies.wahaTransport || defaultWahaTransport;
 const app = express();
 const templateHeaderUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: config.maxMediaBytes, files: 1 } });
 const dedup = new PersistentDedupStore(config.dedupFile);
@@ -1409,7 +1416,10 @@ const hybridBinding = async (request: express.Request, response: express.Respons
   const body = request.body as Record<string, unknown>; const accountId = Number(body.account_id); const inboxId = Number(body.inbox_id); const sessionName = String(body.waha_session || '');
   if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !sessionName) { dedup.release(`hybrid-internal:${requestId}`); return response.status(422).json({ error: 'Invalid hybrid WAHA binding.' }); }
   try {
-    if (action === 'bind') await wahaSessions.reserve({ accountId, inboxId, sessionName });
+    // A binding must never adopt a browser-supplied/orphan session. Creation
+    // and legacy association establish ownership first; official inboxes only
+    // bind an already-owned session.
+    if (action === 'bind') await wahaSessions.assertOwned(accountId, inboxId, sessionName);
     else if (action === 'unbind') await wahaSessions.remove(accountId, inboxId, sessionName);
     else {
       await wahaSessions.assertOwned(accountId, inboxId, sessionName);
@@ -1435,6 +1445,46 @@ const hybridBinding = async (request: express.Request, response: express.Respons
 app.post('/internal/official-whatsapp/waha/binding/bind', (request, response) => { void hybridBinding(request, response, 'bind'); });
 app.post('/internal/official-whatsapp/waha/binding/unbind', (request, response) => { void hybridBinding(request, response, 'unbind'); });
 app.post('/internal/official-whatsapp/waha/binding/status', (request, response) => { void hybridBinding(request, response, 'status'); });
+
+const hybridSession = async (request: express.Request, response: express.Response, action: 'create' | 'status' | 'start' | 'restart' | 'logout' | 'qr' | 'delete' | 'list') => {
+  const path = `/internal/official-whatsapp/waha/session/${action}`; const requestId = internalHybridRequestId(request, path);
+  if (!requestId || await dedup.hasOrLock(`hybrid-internal:${requestId}`)) return response.status(401).json({ error: 'Unauthorized' });
+  const body = request.body as Record<string, unknown>; const accountId = Number(body.account_id); const inboxId = Number(body.inbox_id); const channelId = Number(body.channel_id);
+  const requested = typeof body.waha_session === 'string' ? body.waha_session : '';
+  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !Number.isInteger(channelId)) { dedup.release(`hybrid-internal:${requestId}`); return response.status(422).json({ error: 'Invalid official hybrid WAHA context.' }); }
+  try {
+    if (action === 'list') {
+      const owned = await wahaSessions.list(accountId, inboxId);
+      const sessions = await Promise.all(owned.map(async ownership => {
+        try { const session = await wahaTransport.getSession(ownership.sessionName); await wahaSessions.update(session.name, { status: session.status, engine: session.engine, phone: session.me?.id }); return session; }
+        catch { return { name: ownership.sessionName, status: ownership.status || 'STOPPED', connectionStatus: 'disconnected', engine: ownership.engine, me: ownership.phone ? { id: ownership.phone } : undefined }; }
+      }));
+      await dedup.commit(`hybrid-internal:${requestId}`); return response.json({ sessions });
+    }
+    const sessionName = action === 'create' ? `hybrid-a${accountId}-i${inboxId}` : requested;
+    if (!validWahaSessionName(sessionName)) { dedup.release(`hybrid-internal:${requestId}`); return response.status(422).json({ error: 'Invalid hybrid WAHA session.' }); }
+    let session;
+    if (action === 'create') {
+      await wahaSessions.reserve({ accountId, inboxId, sessionName });
+      try { session = await wahaTransport.createSession({ name: sessionName }); session = await wahaTransport.startSession(sessionName); }
+      catch (error) { await wahaSessions.remove(accountId, inboxId, sessionName); throw error; }
+    } else {
+      await wahaSessions.assertOwned(accountId, inboxId, sessionName);
+      if (action === 'status') session = await wahaTransport.getSession(sessionName);
+      if (action === 'start') session = await wahaTransport.startSession(sessionName);
+      if (action === 'restart') session = await wahaTransport.restartSession(sessionName);
+      if (action === 'logout') { await wahaTransport.logoutSession(sessionName); session = await wahaTransport.getSession(sessionName); }
+      if (action === 'qr') { const current = await wahaTransport.getSession(sessionName); if (current.status !== 'WORKING') await wahaTransport.restartSession(sessionName); const qr = await wahaTransport.getQrCode(sessionName); await dedup.commit(`hybrid-internal:${requestId}`); return response.json({ session: await wahaTransport.getSession(sessionName), qr }); }
+      if (action === 'delete') { await wahaTransport.deleteSession(sessionName); await wahaSessions.remove(accountId, inboxId, sessionName); await dedup.commit(`hybrid-internal:${requestId}`); return response.status(204).end(); }
+    }
+    await wahaSessions.update(sessionName, { status: session.status, engine: session.engine, phone: session.me?.id });
+    await dedup.commit(`hybrid-internal:${requestId}`); return response.json({ session });
+  } catch (error) {
+    dedup.release(`hybrid-internal:${requestId}`);
+    return response.status(error instanceof WahaSessionOwnershipError ? 403 : 502).json({ error: error instanceof Error ? error.message : 'Hybrid WAHA session failed.' });
+  }
+};
+(['create', 'status', 'start', 'restart', 'logout', 'qr', 'delete', 'list'] as const).forEach(action => app.post(`/internal/official-whatsapp/waha/session/${action}`, (request, response) => { void hybridSession(request, response, action); }));
 
 app.post('/webhooks/waha', (request, response) => {
   if (!config.wahaWebhookSecret) return response.status(503).json({ error: 'WAHA webhook is not configured.' });
@@ -1959,4 +2009,14 @@ app.post('/webhooks/chatwoot', async (request, response) => {
     return response.status(502).json({ error: 'Could not validate Chatwoot webhook' });
   }
 });
-app.listen(config.port, () => console.info(`[evolution-bridge] listening on :${config.port}`));
+return app;
+};
+
+export const startBridge = () => {
+  const app = createBridgeApp();
+  return app.listen(config.port, () => console.info(`[evolution-bridge] listening on :${config.port}`));
+};
+
+// Importing the factory must not bind a port. The regular bridge command keeps
+// the historical production behaviour; tests opt out explicitly.
+if (process.env.BRIDGE_TEST_APP !== '1') startBridge();
