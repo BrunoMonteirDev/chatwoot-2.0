@@ -1375,7 +1375,14 @@ const deliverOfficialHybridWahaInbound = async (message: IncomingWahaMessage) =>
   const timestamp = String(Math.floor(Date.now() / 1000)); const requestId = randomUUID();
   const signature = createHmac('sha256', config.hybridWahaBridgeSecret).update(`POST\n/internal/official_whatsapp/waha/inbound\n${timestamp}\n${requestId}\n${body}`).digest('hex');
   const response = await fetch(`${config.chatwootBaseUrl}/internal/official_whatsapp/waha/inbound`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hybrid-Waha-Signature': signature, 'X-Hybrid-Waha-Timestamp': timestamp, 'X-Hybrid-Waha-Request-Id': requestId }, body
+    method: 'POST', headers: {
+      'Content-Type': 'application/json',
+      // Rails runs over private HTTP while FORCE_SSL is enabled. Keep the
+      // original public scheme so it does not redirect this signed POST to
+      // https://rails:3000 (which is not a TLS listener).
+      'X-Forwarded-Proto': 'https', 'X-Forwarded-Ssl': 'on',
+      'X-Hybrid-Waha-Signature': signature, 'X-Hybrid-Waha-Timestamp': timestamp, 'X-Hybrid-Waha-Request-Id': requestId,
+    }, body
   });
   if (response.status === 404) return { handled: false };
   if (!response.ok) throw new Error(`Official hybrid WAHA inbound rejected (${response.status}).`);
@@ -1587,7 +1594,10 @@ app.post('/webhooks/waha', (request, response) => {
         hasMediaUrl: Boolean(message.media?.url),
         hasMediaData: Boolean(message.media?.data),
       });
-      const key = externalMessageId('waha', message.externalId);
+      // WAHA can emit the same provider message ID from separate linked
+      // sessions. Deduplication is transport-local, so one inbox must never
+      // suppress an owned session in another inbox (notably Hybrid groups).
+      const key = `waha-inbound:${message.session}:${message.externalId}`;
       if (await dedup.hasOrLock(key)) return;
       try {
         const legacyInbox = await legacyWahaInboxForWebhook(message.session);

@@ -24,7 +24,12 @@ beforeAll(async () => {
   ({ createBridgeApp } = await import('./index.js'));
   ({ WahaApiError } = await import('./waha.js'));
 });
-afterAll(async () => { await rm(directory, { recursive: true, force: true }); });
+afterAll(async () => {
+  // Webhook processing is intentionally asynchronous after its 202 response.
+  // Let pending persistent-store writes settle before removing the test data.
+  await new Promise(resolve => setTimeout(resolve, 50));
+  await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+});
 
 const buildWaha = () => {
   let exists = false;
@@ -195,11 +200,11 @@ describe('WAHA inbound routing', () => {
 
   it('keeps official hybrid private inbound on the official handler and out of legacy delivery', async () => {
     const nativeFetch = globalThis.fetch;
-    const requests: string[] = [];
+    const requests: Array<{ url: string; headers?: HeadersInit }> = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.startsWith('http://127.0.0.1:')) return nativeFetch(input, init);
-      requests.push(url);
+      requests.push({ url, headers: init?.headers });
       if (url.endsWith('/api/v1/bridge/access_token')) return new Response(JSON.stringify({ api_access_token: 'test-token' }));
       if (url.endsWith('/api/v1/accounts/1/inboxes')) return new Response(JSON.stringify({ payload: [] }));
       if (url.endsWith('/internal/official_whatsapp/waha/inbound')) return new Response(JSON.stringify({ handled: true, ignored: true }));
@@ -210,10 +215,13 @@ describe('WAHA inbound routing', () => {
       await withApp(async base => {
         await signed(base, 'create', context());
         expect((await webhook(base, { event: 'message', session: 'hybrid-a1-i10', payload: { id: 'official-private-1', from: '5511999999999@c.us', chatId: '5511999999999@c.us', body: 'private', fromMe: false, pushName: 'Cliente', profilePicUrl: 'https://avatar.test/client.jpg' } })).status).toBe(202);
-        for (let attempt = 0; attempt < 30 && !requests.some(url => url.endsWith('/internal/official_whatsapp/waha/inbound')); attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
+        for (let attempt = 0; attempt < 30 && !requests.some(request => request.url.endsWith('/internal/official_whatsapp/waha/inbound')); attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
       });
-      expect(requests.some(url => url.endsWith('/internal/official_whatsapp/waha/inbound'))).toBe(true);
-      expect(requests.some(url => url.endsWith('/messages'))).toBe(false);
+      const official = requests.find(request => request.url.endsWith('/internal/official_whatsapp/waha/inbound'));
+      expect(official).toBeDefined();
+      expect(new Headers(official?.headers).get('x-forwarded-proto')).toBe('https');
+      expect(new Headers(official?.headers).get('x-forwarded-ssl')).toBe('on');
+      expect(requests.some(request => request.url.endsWith('/messages'))).toBe(false);
     } finally {
       vi.unstubAllGlobals();
     }
@@ -268,6 +276,30 @@ describe('WAHA inbound routing', () => {
       const official = requests.find(request => request.url.endsWith('/internal/official_whatsapp/waha/inbound'));
       expect(official?.body).toContain('120@g.us');
       expect(requests.some(request => request.url.endsWith('/messages'))).toBe(false);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('does not let a matching provider message ID in another session suppress Hybrid routing', async () => {
+    const nativeFetch = globalThis.fetch;
+    const officialRequests: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('http://127.0.0.1:')) return nativeFetch(input, init);
+      if (url.endsWith('/api/v1/bridge/access_token')) return new Response(JSON.stringify({ api_access_token: 'test-token' }));
+      if (url.endsWith('/api/v1/accounts/1/inboxes')) return new Response(JSON.stringify({ payload: [] }));
+      if (url.endsWith('/internal/official_whatsapp/waha/inbound')) { officialRequests.push(url); return new Response(JSON.stringify({ handled: true })); }
+      throw new Error(`Unexpected fetch ${url}`);
+    }));
+    try {
+      await withApp(async base => {
+        await signed(base, 'create', context());
+        await signed(base, 'create', context({ inbox_id: 11, channel_id: 101 }));
+        const payload = { event: 'message', payload: { id: 'shared-provider-id', from: '5511999999999@c.us', chatId: '5511999999999@c.us', body: 'same provider id', fromMe: false, pushName: 'Cliente', profilePicUrl: 'https://avatar.test/client.jpg' } };
+        expect((await webhook(base, { ...payload, session: 'hybrid-a1-i10' })).status).toBe(202);
+        expect((await webhook(base, { ...payload, session: 'hybrid-a1-i11' })).status).toBe(202);
+        for (let attempt = 0; attempt < 30 && officialRequests.length < 2; attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
+      });
+      expect(officialRequests).toHaveLength(2);
     } finally { vi.unstubAllGlobals(); }
   });
 });
