@@ -8,6 +8,7 @@ export interface SendWhatsAppReactionInput {
   accountId: number;
   inboxId: number;
   conversationId: number;
+  messageId: number;
   sourceId: string;
   remoteJid: string;
   targetFromMe: boolean;
@@ -36,10 +37,23 @@ export const whatsappReactionService = {
   },
 };
 
-export const nativeMetaReactionService = {
+export const nativeWhatsAppReactionService = {
   send: (accountId: number, conversationId: number, messageId: number, emoji: string) =>
     chatwootApiClient.post(`/api/v1/accounts/${accountId}/conversations/${conversationId}/messages/${messageId}/native_whatsapp_reaction`, { emoji }),
 };
+
+// Official Hybrid reactions use the authenticated Rails endpoint. The browser
+// never supplies a WAHA session: Rails resolves it from the official channel.
+export const routedWhatsAppReactionService = {
+  send: (input: SendWhatsAppReactionInput, officialHybrid: boolean): Promise<void> => {
+    if (officialHybrid) return nativeWhatsAppReactionService.send(input.accountId, input.conversationId, input.messageId, input.emoji);
+    return whatsappReactionService.send(input);
+  },
+};
+
+// Compatibility for existing Meta callers; the endpoint is provider-neutral
+// and now also dispatches official Hybrid WAHA reactions server-side.
+export const nativeMetaReactionService = nativeWhatsAppReactionService;
 
 export const fallbackRemoteJid = (phoneNumber: string | null | undefined) => {
   const digits = phoneNumber?.replace(/\D/g, '') || '';

@@ -3,7 +3,7 @@ import type { ConversationMessage } from '../../domain/currentUser';
 import { errorMessageForUser } from '../../integrations/chatwoot/errors';
 import { messageService } from '../../integrations/chatwoot/messages';
 import { parseExternalMessageId } from '../../integrations/whatsapp/provider';
-import { fallbackRemoteJid, nativeMetaReactionService, whatsappReactionService, type WhatsAppReactionTransport } from '../../integrations/whatsapp/reactions';
+import { fallbackRemoteJid, routedWhatsAppReactionService, type WhatsAppReactionTransport } from '../../integrations/whatsapp/reactions';
 import { whatsappMessageMutationService } from '../../integrations/whatsapp/messageMutations';
 import { mergeMessage, messageHistoryCache } from './MessageHistoryCache';
 
@@ -38,6 +38,9 @@ export const optimisticReactionList = (current: unknown, transport: WhatsAppReac
   return own?.emoji === emoji || !emoji ? withoutOwn : [...withoutOwn, { sender_id: 'self', emoji, transport, origin: 'platform' }];
 };
 
+export const usesRailsReaction = (transport: WhatsAppReactionTransport, inboxChannelType?: string | null) =>
+  transport === 'waha' && inboxChannelType === 'Channel::Whatsapp';
+
 // Files cannot be reconstructed from the normalized Chatwoot response. Keep
 // them only while a local send is retryable, keyed by its stable echo id.
 export class PendingMessageFiles {
@@ -49,7 +52,7 @@ export class PendingMessageFiles {
   clear() { this.files.clear(); }
 }
 
-export const useConversationMessages = (accountId: number | null, conversationId: number | null, inboxId: number | null, fallbackPhoneNumber?: string | null) => {
+export const useConversationMessages = (accountId: number | null, conversationId: number | null, inboxId: number | null, fallbackPhoneNumber?: string | null, inboxChannelType?: string | null) => {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -199,13 +202,13 @@ export const useConversationMessages = (accountId: number | null, conversationId
     setMessages(current => current.map((message) => message.id === messageId ? { ...message, contentAttributes: expectedAttributes } : message));
     try {
       const emoji = nextReactions.find((reaction) => reaction.sender_id === 'self' && reaction.transport === transport)?.emoji || '';
-      if (transport === 'meta_cloud' && target.sourceId.startsWith('wamid.')) {
-        if (!accountId) return false;
-        await nativeMetaReactionService.send(accountId, conversationId, messageId, emoji);
-      } else await whatsappReactionService.send({
+      const railsOwned = (transport === 'meta_cloud' && target.sourceId.startsWith('wamid.')) || usesRailsReaction(transport, inboxChannelType);
+      if (!accountId) return false;
+      await routedWhatsAppReactionService.send({
         accountId,
         inboxId,
         conversationId,
+        messageId,
         sourceId: target.sourceId,
         remoteJid,
         targetFromMe: typeof target.contentAttributes.whatsapp_from_me === 'boolean' ? target.contentAttributes.whatsapp_from_me : target.kind === 'outgoing',
@@ -213,7 +216,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
         providerMessageKey: typeof target.contentAttributes.whatsapp_provider_message_key === 'string' ? target.contentAttributes.whatsapp_provider_message_key : null,
         transport,
         emoji,
-      });
+      }, railsOwned);
       return true;
     } catch {
       // Do not clobber a newer ActionCable update that may have reached the
@@ -225,7 +228,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
     } finally {
       reactionInFlight.current.delete(operationId);
     }
-  }, [accountId, conversationId, fallbackPhoneNumber, inboxId, messages]);
+  }, [accountId, conversationId, fallbackPhoneNumber, inboxChannelType, inboxId, messages]);
 
   const mutate = useCallback(async (operation: 'edit' | 'revoke', messageId: number, content?: string) => {
     if (!inboxId || messageId < 1) return false;

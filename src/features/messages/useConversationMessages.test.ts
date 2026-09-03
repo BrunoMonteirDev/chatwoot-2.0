@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ConversationMessage } from '../../domain/currentUser';
-import { mergeRealtimeMessage, optimisticReactionList, PendingMessageFiles } from './useConversationMessages';
+import { mergeRealtimeMessage, optimisticReactionList, PendingMessageFiles, usesRailsReaction } from './useConversationMessages';
 
 const message = (overrides: Partial<ConversationMessage> = {}): ConversationMessage => ({
   id: 10, conversationId: 31, kind: 'outgoing', contentType: 'text', content: 'Olá', createdAt: 100,
@@ -41,5 +41,11 @@ describe('mergeRealtimeMessage', () => {
     expect(pending.get('echo-audio')).toEqual([audio]);
     pending.delete('echo-audio');
     expect(pending.get('echo-audio')).toEqual([]);
+  });
+
+  it('envia somente reactions WAHA de inbox oficial Hybrid ao Rails', () => {
+    expect(usesRailsReaction('waha', 'Channel::Whatsapp')).toBe(true);
+    expect(usesRailsReaction('waha', 'Channel::Api')).toBe(false);
+    expect(usesRailsReaction('evolution', 'Channel::Whatsapp')).toBe(false);
   });
 });

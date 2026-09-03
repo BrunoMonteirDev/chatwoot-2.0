@@ -445,7 +445,8 @@ export default function App() {
     return () => { active = false; window.clearInterval(interval); };
   }, [currentAccount?.id, selectedConversation?.id, selectedConversation?.inboxId, selectedConversation?.isGroup]);
   const contactDetails = useContactDetails(currentAccount?.id ?? null, selectedConversation?.contactId ?? null);
-  const messageHistory = useConversationMessages(currentAccount?.id ?? null, selectedConversationId, selectedConversation?.inboxId ?? null, contactDetails.contact?.phoneNumber);
+  const messageHistory = useConversationMessages(currentAccount?.id ?? null, selectedConversationId, selectedConversation?.inboxId ?? null, contactDetails.contact?.phoneNumber,
+    inboxes.find((inbox) => inbox.id === selectedConversation?.inboxId)?.channelType);
   const showSystemMessages = showSystemMessagesFrom(authenticatedUser?.uiSettings);
   const sendMessageShortcut = sendMessageShortcutFrom(authenticatedUser?.uiSettings);
   const visibleHistoryMessages = useMemo(() => visibleConversationMessages(messageHistory.messages, showSystemMessages), [messageHistory.messages, showSystemMessages]);
