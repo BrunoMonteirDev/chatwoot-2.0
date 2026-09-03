@@ -70,4 +70,34 @@ describe('HybridWhatsAppInboxConfig', () => {
     expect(element.textContent).toContain('Desvincular');
     expect((Array.from(element.querySelectorAll('button')).find(button => button.textContent?.includes('Reconectar')) as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it('creates, reconnects and shows QR without attempting to bind', async () => {
+    const element = await render({ hybridEnabled: true, outOfWindowStrategy: 'template', metaFailureStrategy: 'block' }, { wahaSession: null, wahaStatus: 'not_bound' });
+    vi.spyOn(inboxService, 'createHybridWahaSession').mockResolvedValue({ name: 'hybrid-a1-i5', status: 'FAILED', connectionStatus: 'error' });
+    vi.spyOn(inboxService, 'hybridWahaSessionStatus').mockResolvedValue({ name: 'hybrid-a1-i5', status: 'FAILED', connectionStatus: 'error' });
+    const operate = vi.spyOn(inboxService, 'operateHybridWahaSession').mockImplementation(async (_account, _inbox, _session, operation) => operation === 'restart'
+      ? { session: { name: 'hybrid-a1-i5', status: 'SCAN_QR_CODE', connectionStatus: 'connecting' } }
+      : { session: { name: 'hybrid-a1-i5', status: 'SCAN_QR_CODE', connectionStatus: 'connecting' }, qr: { mimetype: 'image/png', data: 'qr-data' } });
+    const bind = vi.spyOn(inboxService, 'bindHybridWahaSession');
+
+    await act(async () => { (Array.from(element.querySelectorAll('button')).find(button => button.textContent?.includes('Criar e conectar')) as HTMLButtonElement).click(); });
+
+    expect(inboxService.createHybridWahaSession).toHaveBeenCalledWith(1, 5);
+    expect(operate).toHaveBeenCalledWith(1, 5, 'hybrid-a1-i5', 'restart');
+    expect(operate).toHaveBeenCalledWith(1, 5, 'hybrid-a1-i5', 'qr');
+    expect(element.querySelector('img[alt="QR Code WAHA"]')).not.toBeNull();
+    expect(bind).not.toHaveBeenCalled();
+  });
+
+  it('auto-binds exactly once after the status becomes connected', async () => {
+    const element = await render({ hybridEnabled: true, outOfWindowStrategy: 'template', metaFailureStrategy: 'block' }, { wahaSession: null, wahaStatus: 'not_bound' });
+    vi.spyOn(inboxService, 'createHybridWahaSession').mockResolvedValue({ name: 'hybrid-a1-i5', status: 'WORKING', connectionStatus: 'connected', me: { id: '554488567632@c.us' } });
+    vi.spyOn(inboxService, 'hybridWahaSessionStatus').mockResolvedValue({ name: 'hybrid-a1-i5', status: 'WORKING', connectionStatus: 'connected', me: { id: '554488567632@c.us' } });
+    const bind = vi.spyOn(inboxService, 'bindHybridWahaSession').mockResolvedValue({ hybridEnabled: true, wahaSession: 'hybrid-a1-i5', wahaStatus: 'connected' });
+
+    await act(async () => { (Array.from(element.querySelectorAll('button')).find(button => button.textContent?.includes('Criar e conectar')) as HTMLButtonElement).click(); });
+
+    expect(bind).toHaveBeenCalledTimes(1);
+    expect(bind).toHaveBeenCalledWith(1, 5, 'hybrid-a1-i5');
+  });
 });
