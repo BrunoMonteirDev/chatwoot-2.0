@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 const secret = 'hybrid-http-test-secret';
 let directory = '';
 let createBridgeApp: (dependencies?: { wahaTransport?: unknown }) => import('express').Express;
+let WahaApiError: typeof import('./waha.js').WahaApiError;
 let fakeWaha: Record<string, ReturnType<typeof vi.fn>>;
 const session = (status = 'WORKING') => ({ name: 'hybrid-a1-i10', status, connectionStatus: status === 'WORKING' ? 'connected' : status === 'SCAN_QR_CODE' ? 'connecting' : 'disconnected', engine: 'GOWS', me: { id: '554488567632@c.us' } });
 
@@ -21,6 +22,7 @@ beforeAll(async () => {
     BRIDGE_WAHA_HISTORY_FILE: join(directory, 'waha-history.json'), BRIDGE_WAHA_SESSION_OWNERSHIP_FILE: join(directory, 'ownership.json'),
   });
   ({ createBridgeApp } = await import('./index.js'));
+  ({ WahaApiError } = await import('./waha.js'));
 });
 afterAll(async () => { await rm(directory, { recursive: true, force: true }); });
 
@@ -103,6 +105,19 @@ describe('official hybrid WAHA session HTTP contract', () => {
       fakeWaha.getSession.mockRejectedValueOnce(new Error('WAHA offline'));
       expect((await signed(base, 'status', context({ waha_session: 'hybrid-a1-i10' }))).status).toBe(502);
       expect((await signed(base, 'list', context())).status).toBe(200);
+    });
+  });
+
+  it('reports a removed WAHA session as missing without changing ownership', async () => {
+    await withApp(async base => {
+      await signed(base, 'create', context());
+      fakeWaha.getSession.mockRejectedValueOnce(new WahaApiError('api', 404, 'Not Found'));
+
+      const response = await signed(base, 'status', context({ waha_session: 'hybrid-a1-i10' }));
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ session: { name: 'hybrid-a1-i10', connectionStatus: 'missing' } });
+      expect((await signed(base, 'status', context({ waha_session: 'hybrid-a1-i10' }))).status).toBe(200);
     });
   });
 });

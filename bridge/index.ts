@@ -1428,11 +1428,12 @@ const hybridBinding = async (request: express.Request, response: express.Respons
         await wahaSessions.update(sessionName, { status: session.status, engine: session.engine, phone: session.me?.id });
         await dedup.commit(`hybrid-internal:${requestId}`);
         return response.json({ ok: true, account_id: accountId, inbox_id: inboxId, session: sessionName, status: session.connectionStatus });
-      } catch {
+      } catch (error) {
         // A status lookup is observational. Do not release ownership or alter
         // the configured transport merely because WAHA is temporarily down.
         await dedup.commit(`hybrid-internal:${requestId}`);
-        return response.json({ ok: true, account_id: accountId, inbox_id: inboxId, session: sessionName, status: 'disconnected' });
+        const status = error instanceof WahaApiError && error.status === 404 ? 'missing' : 'disconnected';
+        return response.json({ ok: true, account_id: accountId, inbox_id: inboxId, session: sessionName, status });
       }
     }
     await dedup.commit(`hybrid-internal:${requestId}`);
@@ -1470,7 +1471,14 @@ const hybridSession = async (request: express.Request, response: express.Respons
       catch (error) { await wahaSessions.remove(accountId, inboxId, sessionName); throw error; }
     } else {
       await wahaSessions.assertOwned(accountId, inboxId, sessionName);
-      if (action === 'status') session = await wahaTransport.getSession(sessionName);
+      if (action === 'status') {
+        try { session = await wahaTransport.getSession(sessionName); }
+        catch (error) {
+          if (!(error instanceof WahaApiError && error.status === 404)) throw error;
+          await dedup.commit(`hybrid-internal:${requestId}`);
+          return response.json({ session: { name: sessionName, status: 'MISSING', connectionStatus: 'missing' } });
+        }
+      }
       if (action === 'start') session = await wahaTransport.startSession(sessionName);
       if (action === 'restart') session = await wahaTransport.restartSession(sessionName);
       if (action === 'logout') { await wahaTransport.logoutSession(sessionName); session = await wahaTransport.getSession(sessionName); }
