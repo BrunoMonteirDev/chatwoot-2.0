@@ -17,6 +17,7 @@ afterEach(async () => {
 const render = async (configuration: { hybridEnabled: boolean; outOfWindowStrategy: 'template' | 'waha'; metaFailureStrategy: 'block' | 'waha' }, binding: { wahaSession: string | null; wahaStatus: 'connected' | 'disconnected' | 'not_bound' }) => {
   vi.spyOn(inboxService, 'hybridWahaConfiguration').mockResolvedValue({ ...configuration, wahaSession: binding.wahaSession });
   vi.spyOn(inboxService, 'hybridWahaBinding').mockResolvedValue({ hybridEnabled: configuration.hybridEnabled, ...binding });
+  vi.spyOn(inboxService, 'listHybridWahaSessions').mockResolvedValue(binding.wahaSession ? [{ name: binding.wahaSession, status: 'STOPPED', connectionStatus: binding.wahaStatus }] : []);
   const element = document.createElement('div'); document.body.appendChild(element); const root = createRoot(element); roots.push({ root, element });
   await act(async () => { root.render(<HybridWhatsAppInboxConfig accountId={1} inbox={inbox} isDarkMode={false} onChanged={vi.fn()} />); });
   return element;

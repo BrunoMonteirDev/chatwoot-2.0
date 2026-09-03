@@ -21,6 +21,8 @@ export interface HybridWahaConfiguration {
   metaFailureStrategy: 'block' | 'waha';
 }
 export interface HybridWahaBinding extends Pick<HybridWahaConfiguration, 'hybridEnabled' | 'wahaSession'> { wahaStatus: HybridWahaStatus; }
+export interface HybridWahaSession { name: string; status: string; connectionStatus: HybridWahaStatus; engine?: string; me?: { id?: string; pushName?: string }; }
+export interface HybridWahaQr { mimetype: string; data: string; }
 const normalizePermissionProfile = (dto: ChatwootPermissionProfileDto): PermissionProfile => ({ id: dto.id, name: dto.name, description: dto.description || null, kind: dto.kind || 'inbox', inboxPermissions: dto.inbox_permissions || [], systemPermissions: dto.system_permissions || [], isDefault: Boolean(dto.default) });
 const normalizeAutomationRule = (dto: ChatwootAutomationRuleDto): AutomationRule => ({ id: dto.id, name: dto.name, description: dto.description || null, eventName: dto.event_name, active: dto.active, createdAt: dto.created_on, conditions: dto.conditions.map(item => ({ attributeKey: item.attribute_key, filterOperator: item.filter_operator, queryOperator: item.query_operator || '', values: item.values || [] })), actions: dto.actions.map(item => { const params = item.action_params || []; if (item.action_name === 'send_webhook_event' && typeof params[0] === 'string' && params[0].trim().startsWith('{')) { try { return { actionName: item.action_name, actionParams: [JSON.parse(params[0])] }; } catch { /* Preserve malformed legacy values so they can be corrected in the editor. */ } } return { actionName: item.action_name, actionParams: params }; }) });
 
@@ -141,6 +143,22 @@ export const inboxService = {
 
   async unbindHybridWahaSession(accountId: number, inboxId: number): Promise<void> {
     await chatwootApiClient.delete(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_binding`);
+  },
+
+  async listHybridWahaSessions(accountId: number, inboxId: number): Promise<HybridWahaSession[]> {
+    return (await chatwootApiClient.get<{ sessions: HybridWahaSession[] }>(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_sessions`)).sessions;
+  },
+
+  async createHybridWahaSession(accountId: number, inboxId: number): Promise<HybridWahaSession> {
+    return (await chatwootApiClient.post<{ session: HybridWahaSession }>(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_sessions`, {})).session;
+  },
+
+  async operateHybridWahaSession(accountId: number, inboxId: number, session: string, operation: 'status' | 'start' | 'restart' | 'logout' | 'qr'): Promise<{ session?: HybridWahaSession; qr?: HybridWahaQr }> {
+    return chatwootApiClient.patch(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_sessions/${encodeURIComponent(session)}`, { operation });
+  },
+
+  async deleteHybridWahaSession(accountId: number, inboxId: number, session: string): Promise<void> {
+    await chatwootApiClient.delete(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_sessions/${encodeURIComponent(session)}`);
   },
 
   delete(accountId: number, inboxId: number): Promise<void> {
