@@ -4,6 +4,7 @@ import { inboxService } from '../integrations/chatwoot/inboxes';
 import { listenForEmbeddedSignupEvents, openEmbeddedSignup, type MetaEmbeddedSignupEventResult } from '../integrations/meta/embeddedSignup';
 import type { Inbox } from '../domain/currentUser';
 import { errorMessageForUser } from '../integrations/chatwoot/errors';
+import { HybridWhatsAppInboxConfig } from './HybridWhatsAppInboxConfig';
 
 interface Props {
   accountId: number;
@@ -82,5 +83,6 @@ export const MetaCloudSetup = ({ accountId, isDarkMode, inbox: existingInbox, on
       <button type="button" disabled={saving || Boolean(existingInbox && !nativeInbox)} onClick={() => void startEmbedded()} className="w-full rounded-xl bg-[#00a884] py-3 text-xs font-bold text-white disabled:opacity-40">{nativeInbox ? 'Conectar/reautorizar WhatsApp Business' : 'Conectar WhatsApp Business'}</button>
     </div>
     {error && <p className="flex gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-500"><AlertCircle className="h-4 w-4 shrink-0" />{error}</p>}
+    {nativeInbox && existingInbox && <HybridWhatsAppInboxConfig accountId={accountId} inbox={existingInbox} isDarkMode={isDarkMode} onChanged={async () => { await onSaved(existingInbox); }} />}
   </div>;
 };

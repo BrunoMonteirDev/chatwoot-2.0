@@ -13,6 +13,14 @@ export interface CreateEvolutionInboxParams { name: string; webhookUrl: string; 
 export interface SaveAgentParams { name: string; email?: string; role: 'agent' | 'administrator'; availability: 'online' | 'offline' | 'busy'; customRoleId?: number | null; }
 export interface SaveCustomRoleParams { name: string; description: string; permissions: string[]; }
 export interface SavePermissionProfileParams { name: string; description: string; kind: 'inbox' | 'system'; inboxPermissions: string[]; systemPermissions: string[]; }
+export type HybridWahaStatus = 'connected' | 'connecting' | 'disconnected' | 'error' | 'not_bound';
+export interface HybridWahaConfiguration {
+  hybridEnabled: boolean;
+  wahaSession: string | null;
+  outOfWindowStrategy: 'template' | 'waha';
+  metaFailureStrategy: 'block' | 'waha';
+}
+export interface HybridWahaBinding extends Pick<HybridWahaConfiguration, 'hybridEnabled' | 'wahaSession'> { wahaStatus: HybridWahaStatus; }
 const normalizePermissionProfile = (dto: ChatwootPermissionProfileDto): PermissionProfile => ({ id: dto.id, name: dto.name, description: dto.description || null, kind: dto.kind || 'inbox', inboxPermissions: dto.inbox_permissions || [], systemPermissions: dto.system_permissions || [], isDefault: Boolean(dto.default) });
 const normalizeAutomationRule = (dto: ChatwootAutomationRuleDto): AutomationRule => ({ id: dto.id, name: dto.name, description: dto.description || null, eventName: dto.event_name, active: dto.active, createdAt: dto.created_on, conditions: dto.conditions.map(item => ({ attributeKey: item.attribute_key, filterOperator: item.filter_operator, queryOperator: item.query_operator || '', values: item.values || [] })), actions: dto.actions.map(item => { const params = item.action_params || []; if (item.action_name === 'send_webhook_event' && typeof params[0] === 'string' && params[0].trim().startsWith('{')) { try { return { actionName: item.action_name, actionParams: [JSON.parse(params[0])] }; } catch { /* Preserve malformed legacy values so they can be corrected in the editor. */ } } return { actionName: item.action_name, actionParams: params }; }) });
 
@@ -103,6 +111,36 @@ export const inboxService = {
       channel: { additional_attributes: metadata, ...(webhookUrl ? { webhook_url: webhookUrl } : {}) },
     });
     return normalizeInbox(response);
+  },
+
+  async hybridWahaConfiguration(accountId: number, inboxId: number): Promise<HybridWahaConfiguration> {
+    const response = await chatwootApiClient.get<Record<string, unknown>>(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_configuration`);
+    return normalizeHybridWahaConfiguration(response);
+  },
+
+  async saveHybridWahaConfiguration(accountId: number, inboxId: number, configuration: Pick<HybridWahaConfiguration, 'hybridEnabled' | 'outOfWindowStrategy' | 'metaFailureStrategy'>): Promise<HybridWahaConfiguration> {
+    // Session ownership is intentionally absent here. It is only established
+    // by the server-side bind endpoint below.
+    const response = await chatwootApiClient.patch<Record<string, unknown>>(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_configuration`, {
+      hybrid_enabled: configuration.hybridEnabled,
+      out_of_window_strategy: configuration.outOfWindowStrategy,
+      meta_failure_strategy: configuration.metaFailureStrategy,
+    });
+    return normalizeHybridWahaConfiguration(response);
+  },
+
+  async hybridWahaBinding(accountId: number, inboxId: number): Promise<HybridWahaBinding> {
+    const response = await chatwootApiClient.get<Record<string, unknown>>(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_binding`);
+    return normalizeHybridWahaBinding(response);
+  },
+
+  async bindHybridWahaSession(accountId: number, inboxId: number, session: string): Promise<HybridWahaBinding> {
+    const response = await chatwootApiClient.post<Record<string, unknown>>(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_binding`, { waha_session: session });
+    return normalizeHybridWahaBinding(response);
+  },
+
+  async unbindHybridWahaSession(accountId: number, inboxId: number): Promise<void> {
+    await chatwootApiClient.delete(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_binding`);
   },
 
   delete(accountId: number, inboxId: number): Promise<void> {
@@ -203,3 +241,17 @@ export const inboxService = {
     return response.payload.map(normalizeAssignableAgent);
   },
 };
+
+const enumValue = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T => typeof value === 'string' && (allowed as readonly string[]).includes(value) ? value as T : fallback;
+const stringOrNull = (value: unknown) => typeof value === 'string' && value ? value : null;
+const normalizeHybridWahaConfiguration = (value: Record<string, unknown>): HybridWahaConfiguration => ({
+  hybridEnabled: value.hybrid_enabled === true,
+  wahaSession: stringOrNull(value.waha_session),
+  outOfWindowStrategy: enumValue(value.out_of_window_strategy, ['template', 'waha'] as const, 'template'),
+  metaFailureStrategy: enumValue(value.meta_failure_strategy, ['block', 'waha'] as const, 'block'),
+});
+const normalizeHybridWahaBinding = (value: Record<string, unknown>): HybridWahaBinding => ({
+  hybridEnabled: value.hybrid_enabled === true,
+  wahaSession: stringOrNull(value.waha_session),
+  wahaStatus: enumValue(value.waha_status, ['connected', 'connecting', 'disconnected', 'error', 'not_bound'] as const, 'disconnected'),
+});

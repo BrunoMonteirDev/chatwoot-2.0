@@ -52,7 +52,10 @@ export const errorMessageForUser = (error: unknown): string => {
     if (error.status === 402 || /(?:account )?limit exceeded|limite (?:de )?(?:agentes|caixas)/i.test(error.validationErrors[0] || error.message)) {
       return 'O limite desta conta foi atingido. Fale com o suporte para ampliar o limite.';
     }
-    return error.validationErrors[0] || error.message;
+    const message = error.validationErrors[0] || error.message;
+    if (/Meta delivery result is uncertain/i.test(message)) return 'Não foi possível confirmar o envio pela Meta. O fallback WAHA não foi usado para evitar possível duplicação.';
+    if (/WAHA session is not configured|Hybrid WAHA bridge rejected/i.test(message)) return 'A sessão WAHA está indisponível para esta inbox.';
+    return message;
   }
   if (error instanceof BridgeApiError) {
     if (error.status === 401) return 'Sua sessão expirou. Entre novamente para administrar esta conexão.';

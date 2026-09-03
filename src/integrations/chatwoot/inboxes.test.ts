@@ -74,6 +74,35 @@ describe('inboxService', () => {
     expect(JSON.stringify(body)).not.toContain('accessToken');
   });
 
+  it('configura híbrido somente pelo Rails e nunca envia uma sessão no payload de estratégia', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ hybrid_enabled: true, waha_session: null, out_of_window_strategy: 'waha', meta_failure_strategy: 'block' }), { status: 200 }));
+
+    await expect(inboxService.saveHybridWahaConfiguration(12, 5, { hybridEnabled: true, outOfWindowStrategy: 'waha', metaFailureStrategy: 'block' }))
+      .resolves.toMatchObject({ hybridEnabled: true, wahaSession: null, outOfWindowStrategy: 'waha' });
+
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/v1/accounts/12/inboxes/5/hybrid_waha_configuration');
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body).toEqual({ hybrid_enabled: true, out_of_window_strategy: 'waha', meta_failure_strategy: 'block' });
+    expect(body).not.toHaveProperty('waha_session');
+  });
+
+  it('faz bind, consulta estado e unbind somente por endpoints Rails account-scoped', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ hybrid_enabled: true, waha_session: 'sessao-segura', waha_status: 'connected' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ hybrid_enabled: true, waha_session: 'sessao-segura', waha_status: 'connected' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await expect(inboxService.bindHybridWahaSession(12, 5, 'sessao-segura')).resolves.toMatchObject({ wahaSession: 'sessao-segura', wahaStatus: 'connected' });
+    await expect(inboxService.hybridWahaBinding(12, 5)).resolves.toMatchObject({ wahaSession: 'sessao-segura' });
+    await expect(inboxService.unbindHybridWahaSession(12, 5)).resolves.toBeUndefined();
+
+    expect(vi.mocked(fetch).mock.calls.map(call => [call[0], (call[1] as RequestInit | undefined)?.method])).toEqual([
+      ['/api/v1/accounts/12/inboxes/5/hybrid_waha_binding', 'POST'],
+      ['/api/v1/accounts/12/inboxes/5/hybrid_waha_binding', 'GET'],
+      ['/api/v1/accounts/12/inboxes/5/hybrid_waha_binding', 'DELETE'],
+    ]);
+  });
+
   it('exclui a inbox pelo endpoint da conta sem tentar apagar a instância Evolution', async () => {
     vi.mocked(fetch).mockResolvedValue(new Response('', { status: 200 }));
     await expect(inboxService.delete(12, 5)).resolves.toBeUndefined();
