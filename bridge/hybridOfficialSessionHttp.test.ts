@@ -15,7 +15,7 @@ const session = (status = 'WORKING') => ({ name: 'hybrid-a1-i10', status, connec
 beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), 'hybrid-waha-http-'));
   Object.assign(process.env, {
-    BRIDGE_TEST_APP: '1', BRIDGE_WEBHOOK_SECRET: 'bridge-test-secret', CHATWOOT_BASE_URL: 'http://chatwoot.test',
+    BRIDGE_TEST_APP: '1', BRIDGE_WEBHOOK_SECRET: 'bridge-test-secret', WAHA_WEBHOOK_SECRET: 'bridge-test-secret', CHATWOOT_BASE_URL: 'http://chatwoot.test',
     BRIDGE_ENCRYPTION_KEY: 'bridge-test-encryption-key', HYBRID_WAHA_BRIDGE_SECRET: secret,
     BRIDGE_DEDUP_FILE: join(directory, 'dedup.json'), BRIDGE_IDENTITY_FILE: join(directory, 'identity.json'),
     BRIDGE_META_CONFIG_FILE: join(directory, 'meta.json'), BRIDGE_META_HISTORY_FILE: join(directory, 'history.json'),
@@ -36,6 +36,8 @@ const buildWaha = () => {
       if (!exists) throw new WahaApiError('api', 404, 'Not Found');
       return session();
     }), getQrCode: vi.fn().mockResolvedValue({ mimetype: 'image/png', data: 'qr-data' }),
+    listChats: vi.fn().mockResolvedValue([]), getChatAvatarUrl: vi.fn().mockResolvedValue(undefined),
+    downloadMedia: vi.fn().mockResolvedValue({ buffer: Buffer.from('media'), contentType: 'image/jpeg', fileName: 'image.jpg' }),
   };
   return fakeWaha;
 };
@@ -145,5 +147,127 @@ describe('official hybrid WAHA session HTTP contract', () => {
       await expect(response.json()).resolves.toMatchObject({ session: { name: 'hybrid-a1-i10', connectionStatus: 'missing' } });
       expect((await signed(base, 'status', context({ waha_session: 'hybrid-a1-i10' }))).status).toBe(200);
     });
+  });
+});
+
+describe('WAHA inbound routing', () => {
+  const webhook = async (base: string, body: Record<string, unknown>) => {
+    const raw = JSON.stringify(body);
+    const signature = createHmac('sha512', 'bridge-test-secret').update(raw).digest('hex');
+    return fetch(`${base}/webhooks/waha`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-webhook-hmac': signature }, body: raw });
+  };
+
+  it('delivers legacy Channel::Api inbound without calling the official hybrid endpoint', async () => {
+    const nativeFetch = globalThis.fetch;
+    const requests: Array<{ url: string; method: string; body?: string }> = [];
+    let conversationReads = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input); const method = init?.method || 'GET';
+      if (url.startsWith('http://127.0.0.1:')) return nativeFetch(input, init);
+      requests.push({ url, method, body: typeof init?.body === 'string' ? init.body : undefined });
+      if (url.endsWith('/api/v1/bridge/access_token')) return new Response(JSON.stringify({ api_access_token: 'test-token' }));
+      if (url.endsWith('/api/v1/accounts/1/inboxes')) return new Response(JSON.stringify({ payload: [{ id: 10, channel_type: 'Channel::Api', inbox_identifier: 'legacy-waha', additional_attributes: { waha_session_name: 'hybrid-a1-i10', whatsapp_transports: ['waha'] } }] }));
+      if (url.includes('/contacts/search?')) return new Response(JSON.stringify({ payload: [] }));
+      if (url.includes('/public/api/v1/inboxes/legacy-waha/contacts') && method === 'POST') return new Response(JSON.stringify({ id: 20, source_id: 'whatsapp:5511999999999' }));
+      if (url.endsWith('/api/v1/accounts/1/contacts/20') && method === 'PATCH') return new Response(JSON.stringify({}));
+      if (url.endsWith('/api/v1/accounts/1/contacts/20/conversations')) {
+        conversationReads += 1;
+        return new Response(JSON.stringify({ payload: conversationReads === 1 ? [] : [{ id: 30, inbox_id: 10 }] }));
+      }
+      if (url.includes('/conversations') && url.includes('/public/api/v1/') && method === 'POST') return new Response(JSON.stringify({}));
+      if (url.endsWith('/api/v1/accounts/1/conversations/30/messages') && method === 'POST') return new Response(JSON.stringify({ id: 40 }));
+      throw new Error(`Unexpected fetch ${method} ${url}`);
+    }));
+
+    try {
+      await withApp(async base => {
+        await signed(base, 'create', context());
+        const response = await webhook(base, { event: 'message', session: 'hybrid-a1-i10', payload: { id: 'legacy-inbound-1', from: '5511999999999@c.us', chatId: '5511999999999@c.us', body: 'TESTE INBOUND WAHA DEBUG 01', fromMe: false } });
+        expect(response.status).toBe(202);
+        for (let attempt = 0; attempt < 30 && !requests.some(request => request.url.endsWith('/messages')); attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
+      });
+      expect(requests.some(request => request.url.endsWith('/internal/official_whatsapp/waha/inbound'))).toBe(false);
+      expect(requests.find(request => request.url.endsWith('/messages'))?.body).toContain('TESTE INBOUND WAHA DEBUG 01');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps official hybrid private inbound on the official handler and out of legacy delivery', async () => {
+    const nativeFetch = globalThis.fetch;
+    const requests: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('http://127.0.0.1:')) return nativeFetch(input, init);
+      requests.push(url);
+      if (url.endsWith('/api/v1/bridge/access_token')) return new Response(JSON.stringify({ api_access_token: 'test-token' }));
+      if (url.endsWith('/api/v1/accounts/1/inboxes')) return new Response(JSON.stringify({ payload: [] }));
+      if (url.endsWith('/internal/official_whatsapp/waha/inbound')) return new Response(JSON.stringify({ handled: true, ignored: true }));
+      throw new Error(`Unexpected fetch ${url}`);
+    }));
+
+    try {
+      await withApp(async base => {
+        await signed(base, 'create', context());
+        expect((await webhook(base, { event: 'message', session: 'hybrid-a1-i10', payload: { id: 'official-private-1', from: '5511999999999@c.us', chatId: '5511999999999@c.us', body: 'private', fromMe: false, pushName: 'Cliente', profilePicUrl: 'https://avatar.test/client.jpg' } })).status).toBe(202);
+        for (let attempt = 0; attempt < 30 && !requests.some(url => url.endsWith('/internal/official_whatsapp/waha/inbound')); attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
+      });
+      expect(requests.some(url => url.endsWith('/internal/official_whatsapp/waha/inbound'))).toBe(true);
+      expect(requests.some(url => url.endsWith('/messages'))).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps legacy WAHA media on the legacy delivery path', async () => {
+    const nativeFetch = globalThis.fetch;
+    const requests: string[] = [];
+    let conversationReads = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input); const method = init?.method || 'GET';
+      if (url.startsWith('http://127.0.0.1:')) return nativeFetch(input, init);
+      requests.push(url);
+      if (url.endsWith('/api/v1/bridge/access_token')) return new Response(JSON.stringify({ api_access_token: 'test-token' }));
+      if (url.endsWith('/api/v1/accounts/1/inboxes')) return new Response(JSON.stringify({ payload: [{ id: 10, channel_type: 'Channel::Api', inbox_identifier: 'legacy-waha', additional_attributes: { waha_session_name: 'hybrid-a1-i10', whatsapp_transports: ['waha'] } }] }));
+      if (url.includes('/contacts/search?')) return new Response(JSON.stringify({ payload: [] }));
+      if (url.includes('/public/api/v1/inboxes/legacy-waha/contacts') && method === 'POST') return new Response(JSON.stringify({ id: 20, source_id: 'whatsapp:5511999999999' }));
+      if (url.endsWith('/api/v1/accounts/1/contacts/20') && method === 'PATCH') return new Response(JSON.stringify({}));
+      if (url.endsWith('/api/v1/accounts/1/contacts/20/conversations')) return new Response(JSON.stringify({ payload: ++conversationReads === 1 ? [] : [{ id: 30, inbox_id: 10 }] }));
+      if (url.includes('/conversations') && url.includes('/public/api/v1/') && method === 'POST') return new Response(JSON.stringify({}));
+      if (url.endsWith('/api/v1/accounts/1/conversations/30/messages') && method === 'POST') return new Response(JSON.stringify({ id: 40 }));
+      throw new Error(`Unexpected fetch ${method} ${url}`);
+    }));
+    try {
+      await withApp(async base => {
+        expect((await webhook(base, { event: 'message', session: 'hybrid-a1-i10', payload: { id: 'legacy-media-1', from: '5511999999999@c.us', chatId: '5511999999999@c.us', body: 'imagem', fromMe: false, hasMedia: true, media: { data: 'bWVkaWE=', mimetype: 'image/jpeg', filename: 'image.jpg' } } })).status).toBe(202);
+        for (let attempt = 0; attempt < 30 && !requests.some(url => url.endsWith('/messages')); attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
+      });
+      expect(fakeWaha.downloadMedia).toHaveBeenCalled();
+      expect(requests.some(url => url.endsWith('/internal/official_whatsapp/waha/inbound'))).toBe(false);
+      expect(requests.some(url => url.endsWith('/messages'))).toBe(true);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('forwards official hybrid group inbound only to the official handler', async () => {
+    const nativeFetch = globalThis.fetch;
+    const requests: Array<{ url: string; body?: string }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('http://127.0.0.1:')) return nativeFetch(input, init);
+      requests.push({ url, body: typeof init?.body === 'string' ? init.body : undefined });
+      if (url.endsWith('/api/v1/bridge/access_token')) return new Response(JSON.stringify({ api_access_token: 'test-token' }));
+      if (url.endsWith('/api/v1/accounts/1/inboxes')) return new Response(JSON.stringify({ payload: [] }));
+      if (url.endsWith('/internal/official_whatsapp/waha/inbound')) return new Response(JSON.stringify({ handled: true, message_id: 41 }));
+      throw new Error(`Unexpected fetch ${url}`);
+    }));
+    try {
+      await withApp(async base => {
+        expect((await webhook(base, { event: 'message', session: 'hybrid-a1-i10', payload: { id: 'official-group-1', from: '120@g.us', chatId: '120@g.us', participant: '5511999999999@c.us', body: 'grupo', fromMe: false, subject: 'Equipe' } })).status).toBe(202);
+        for (let attempt = 0; attempt < 30 && !requests.some(request => request.url.endsWith('/internal/official_whatsapp/waha/inbound')); attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
+      });
+      const official = requests.find(request => request.url.endsWith('/internal/official_whatsapp/waha/inbound'));
+      expect(official?.body).toContain('120@g.us');
+      expect(requests.some(request => request.url.endsWith('/messages'))).toBe(false);
+    } finally { vi.unstubAllGlobals(); }
   });
 });

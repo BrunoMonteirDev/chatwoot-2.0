@@ -1341,9 +1341,23 @@ const wahaInboxForWebhook = async (sessionName: string) => {
   return { ...inbox, accountId: ownership.accountId };
 };
 
-// This is deliberately checked before the legacy Channel::Api resolver. Rails
-// owns the official-channel binding and returns handled:false for legacy WAHA.
-// The bridge independently validates session ownership before forwarding data.
+// A durable ownership record is shared by both the official hybrid lifecycle
+// and legacy Channel::Api WAHA inboxes. Resolve the legacy inbox first so its
+// inbound delivery never depends on the official-channel endpoint being
+// reachable. A missing Channel::Api inbox is the expected shape for an
+// official Channel::Whatsapp session; ownership and all other lookup failures
+// remain errors rather than being silently reclassified.
+const legacyWahaInboxForWebhook = async (sessionName: string) => {
+  try {
+    return await wahaInboxForWebhook(sessionName);
+  } catch (error) {
+    if (error instanceof Error && error.message === `Nenhuma inbox WAHA encontrada para a sessão ${sessionName}.`) return null;
+    throw error;
+  }
+};
+
+// Rails owns the official-channel binding. This is called only after proving
+// that the owned session is not a legacy Channel::Api WAHA inbox.
 const deliverOfficialHybridWahaInbound = async (message: IncomingWahaMessage) => {
   if (!config.hybridWahaBridgeSecret) return { handled: false };
   const ownership = await wahaSessions.get(message.session);
@@ -1576,13 +1590,17 @@ app.post('/webhooks/waha', (request, response) => {
       const key = externalMessageId('waha', message.externalId);
       if (await dedup.hasOrLock(key)) return;
       try {
-        const official = await deliverOfficialHybridWahaInbound(message);
-        if (official.handled) {
-          await dedup.commit(key);
-          console.info('[waha] official hybrid inbound handled', { session: message.session, messageId: message.externalId, ignored: official.ignored });
-          return;
+        const legacyInbox = await legacyWahaInboxForWebhook(message.session);
+        if (!legacyInbox) {
+          const official = await deliverOfficialHybridWahaInbound(message);
+          if (official.handled) {
+            await dedup.commit(key);
+            console.info('[waha] official hybrid inbound handled', { session: message.session, messageId: message.externalId, ignored: official.ignored });
+            return;
+          }
+          throw new WahaSessionOwnershipError('not_found');
         }
-        const inbox = await wahaInboxForWebhook(message.session);
+        const inbox = legacyInbox;
         if (message.fromMe && consumePendingWahaOutgoing(message.session, message)) {
           await dedup.commit(key);
           console.info('[waha] platform echo ignored', { session: message.session, messageId: message.externalId });
