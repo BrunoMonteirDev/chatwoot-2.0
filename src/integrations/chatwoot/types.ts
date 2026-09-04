@@ -176,6 +176,8 @@ export interface ChatwootAttachmentDto {
   content_type?: string | null;
   file_size?: number | null;
   fallback_title?: string | null;
+  width?: number | null;
+  height?: number | null;
 }
 export interface ChatwootConversationAttachmentDto { id: number; message_id?: number | null; thumb_url?: string | null; data_url?: string | null; file_size?: number | null; file_type: string; extension?: string | null; created_at: number; }
 export interface ChatwootConversationAttachmentsResponse { meta: { total_count: number }; payload: ChatwootConversationAttachmentDto[]; }

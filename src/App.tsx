@@ -64,7 +64,7 @@ const emptyUser: UserProfile = { name: '', phone: '', about: '', avatar: '' };
 const emptyAccount: MultiTenantAccount = { id: '', name: '', role: '' };
 // This is also the route allow-list. Retired modules cannot be reopened by
 // manually entering an old settings URL.
-const settingsTabs: SettingsTab[] = ['perfil', 'conta', 'agentes', 'times', 'caixas', 'etiquetas', 'atributos', 'automacao', 'macros', 'respostas', 'agendadas', 'apps', 'integracoes', 'auditoria', 'permissoes'];
+const settingsTabs: SettingsTab[] = ['perfil', 'conta', 'agentes', 'times', 'caixas', 'etiquetas', 'atributos', 'automacao', 'macros', 'respostas', 'agendadas', 'integracoes', 'auditoria', 'permissoes'];
 const isSettingsTab = (value: string | undefined): value is SettingsTab => Boolean(value && settingsTabs.includes(value as SettingsTab));
 
 export default function App() {
@@ -1115,7 +1115,6 @@ export default function App() {
               await retryBootstrap();
             }}
             onResetAccessToken={async () => { await authService.resetAccessToken(); await retryBootstrap(); }}
-            canManageDashboardApps={currentAccount?.role === 'administrator'}
           /></div>
           </>
         )}
@@ -1126,6 +1125,7 @@ export default function App() {
           <AppsView
             onClose={() => navigateToTab('chats')}
             accountId={currentAccount?.id ?? null}
+            canManage={currentAccount?.role === 'administrator'}
             isDarkMode={isDarkMode}
           />
         )}

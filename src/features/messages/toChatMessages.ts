@@ -13,6 +13,8 @@ const toAttachment = (attachment: ConversationMessage['attachments'][number]): A
   title: attachment.title || undefined,
   subtitle: attachment.contentType || undefined,
   size: formatSize(attachment.size),
+  width: attachment.width || undefined,
+  height: attachment.height || undefined,
 });
 
 export const toChatMessages = (items: ConversationMessage[]): Message[] => items.map((message) => {
@@ -26,7 +28,7 @@ export const toChatMessages = (items: ConversationMessage[]): Message[] => items
   // Chatwoot correctly identifies the group as the conversation contact. The
   // real author of an incoming group message is carried separately by the
   // bridge so a group does not look like a direct conversation with itself.
-  senderName: jid || phone ? participantLabel(name, jid, phone) : name,
+  senderName: message.kind === 'outgoing' ? 'Você' : jid || phone ? participantLabel(name, jid, phone) : name,
   ...(jid || phone ? { senderPhone: participantPhone(jid, phone), senderIdentity: identity, senderColor: participantColor(identity) } : {}),
   senderEmail: message.senderEmail || undefined,
   senderAvatarUrl: message.senderAvatarUrl || undefined,

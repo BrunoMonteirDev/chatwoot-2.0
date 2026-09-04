@@ -11,7 +11,7 @@ const baseMessage = (overrides: Partial<ConversationMessage> = {}): Conversation
 
 describe('toChatMessages reactions', () => {
   it('mantém reactions e metadados internos em mensagem com reply e attachment', () => {
-    const item = baseMessage({ attachments: [{ id: 1, kind: 'image', url: 'https://example.test/a.jpg', thumbnailUrl: null, title: null, contentType: 'image/jpeg', size: 1 }] });
+    const item = baseMessage({ attachments: [{ id: 1, kind: 'image', url: 'https://example.test/a.jpg', thumbnailUrl: null, title: null, contentType: 'image/jpeg', size: 1, width: null, height: null }] });
     const original = baseMessage({ id: 4, content: 'Original', contentAttributes: {} });
     const mapped = toChatMessages([original, item])[1];
 
@@ -22,7 +22,7 @@ describe('toChatMessages reactions', () => {
   });
 
   it('usa miniatura e rótulo de foto na citação de uma imagem', () => {
-    const original = baseMessage({ id: 4, content: '', contentAttributes: {}, attachments: [{ id: 1, kind: 'image', url: 'https://example.test/photo.jpg', thumbnailUrl: 'https://example.test/thumb.jpg', title: null, contentType: 'image/jpeg', size: 1 }] });
+    const original = baseMessage({ id: 4, content: '', contentAttributes: {}, attachments: [{ id: 1, kind: 'image', url: 'https://example.test/photo.jpg', thumbnailUrl: 'https://example.test/thumb.jpg', title: null, contentType: 'image/jpeg', size: 1, width: null, height: null }] });
     const reply = baseMessage({ contentAttributes: { in_reply_to: 4 } });
     expect(toChatMessages([original, reply])[1].replyTo).toMatchObject({ id: '4', text: 'Foto', mediaPreviewUrl: 'https://example.test/thumb.jpg' });
   });
@@ -35,12 +35,12 @@ describe('toChatMessages reactions', () => {
   it('identifica participante de grupo por JID, mantém cor estável e mostra nome e número', () => {
     const item = baseMessage({ contentAttributes: { whatsapp_participant_jid: '5511999999999@s.whatsapp.net', whatsapp_participant_name: 'Ana' } });
     const [first] = toChatMessages([item]); const [second] = toChatMessages([item]);
-    expect(first.senderName).toBe('Ana · +5511999999999');
+    expect(first.senderName).toBe('Ana · +55 11 99999-9999');
     expect(first.senderColor).toBe(second.senderColor);
     expect(first.senderIdentity).toBe('5511999999999@s.whatsapp.net');
   });
 
-  it('usa LID apenas quando nome e número não estão disponíveis', () => {
+  it('nunca expõe LID quando nome e número não estão disponíveis', () => {
     const [item] = toChatMessages([baseMessage({ contentAttributes: { whatsapp_participant_jid: '12345@lid', whatsapp_participant_name: 'Ana' } })]);
     expect(item.senderName).toBe('Ana');
     expect(item.senderIdentity).toBe('12345@lid');

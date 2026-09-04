@@ -152,6 +152,8 @@ export interface ConversationAttachment {
   title: string | null;
   contentType: string | null;
   size: number | null;
+  width: number | null;
+  height: number | null;
 }
 
 export interface ConversationAttachmentSummary {
