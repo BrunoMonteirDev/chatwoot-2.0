@@ -78,6 +78,7 @@ interface Props {
   onRetryInboxes?: () => void;
   isSuperAdmin?: boolean;
   onOpenSuperAdmin?: () => void;
+  onOpenGlobalSearch?: () => void;
   systemPermissions?: string[];
 }
 
@@ -104,6 +105,7 @@ export const NavRail: React.FC<Props> = ({
   onRetryInboxes,
   isSuperAdmin = false,
   onOpenSuperAdmin,
+  onOpenGlobalSearch,
   systemPermissions = [],
 }) => {
   const [isExpanded, setIsExpanded] = useState(true);
@@ -210,7 +212,6 @@ export const NavRail: React.FC<Props> = ({
   const [availability, setAvailability] = useState<'online' | 'ocupado' | 'ausente' | 'offline'>('online');
   const [showAvailabilityDropdown, setShowAvailabilityDropdown] = useState(false);
   const [autoOffline, setAutoOffline] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
 
   // Multi-Tenant Account Switcher state
   const availableAccounts = accounts || [];
@@ -435,7 +436,10 @@ export const NavRail: React.FC<Props> = ({
 
               {/* Expanded Search Bar */}
               <div className="flex items-center space-x-1.5">
-                <div
+                <button
+                  type="button"
+                  onClick={onOpenGlobalSearch}
+                  title="Pesquisa global"
                   className={`flex-1 flex items-center px-2.5 py-1.5 rounded-lg border text-xs transition-colors ${
                     isDarkMode
                       ? 'bg-[#151717] border-[#242525] text-white'
@@ -443,14 +447,8 @@ export const NavRail: React.FC<Props> = ({
                   }`}
                 >
                   <Search className="w-3.5 h-3.5 text-[#8696a0] mr-2 shrink-0" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Pesquisar..."
-                    className="w-full bg-transparent outline-none placeholder-[#8696a0]"
-                  />
-                </div>
+                  <span className="text-[#8696a0]">Pesquisar...</span>
+                </button>
                 <button
                   type="button"
                   onClick={onNewChatClick}

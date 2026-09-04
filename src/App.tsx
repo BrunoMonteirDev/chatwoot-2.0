@@ -13,6 +13,7 @@ import {
   ChatFilterRule,
 } from './types';
 import { NavRail } from './components/NavRail';
+import { SidebarGlobalSearch } from './components/SidebarGlobalSearch';
 import { ChatListHeader } from './components/ChatListHeader';
 import { ChatListItem } from './components/ChatListItem';
 import { ChatArea } from './components/ChatArea';
@@ -347,6 +348,7 @@ export default function App() {
   const [showContactsModal, setShowContactsModal] = useState<boolean>(false);
   const [showNewConversationModal, setShowNewConversationModal] = useState<boolean>(false);
   const [showNewGroupModal, setShowNewGroupModal] = useState<boolean>(false);
+  const [showGlobalSearch, setShowGlobalSearch] = useState(false);
 
   const applyRoute = useCallback((route: AppRoute) => {
     setRouteAccountId(route.accountId || '');
@@ -1039,6 +1041,7 @@ export default function App() {
           onLogout={() => void logout()}
           isSuperAdmin={authenticatedUser?.isSuperAdmin}
           onOpenSuperAdmin={() => window.location.assign(superAdminUrl)}
+          onOpenGlobalSearch={() => setShowGlobalSearch(true)}
           systemPermissions={currentAccount?.permissions}
           onNewChatClick={() => {
             setShowNewConversationModal(true);
@@ -1046,6 +1049,14 @@ export default function App() {
             navigateToTab('chats');
           }}
         />
+
+        {showGlobalSearch && <SidebarGlobalSearch
+          accountId={currentAccount?.id ?? null}
+          isDarkMode={isDarkMode}
+          onClose={() => setShowGlobalSearch(false)}
+          onOpenConversation={(conversationId) => { setShowGlobalSearch(false); openConversationDirectly(conversationId); }}
+          onOpenContacts={() => { setShowGlobalSearch(false); navigateToTab('communities'); }}
+        />}
 
         {/* Dynamic Secondary Views (Status, Calls, Communities, Settings) */}
         {activeNavTab === 'status' && (
