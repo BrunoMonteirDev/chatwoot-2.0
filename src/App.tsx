@@ -24,7 +24,8 @@ import { CallsView } from './components/CallsView';
 import { CommunitiesView } from './components/CommunitiesView';
 import { ContactsView } from './components/ContactsView';
 import { SettingsView, SettingsTab } from './components/SettingsView';
-import { AppsView } from './components/AppsView';
+import { DashboardAppEmbed } from './components/DashboardAppEmbed';
+import { enabledDashboardAppForId, useDashboardApps } from './features/apps/useDashboardApps';
 import { NewConversationModal } from './components/NewConversationModal';
 import { NewGroupModal } from './components/NewGroupModal';
 import { WallpaperId } from './components/WhatsAppDoodleBg';
@@ -220,6 +221,8 @@ export default function App() {
   const [user, setUser] = useState<UserProfile>(emptyUser);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [selectedAccount, setSelectedAccount] = useState<MultiTenantAccount>(emptyAccount);
+  const { enabledApps: sidebarApps } = useDashboardApps(currentAccount?.id ?? null);
+  const selectedDashboardApp = useMemo(() => enabledDashboardAppForId(sidebarApps, activeDashboardAppId), [activeDashboardAppId, sidebarApps]);
 
   async function deleteConversation(chat: Chat) {
     const conversationId = Number(chat.id);
@@ -345,6 +348,7 @@ export default function App() {
   } | null>(null);
   const [selectedSettingsTab, setSelectedSettingsTab] = useState<SettingsTab>(() => isSettingsTab(initialRoute.settingsTab) ? initialRoute.settingsTab : 'conta');
   const [selectedSettingsInboxId, setSelectedSettingsInboxId] = useState<string | null>(() => initialRoute.settingsInboxId || null);
+  const [activeDashboardAppId, setActiveDashboardAppId] = useState<string>(() => initialRoute.appId || '');
   const [showContactsModal, setShowContactsModal] = useState<boolean>(false);
   const [showNewConversationModal, setShowNewConversationModal] = useState<boolean>(false);
   const [showNewGroupModal, setShowNewGroupModal] = useState<boolean>(false);
@@ -357,6 +361,7 @@ export default function App() {
     setSelectedInbox(route.inbox || 'todas');
     if (isSettingsTab(route.settingsTab)) setSelectedSettingsTab(route.settingsTab);
     setSelectedSettingsInboxId(route.settingsInboxId || null);
+    setActiveDashboardAppId(route.appId || '');
     setShowContactsModal(false);
     setShowMobileChat(Boolean(route.conversationId));
   }, []);
@@ -415,9 +420,9 @@ export default function App() {
     // Canonicalize legacy/local links only after authentication determines the
     // account. Every operational route is then isolated by account ID.
     if (routeAccountId !== String(currentAccount.id)) {
-      navigate({ tab: activeNavTab, ...(activeChatId ? { conversationId: activeChatId } : {}), ...(selectedInbox !== 'todas' ? { inbox: selectedInbox } : {}), ...(activeNavTab === 'settings' ? { settingsTab: selectedSettingsTab, ...(selectedSettingsInboxId ? { settingsInboxId: selectedSettingsInboxId } : {}) } : {}), accountId: String(currentAccount.id) }, true);
+      navigate({ tab: activeNavTab, ...(activeChatId ? { conversationId: activeChatId } : {}), ...(selectedInbox !== 'todas' ? { inbox: selectedInbox } : {}), ...(activeNavTab === 'settings' ? { settingsTab: selectedSettingsTab, ...(selectedSettingsInboxId ? { settingsInboxId: selectedSettingsInboxId } : {}) } : {}), ...(activeNavTab === 'media' && activeDashboardAppId ? { appId: activeDashboardAppId } : {}), accountId: String(currentAccount.id) }, true);
     }
-  }, [activeChatId, activeNavTab, authenticatedUser, currentAccount, navigate, routeAccountId, selectAccount, selectedInbox, selectedSettingsInboxId, selectedSettingsTab]);
+  }, [activeChatId, activeDashboardAppId, activeNavTab, authenticatedUser, currentAccount, navigate, routeAccountId, selectAccount, selectedInbox, selectedSettingsInboxId, selectedSettingsTab]);
 
   // Selected Chat Object
   const listChats = useMemo(() => conversations.map((conversation) => toChatListItem(conversation, inboxes)), [conversations, inboxes]);
@@ -1042,6 +1047,9 @@ export default function App() {
           isSuperAdmin={authenticatedUser?.isSuperAdmin}
           onOpenSuperAdmin={() => window.location.assign(superAdminUrl)}
           onOpenGlobalSearch={() => setShowGlobalSearch(true)}
+          dashboardApps={sidebarApps}
+          selectedDashboardAppId={selectedDashboardApp?.id ?? null}
+          onOpenDashboardApp={(appId) => navigate({ tab: 'media', appId: String(appId) })}
           systemPermissions={currentAccount?.permissions}
           onNewChatClick={() => {
             setShowNewConversationModal(true);
@@ -1132,14 +1140,7 @@ export default function App() {
 
         {activeNavTab === 'tools' && <QuickNotesView isDarkMode={isDarkMode} />}
 
-        {activeNavTab === 'media' && (
-          <AppsView
-            onClose={() => navigateToTab('chats')}
-            accountId={currentAccount?.id ?? null}
-            canManage={currentAccount?.role === 'administrator'}
-            isDarkMode={isDarkMode}
-          />
-        )}
+        {activeNavTab === 'media' && <DashboardAppEmbed app={selectedDashboardApp} isDarkMode={isDarkMode} />}
 
         {/* Full-screen Contacts & Clients Manager Screen */}
         {(showContactsModal || activeNavTab === 'contacts') && (

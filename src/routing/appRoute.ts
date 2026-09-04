@@ -7,6 +7,7 @@ export type AppRoute = {
   inbox?: string;
   settingsTab?: string;
   settingsInboxId?: string;
+  appId?: string;
 };
 
 const tabForPath: Record<string, NavTab> = {
@@ -38,6 +39,8 @@ export const appRouteFromUrl = (url: Pick<URL, 'pathname' | 'searchParams'>): Ap
   if (accountId && settingsInbox) return { accountId, tab: 'settings', settingsTab: 'caixas', settingsInboxId: settingsInbox[1] };
   const settings = accountId && suffix.match(/^settings(?:\/([^/]+))?$/);
   if (accountId && settings) return { accountId, tab: 'settings', ...(settings[1] ? { settingsTab: decodeURIComponent(settings[1]) } : {}) };
+  const app = accountId && suffix.match(/^apps\/(\d+)$/);
+  if (accountId && app) return { accountId, tab: 'media', appId: app[1] };
   const accountTab = accountId && tabForPath[`/${suffix}`];
   if (accountId && accountTab) return { accountId, tab: accountTab };
   // Compatibility with pre-routing local links. Canonical navigation always
@@ -62,7 +65,7 @@ export const urlForAppRoute = (route: AppRoute) => {
   else if (route.tab === 'status') pathname = `${base}/status`;
   else if (route.tab === 'calls') pathname = `${base}/calls`;
   else if (route.tab === 'communities') pathname = `${base}/contacts`;
-  else if (route.tab === 'media') pathname = `${base}/apps`;
+  else if (route.tab === 'media') pathname = `${base}/apps${route.appId ? `/${encodeURIComponent(route.appId)}` : ''}`;
   else if (route.tab === 'tools') pathname = `${base}/notes`;
   return pathname || '/';
 };

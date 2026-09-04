@@ -46,6 +46,7 @@ import {
 } from 'lucide-react';
 import { NavTab, MultiTenantAccount } from '../types';
 import type { Inbox as ChatwootInbox } from '../domain/currentUser';
+import type { DashboardApp } from '../features/apps/dashboardApps';
 import type { InboxesStatus } from '../features/inboxes/useInboxes';
 import {
   InstagramIcon,
@@ -79,6 +80,9 @@ interface Props {
   isSuperAdmin?: boolean;
   onOpenSuperAdmin?: () => void;
   onOpenGlobalSearch?: () => void;
+  dashboardApps?: DashboardApp[];
+  selectedDashboardAppId?: number | null;
+  onOpenDashboardApp?: (appId: number) => void;
   systemPermissions?: string[];
 }
 
@@ -106,6 +110,9 @@ export const NavRail: React.FC<Props> = ({
   isSuperAdmin = false,
   onOpenSuperAdmin,
   onOpenGlobalSearch,
+  dashboardApps = [],
+  selectedDashboardAppId = null,
+  onOpenDashboardApp,
   systemPermissions = [],
 }) => {
   const [isExpanded, setIsExpanded] = useState(true);
@@ -152,6 +159,7 @@ export const NavRail: React.FC<Props> = ({
     document.body.style.userSelect = 'none';
   };
   const [isConversasOpen, setIsConversasOpen] = useState(true);
+  const [isAppsOpen, setIsAppsOpen] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(true);
   const [hoveredFlyout, setHoveredFlyout] = useState<string | null>(null);
   const canManage = (permission: string) => systemPermissions.includes('administrator') || systemPermissions.includes(permission);
@@ -1044,23 +1052,24 @@ export const NavRail: React.FC<Props> = ({
             )}
           </div>
 
-          {/* 3. Apps */}
-          <button
-            onClick={() => onTabChange('media')}
-            title="Apps"
-            className={`w-full flex items-center px-2.5 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
-              activeTab === 'media'
-                ? isDarkMode
-                  ? 'bg-[#242525] text-[#00a884]'
-                  : 'bg-[#e9edef] text-[#00a884]'
-                : isDarkMode
-                ? 'text-[#aebac1] hover:bg-[#242525] hover:text-white'
-                : 'text-[#54656f] hover:bg-[#e9edef] hover:text-[#111b21]'
-            }`}
-          >
-            <Folder className="w-4.5 h-4.5 shrink-0" />
-            {isExpanded && <span className="ml-3 truncate">Apps</span>}
-          </button>
+          {/* 3. Apps: launchers only. Management remains in Settings. */}
+          <div>
+            <button
+              onClick={() => { if (isExpanded) setIsAppsOpen(value => !value); else onTabChange('media'); }}
+              title="Apps"
+              className={`w-full flex items-center px-2.5 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
+                activeTab === 'media'
+                  ? isDarkMode ? 'bg-[#242525] text-[#00a884]' : 'bg-[#e9edef] text-[#00a884]'
+                  : isDarkMode ? 'text-[#aebac1] hover:bg-[#242525] hover:text-white' : 'text-[#54656f] hover:bg-[#e9edef] hover:text-[#111b21]'
+              }`}
+            >
+              <Folder className="w-4.5 h-4.5 shrink-0" />
+              {isExpanded && <><span className="ml-3 flex-1 truncate text-left">Apps</span>{dashboardApps.length > 0 && (isAppsOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />)}</>}
+            </button>
+            {isExpanded && isAppsOpen && dashboardApps.length > 0 && <div className="ml-5 mt-1 space-y-0.5 border-l border-white/10 pl-2">
+              {dashboardApps.map(app => <button key={app.id} type="button" title={app.title} onClick={() => onOpenDashboardApp?.(app.id)} className={`flex w-full items-center rounded-lg px-2 py-1.5 text-left text-xs transition-colors ${activeTab === 'media' && selectedDashboardAppId === app.id ? 'bg-[#00a884]/15 text-[#00a884]' : isDarkMode ? 'text-[#aebac1] hover:bg-[#242525] hover:text-white' : 'text-[#54656f] hover:bg-[#e9edef]'}`}><LayoutGrid className="mr-2 h-3.5 w-3.5 shrink-0" /><span className="truncate">{app.title}</span></button>)}
+            </div>}
+          </div>
 
           {/* 4. Contatos */}
           <button
