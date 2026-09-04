@@ -165,6 +165,7 @@ export const NavRail: React.FC<Props> = ({
     { id: 'macros', label: 'Macros', icon: <Sliders className="w-3.5 h-3.5" />, permission: 'account_settings_manage' },
     { id: 'respostas', label: 'Respostas Prontas', icon: <MessageSquareQuote className="w-3.5 h-3.5" />, permission: 'canned_responses_manage' },
     { id: 'agendadas', label: 'Mensagens Agendadas', icon: <Clock className="w-3.5 h-3.5" />, permission: 'account_settings_manage' },
+    { id: 'apps', label: 'Apps', icon: <LayoutGrid className="w-3.5 h-3.5" />, permission: 'administrator' },
     { id: 'integracoes', label: 'Integrações e Apps', icon: <Plug className="w-3.5 h-3.5" />, permission: 'integrations_manage' },
     { id: 'auditoria', label: 'Registros de Auditoria', icon: <Scroll className="w-3.5 h-3.5" />, permission: 'audit_logs_view' },
     { id: 'permissoes', label: 'Permissões', icon: <ShieldCheck className="w-3.5 h-3.5" />, permission: 'agents_manage' },

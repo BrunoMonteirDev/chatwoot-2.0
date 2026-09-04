@@ -54,7 +54,7 @@ import { useContacts } from './features/contacts/useContacts';
 import { toContactListItem } from './features/contacts/toContactListItem';
 import { conversationService, type ConversationServerFilters } from './integrations/chatwoot/conversations';
 import { messageService } from './integrations/chatwoot/messages';
-import { canSendWhatsAppMessage, whatsappConnectionService, type OperationalWhatsAppConnection } from './integrations/whatsapp/connection';
+import { canSendCapabilityMessage, canSendWhatsAppMessage, usesLegacyWhatsAppConnection, whatsappConnectionService, whatsappSendCapabilityService, type OperationalWhatsAppConnection, type WhatsAppSendCapability } from './integrations/whatsapp/connection';
 import { authService } from './integrations/chatwoot/auth';
 import { browserNotifications } from './features/notifications/browserNotifications';
 import type { ConversationMessage, ConversationSummary } from './domain/currentUser';
@@ -64,7 +64,7 @@ const emptyUser: UserProfile = { name: '', phone: '', about: '', avatar: '' };
 const emptyAccount: MultiTenantAccount = { id: '', name: '', role: '' };
 // This is also the route allow-list. Retired modules cannot be reopened by
 // manually entering an old settings URL.
-const settingsTabs: SettingsTab[] = ['perfil', 'conta', 'agentes', 'times', 'caixas', 'etiquetas', 'atributos', 'automacao', 'macros', 'respostas', 'agendadas', 'integracoes', 'auditoria', 'permissoes'];
+const settingsTabs: SettingsTab[] = ['perfil', 'conta', 'agentes', 'times', 'caixas', 'etiquetas', 'atributos', 'automacao', 'macros', 'respostas', 'agendadas', 'apps', 'integracoes', 'auditoria', 'permissoes'];
 const isSettingsTab = (value: string | undefined): value is SettingsTab => Boolean(value && settingsTabs.includes(value as SettingsTab));
 
 export default function App() {
@@ -73,6 +73,7 @@ export default function App() {
   const superAdminUrl = import.meta.env.VITE_SUPER_ADMIN_URL || '/super_admin';
   const { inboxes, status: inboxesStatus, error: inboxesError, retry: retryInboxes, upsertRealtimeInbox } = useInboxes(currentAccount?.id ?? null);
   const [whatsappConnection, setWhatsappConnection] = useState<OperationalWhatsAppConnection | null>(null);
+  const [whatsappSendCapability, setWhatsappSendCapability] = useState<WhatsAppSendCapability | null>(null);
   const contactDirectory = useContacts(currentAccount?.id ?? null);
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeChatId, setActiveChatId] = useState<string>(() => initialRoute.conversationId || '');
@@ -433,7 +434,8 @@ export default function App() {
   }, [activeChatId, conversations, directlyLoadedConversation]);
   useEffect(() => {
     const inboxId = selectedConversation?.inboxId;
-    if (!currentAccount || !inboxId) { setWhatsappConnection(null); return; }
+    const channelType = inboxes.find((inbox) => inbox.id === inboxId)?.channelType;
+    if (!currentAccount || !inboxId || !usesLegacyWhatsAppConnection(channelType)) { setWhatsappConnection(null); return; }
     let active = true;
     const refresh = () => whatsappConnectionService.get(currentAccount.id, inboxId, selectedConversation.isGroup ? 'group' : 'private')
       .then((status) => { if (active) setWhatsappConnection(status); })
@@ -443,9 +445,26 @@ export default function App() {
     // check for proxies/providers that drop a callback while reconnecting.
     const interval = window.setInterval(() => void refresh(), 120_000);
     return () => { active = false; window.clearInterval(interval); };
-  }, [currentAccount?.id, selectedConversation?.id, selectedConversation?.inboxId, selectedConversation?.isGroup]);
+  }, [currentAccount?.id, inboxes, selectedConversation?.id, selectedConversation?.inboxId, selectedConversation?.isGroup]);
+  useEffect(() => {
+    const inbox = inboxes.find((item) => item.id === selectedConversation?.inboxId);
+    if (!currentAccount || !selectedConversation || inbox?.channelType !== 'Channel::Whatsapp') { setWhatsappSendCapability(null); return; }
+    let active = true;
+    const refresh = () => whatsappSendCapabilityService.get(currentAccount.id, selectedConversation.id)
+      .then((capability) => { if (active) setWhatsappSendCapability(capability); })
+      .catch(() => { if (active) setWhatsappSendCapability(null); });
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), 60_000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [currentAccount?.id, inboxes, selectedConversation?.id, selectedConversation?.inboxId]);
+  useEffect(() => {
+    const openManager = () => { if (selectedConversation?.inboxId) navigateToSettingsInbox(selectedConversation.inboxId); };
+    window.addEventListener('open-whatsapp-manager', openManager);
+    return () => window.removeEventListener('open-whatsapp-manager', openManager);
+  }, [navigateToSettingsInbox, selectedConversation?.inboxId]);
   const contactDetails = useContactDetails(currentAccount?.id ?? null, selectedConversation?.contactId ?? null);
-  const messageHistory = useConversationMessages(currentAccount?.id ?? null, selectedConversationId, selectedConversation?.inboxId ?? null, contactDetails.contact?.phoneNumber);
+  const messageHistory = useConversationMessages(currentAccount?.id ?? null, selectedConversationId, selectedConversation?.inboxId ?? null, contactDetails.contact?.phoneNumber,
+    inboxes.find((inbox) => inbox.id === selectedConversation?.inboxId)?.channelType);
   const showSystemMessages = showSystemMessagesFrom(authenticatedUser?.uiSettings);
   const sendMessageShortcut = sendMessageShortcutFrom(authenticatedUser?.uiSettings);
   const visibleHistoryMessages = useMemo(() => visibleConversationMessages(messageHistory.messages, showSystemMessages), [messageHistory.messages, showSystemMessages]);
@@ -784,14 +803,14 @@ export default function App() {
   }, [currentAccount, filteredAndSortedChats]);
 
   // Handle sending message
-  const handleSendMessage = (chatId: string, text: string, attachments?: File[], isPrivate?: boolean, replyTo?: import('./types').ReplyTo | null, whatsappMentions?: string[], whatsappMentionReplacements?: Array<{ token: string; text: string }>) => {
-    if (!canSendWhatsAppMessage(whatsappConnection, Boolean(isPrivate))) {
+  const handleSendMessage = (chatId: string, text: string, attachments?: File[], isPrivate?: boolean, replyTo?: import('./types').ReplyTo | null) => {
+    if (!canSendWhatsAppMessage(whatsappConnection, Boolean(isPrivate)) || !canSendCapabilityMessage(whatsappSendCapability, Boolean(isPrivate))) {
       addToast('O WhatsApp desta inbox está desconectado. Reconecte a sessão para enviar mensagens.', 'error');
       return Promise.resolve(false);
     }
     if (selectedConversationId && chatId === String(selectedConversationId)) {
       const inReplyTo = replyTo?.id && /^\d+$/.test(replyTo.id) ? Number(replyTo.id) : undefined;
-      return messageHistory.send(text, Boolean(isPrivate), attachments, inReplyTo, whatsappMentions, whatsappMentionReplacements).then((message) => {
+      return messageHistory.send(text, Boolean(isPrivate), attachments, inReplyTo).then((message) => {
         if (message) applyOutgoingMessage(message);
         return Boolean(message);
       });
@@ -1096,6 +1115,7 @@ export default function App() {
               await retryBootstrap();
             }}
             onResetAccessToken={async () => { await authService.resetAccessToken(); await retryBootstrap(); }}
+            canManageDashboardApps={currentAccount?.role === 'administrator'}
           /></div>
           </>
         )}
@@ -1105,6 +1125,7 @@ export default function App() {
         {activeNavTab === 'media' && (
           <AppsView
             onClose={() => navigateToTab('chats')}
+            accountId={currentAccount?.id ?? null}
             isDarkMode={isDarkMode}
           />
         )}
@@ -1284,6 +1305,7 @@ export default function App() {
                   conversation={selectedConversation}
                   inboxes={inboxes}
                   whatsappConnection={whatsappConnection}
+                  whatsappSendCapability={whatsappSendCapability}
                   sendMessageShortcut={sendMessageShortcut}
                   onCopyConversationLink={() => void handleCopyConversationLink()}
                   onOpenDirectConversation={openConversationDirectly}

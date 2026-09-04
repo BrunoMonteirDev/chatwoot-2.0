@@ -63,6 +63,7 @@ import { AgentInboxPermissionsModal } from './AgentInboxPermissionsModal';
 import { browserNotifications, type BrowserNotificationState } from '../features/notifications/browserNotifications';
 import { AutomationRulesPanel } from './AutomationRulesPanel';
 import { sendMessageShortcutFrom, type SendMessageShortcut } from '../features/messages/sendMessageShortcut';
+import { DashboardAppsSettingsPanel } from './DashboardAppsSettingsPanel';
 
 export type SettingsTab =
   | 'perfil'
@@ -80,6 +81,7 @@ export type SettingsTab =
   | 'macros'
   | 'respostas'
   | 'agendadas'
+  | 'apps'
   | 'aplicacoes'
   | 'integracoes'
   | 'auditoria'
@@ -112,6 +114,7 @@ interface Props {
   onResetAccessToken?: () => Promise<void>;
   selectedInboxId?: number | null;
   onOpenInbox?: (inboxId: number) => void;
+  canManageDashboardApps?: boolean;
 }
 
 export const SettingsView: React.FC<Props> = ({
@@ -134,6 +137,7 @@ export const SettingsView: React.FC<Props> = ({
   onResetAccessToken,
   selectedInboxId = null,
   onOpenInbox,
+  canManageDashboardApps = false,
 }: Props) => {
   const [internalTab, setInternalTab] = useState<SettingsTab>('conta');
   const activeTab = propActiveTab || internalTab;
@@ -1394,6 +1398,7 @@ export const SettingsView: React.FC<Props> = ({
           )}
 
           {/* ==================== 11. APLICAÇÕES ==================== */}
+          {activeTab === 'apps' && (canManageDashboardApps && accountId ? <DashboardAppsSettingsPanel accountId={accountId} /> : <div className="rounded-xl border p-5 text-sm">Você não possui permissão para gerenciar Apps.</div>)}
           {activeTab === 'integracoes' && (
             <div
               className={`p-6 rounded-2xl border shadow-xl space-y-6 ${
