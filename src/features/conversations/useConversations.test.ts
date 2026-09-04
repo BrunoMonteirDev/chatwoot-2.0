@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import type { ConversationSummary } from '../../domain/currentUser';
-import { matchesConversationFilters, mergeFilteredRealtimeConversation, mergeRealtimeConversation } from './useConversations';
+import type { ConversationMessage, ConversationSummary } from '../../domain/currentUser';
+import { matchesConversationFilters, mergeFilteredRealtimeConversation, mergeRealtimeConversation, mergeRealtimeMessage } from './useConversations';
 
 const conversation = (overrides: Partial<ConversationSummary> = {}): ConversationSummary => ({
   id: 1, inboxId: 7, channelType: null, contactName: 'Maria', contactId: 17, contactAvatarUrl: null, lastMessage: 'Olá', lastMessageByCurrentUser: false, isGroup: false,
   lastActivityAt: 100, updatedAt: 100, unreadCount: 0, status: 'open', priority: null, assigneeId: null, assigneeName: null, participantIds: [], teamId: null, teamName: null, labels: [], ...overrides,
+});
+
+const message = (overrides: Partial<ConversationMessage> = {}): ConversationMessage => ({
+  id: 11, conversationId: 1, kind: 'incoming', contentType: 'text', content: 'Nova mensagem',
+  attachments: [], createdAt: 200, updatedAt: null, senderName: 'Maria',
+  ...overrides,
 });
 
 describe('mergeRealtimeConversation', () => {
@@ -23,6 +29,44 @@ describe('mergeRealtimeConversation', () => {
   it('não deixa uma resposta antiga regredir nome e avatar resolvidos', () => {
     const current = [conversation({ contactName: 'Ricardo Freitas', contactAvatarUrl: 'https://cdn/avatar.jpg' })];
     expect(mergeRealtimeConversation(current, conversation({ contactName: '+55 44 99563-9999', contactAvatarUrl: null, updatedAt: 101 }), 'todas')[0]).toMatchObject({ contactName: 'Ricardo Freitas', contactAvatarUrl: 'https://cdn/avatar.jpg' });
+  });
+});
+
+describe('mergeRealtimeMessage', () => {
+  it('atualiza a conversa aberta sem alterar qual conversa a rota mantém selecionada', () => {
+    const selectedConversationId = 1;
+    const result = mergeRealtimeMessage([conversation({ id: 1 })], message());
+
+    expect(result[0]).toMatchObject({ id: 1, lastMessage: 'Nova mensagem' });
+    expect(selectedConversationId).toBe(1);
+  });
+
+  it('atualiza unread e reordena outra conversa sem alterar a seleção, a rota ou rascunhos', () => {
+    const selectedConversationId = 1;
+    const route = '/app/accounts/1/conversations/1';
+    const draft = 'resposta em andamento';
+    const result = mergeRealtimeMessage(
+      [conversation({ id: 1 }), conversation({ id: 2, lastActivityAt: 150 })],
+      message({ conversationId: 2, content: 'Mensagem externa' }),
+      3,
+      300,
+    );
+
+    expect(result.map(item => item.id)).toEqual([2, 1]);
+    expect(result[0]).toMatchObject({ unreadCount: 3, lastMessage: 'Mensagem externa' });
+    expect(selectedConversationId).toBe(1);
+    expect(route).toBe('/app/accounts/1/conversations/1');
+    expect(draft).toBe('resposta em andamento');
+  });
+
+  it('não altera o estado local de criação quando uma conversa nova entra na lista', () => {
+    const createContactForm = { open: true, name: 'Ana', phone: '+5511999999999' };
+    const newConversationForm = { open: true, draft: 'Olá', attachments: ['arquivo.pdf'] };
+    const result = mergeRealtimeConversation([], conversation({ id: 3, lastActivityAt: 300 }), 'todas');
+
+    expect(result.map(item => item.id)).toEqual([3]);
+    expect(createContactForm).toEqual({ open: true, name: 'Ana', phone: '+5511999999999' });
+    expect(newConversationForm).toEqual({ open: true, draft: 'Olá', attachments: ['arquivo.pdf'] });
   });
 });
 

@@ -45,6 +45,34 @@ export const mergeRealtimeConversation = (current: ConversationSummary[], update
   return [merged, ...current.filter(item => item.id !== updated.id)].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 };
 
+// Realtime is allowed to reconcile sidebar data only. Selection is owned by
+// the route in App and deliberately does not participate in this update.
+export const mergeRealtimeMessage = (
+  current: ConversationSummary[],
+  message: ConversationMessage,
+  unreadCount?: number,
+  lastActivityAt?: number,
+): ConversationSummary[] => {
+  const conversation = current.find(item => item.id === message.conversationId);
+  if (!conversation) return current;
+
+  const isPreviewable = message.kind !== 'activity';
+  const updated: ConversationSummary = {
+    ...conversation,
+    lastMessage: isPreviewable
+      ? (message.kind === 'private_note'
+        ? `🔒 Nota: ${message.content}`
+        : message.content || (message.attachments.length ? 'Anexo' : 'Sem mensagens'))
+      : conversation.lastMessage,
+    lastMessageByCurrentUser:
+      message.kind === 'outgoing' || message.kind === 'private_note',
+    lastActivityAt: lastActivityAt ?? message.createdAt,
+    unreadCount: unreadCount ?? conversation.unreadCount,
+  };
+
+  return [updated, ...current.filter(item => item.id !== message.conversationId)];
+};
+
 export const useConversations = (accountId: number | null, selectedInbox: string, filters: ConversationServerFilters = {}) => {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
@@ -188,19 +216,9 @@ export const useConversations = (accountId: number | null, selectedInbox: string
   }, [filterKey, selectedInbox]);
 
   const applyRealtimeMessage = useCallback((message: ConversationMessage, unreadCount?: number, lastActivityAt?: number) => {
-    setConversations(current => {
-      const conversation = current.find(item => item.id === message.conversationId);
-      if (!conversation) return current;
-      const isPreviewable = message.kind !== 'activity';
-      const updated: ConversationSummary = {
-        ...conversation,
-        lastMessage: isPreviewable ? (message.kind === 'private_note' ? `🔒 Nota: ${message.content}` : message.content || (message.attachments.length ? 'Anexo' : 'Sem mensagens')) : conversation.lastMessage,
-        lastMessageByCurrentUser: message.kind === 'outgoing' || message.kind === 'private_note',
-        lastActivityAt: lastActivityAt ?? message.createdAt,
-        unreadCount: unreadCount ?? conversation.unreadCount,
-      };
-      return [updated, ...current.filter(item => item.id !== message.conversationId)];
-    });
+    setConversations(current =>
+      mergeRealtimeMessage(current, message, unreadCount, lastActivityAt)
+    );
   }, []);
 
   return { conversations, status, error, hasNextPage, isLoadingMore, isRefreshing, retry: () => load(1, false), loadMore, applyOutgoingMessage, applyConversationUpdate, removeConversation, replaceConversation, upsertRealtimeConversation, addCreatedConversation, applyRealtimeMessage, refreshRecentConversations };
