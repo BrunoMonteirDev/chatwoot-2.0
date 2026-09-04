@@ -26,6 +26,7 @@ import { ContactsView } from './components/ContactsView';
 import { SettingsView, SettingsTab } from './components/SettingsView';
 import { DashboardAppEmbed } from './components/DashboardAppEmbed';
 import { enabledDashboardAppForId, useDashboardApps } from './features/apps/useDashboardApps';
+import { useLauncherRouteState } from './features/apps/useLauncherRouteState';
 import { NewConversationModal } from './components/NewConversationModal';
 import { NewGroupModal } from './components/NewGroupModal';
 import { WallpaperId } from './components/WhatsAppDoodleBg';
@@ -213,6 +214,8 @@ export default function App() {
   const [showMobileChat, setShowMobileChat] = useState<boolean>(() => Boolean(initialRoute.conversationId));
   const [selectedInbox, setSelectedInbox] = useState<string>(() => initialRoute.inbox || 'todas');
   const [routeAccountId, setRouteAccountId] = useState<string>(() => initialRoute.accountId || '');
+  // Route-derived launcher state must exist before hooks that derive the active app.
+  const [activeDashboardAppId, setActiveDashboardAppId] = useLauncherRouteState(initialRoute.appId);
   const [conversationServerFilters, setConversationServerFilters] = useState<ConversationServerFilters>({ teamId: null, labels: [] });
   const [directlyLoadedConversation, setDirectlyLoadedConversation] = useState<ConversationSummary | null>(null);
   const { conversations, status: conversationsStatus, error: conversationsError, hasNextPage, isLoadingMore, isRefreshing: conversationsRefreshing, retry: retryConversations, loadMore, applyOutgoingMessage, applyConversationUpdate, removeConversation, replaceConversation, upsertRealtimeConversation, addCreatedConversation, applyRealtimeMessage, refreshRecentConversations } = useConversations(currentAccount?.id ?? null, selectedInbox, conversationServerFilters);
@@ -348,7 +351,6 @@ export default function App() {
   } | null>(null);
   const [selectedSettingsTab, setSelectedSettingsTab] = useState<SettingsTab>(() => isSettingsTab(initialRoute.settingsTab) ? initialRoute.settingsTab : 'conta');
   const [selectedSettingsInboxId, setSelectedSettingsInboxId] = useState<string | null>(() => initialRoute.settingsInboxId || null);
-  const [activeDashboardAppId, setActiveDashboardAppId] = useState<string>(() => initialRoute.appId || '');
   const [showContactsModal, setShowContactsModal] = useState<boolean>(false);
   const [showNewConversationModal, setShowNewConversationModal] = useState<boolean>(false);
   const [showNewGroupModal, setShowNewGroupModal] = useState<boolean>(false);
