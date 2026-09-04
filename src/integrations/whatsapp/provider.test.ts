@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { externalMessageId, isNativeWhatsAppInbox, metaCloudMetadataForInbox, parseExternalMessageId, transportStatusesForInbox, whatsappConfigurationForInbox, whatsappProviderForInbox } from './provider';
+import { externalMessageId, isNativeWhatsAppInbox, metaCloudMetadataForInbox, metaHistoryStatusForInbox, parseExternalMessageId, transportStatusesForInbox, whatsappConfigurationForInbox, whatsappProviderForInbox } from './provider';
 
 const inbox = { id: 1, name: 'WhatsApp', avatarUrl: null, channelType: 'Channel::Api', channelId: 1, webhookUrl: null, inboxIdentifier: 'token', additionalAttributes: {} };
 
@@ -28,6 +28,12 @@ describe('WhatsApp providers', () => {
     expect(isNativeWhatsAppInbox(native)).toBe(true);
     expect(whatsappConfigurationForInbox(native)).toBeNull();
     expect(metaCloudMetadataForInbox(native)).toBeNull();
+  });
+
+  it('expõe o lifecycle History nativo sem criar metadados de bridge', () => {
+    const native = { ...inbox, channelType: 'Channel::Whatsapp', additionalAttributes: { meta_history_status: 'syncing' } };
+    expect(metaHistoryStatusForInbox(native)).toBe('syncing');
+    expect(whatsappConfigurationForInbox(native)).toBeNull();
   });
 
   it('namespaceia e interpreta IDs externos sem misturar provedores', () => {

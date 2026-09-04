@@ -75,10 +75,10 @@ describe('WAHA session transport', () => {
   it('uses the WAHA GOWS reaction endpoint and payload', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('{}'));
     vi.stubGlobal('fetch', fetchMock);
-    await wahaTransport.sendReaction('empresa', '5511999999999@c.us', 'message-id', '👍');
+    await wahaTransport.sendReaction('empresa', '5511999999999@c.us', 'false_5511999999999@c.us_message-id', '👍');
     expect(fetchMock.mock.calls[0][0]).toBe('http://waha.test/api/reaction');
     expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('PUT');
-    expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({ session: 'empresa', chatId: '5511999999999@c.us', messageId: 'message-id', reaction: '👍' });
+    expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({ session: 'empresa', chatId: '5511999999999@c.us', messageId: 'false_5511999999999@c.us_message-id', reaction: '👍' });
   });
 
   it('sends each attachment independently and only marks OGG/Opus as a voice note', async () => {

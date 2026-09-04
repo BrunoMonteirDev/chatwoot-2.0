@@ -8,6 +8,7 @@ export const WHATSAPP_MODES = ['official', 'web'] as const;
 export type WhatsAppMode = typeof WHATSAPP_MODES[number];
 export const WHATSAPP_TRANSPORT_STATUSES = ['connected', 'disconnected', 'pending'] as const;
 export type WhatsAppTransportStatus = typeof WHATSAPP_TRANSPORT_STATUSES[number];
+export type MetaHistoryStatus = 'not_eligible' | 'available' | 'pending' | 'syncing' | 'completed' | 'declined' | 'failed' | 'not_available' | 'waiting' | 'receiving' | 'ready' | 'importing' | 'synced';
 
 export interface MetaCloudInboxMetadata {
   whatsapp_provider?: 'meta_cloud';
@@ -20,7 +21,7 @@ export interface MetaCloudInboxMetadata {
   meta_business_app_status?: 'active' | 'offboarded' | 'not_applicable';
   meta_history_available?: boolean;
   meta_history_authorized?: boolean;
-  meta_history_status?: 'not_available' | 'waiting' | 'receiving' | 'ready' | 'importing' | 'synced' | 'failed';
+  meta_history_status?: MetaHistoryStatus;
 }
 
 export interface WhatsAppInboxConfiguration { mode: WhatsAppMode; transports: WhatsAppTransport[]; meta: MetaCloudInboxMetadata | null; evolutionInstanceName: string | null; wahaSessionName: string | null; }
@@ -29,6 +30,14 @@ export interface WhatsAppInboxConfiguration { mode: WhatsAppMode; transports: Wh
 // this separate prevents outbound webhooks, custom Meta tokens, and future
 // hybrid routing from being selected for Channel::Whatsapp by accident.
 export const isNativeWhatsAppInbox = (inbox: Inbox) => inbox.channelType === 'Channel::Whatsapp';
+
+const isMetaHistoryStatus = (value: unknown): value is MetaHistoryStatus =>
+  typeof value === 'string' && ['not_eligible', 'available', 'pending', 'syncing', 'completed', 'declined', 'failed', 'not_available', 'waiting', 'receiving', 'ready', 'importing', 'synced'].includes(value);
+
+export const metaHistoryStatusForInbox = (inbox: Inbox): MetaHistoryStatus | null => {
+  const value = inbox.additionalAttributes.meta_history_status;
+  return isMetaHistoryStatus(value) ? value : null;
+};
 
 const transportsFor = (attributes: Record<string, unknown>): WhatsAppTransport[] => {
   const declared = Array.isArray(attributes.whatsapp_transports) ? attributes.whatsapp_transports.filter((item): item is WhatsAppTransport => item === 'evolution' || item === 'waha' || item === 'meta_cloud') : [];
@@ -48,7 +57,7 @@ export const whatsappConfigurationForInbox = (inbox: Inbox): WhatsAppInboxConfig
   const hasMeta = transports.includes('meta_cloud') && typeof attributes.meta_waba_id === 'string' && typeof attributes.meta_phone_number_id === 'string';
   return {
     mode, transports,
-    meta: hasMeta ? { whatsapp_mode: mode, whatsapp_transports: transports, meta_waba_id: attributes.meta_waba_id as string, meta_phone_number_id: attributes.meta_phone_number_id as string, meta_display_phone_number: typeof attributes.meta_display_phone_number === 'string' ? attributes.meta_display_phone_number : null, ...(attributes.meta_onboarding_mode === 'coexistence' || attributes.meta_onboarding_mode === 'standard' ? { meta_onboarding_mode: attributes.meta_onboarding_mode } : {}), ...(attributes.meta_business_app_status === 'active' || attributes.meta_business_app_status === 'offboarded' || attributes.meta_business_app_status === 'not_applicable' ? { meta_business_app_status: attributes.meta_business_app_status } : {}), ...(typeof attributes.meta_history_available === 'boolean' ? { meta_history_available: attributes.meta_history_available } : {}), ...(typeof attributes.meta_history_authorized === 'boolean' ? { meta_history_authorized: attributes.meta_history_authorized } : {}), ...(attributes.meta_history_status === 'not_available' || attributes.meta_history_status === 'waiting' || attributes.meta_history_status === 'receiving' || attributes.meta_history_status === 'ready' || attributes.meta_history_status === 'importing' || attributes.meta_history_status === 'synced' || attributes.meta_history_status === 'failed' ? { meta_history_status: attributes.meta_history_status } : {}) } : null,
+    meta: hasMeta ? { whatsapp_mode: mode, whatsapp_transports: transports, meta_waba_id: attributes.meta_waba_id as string, meta_phone_number_id: attributes.meta_phone_number_id as string, meta_display_phone_number: typeof attributes.meta_display_phone_number === 'string' ? attributes.meta_display_phone_number : null, ...(attributes.meta_onboarding_mode === 'coexistence' || attributes.meta_onboarding_mode === 'standard' ? { meta_onboarding_mode: attributes.meta_onboarding_mode } : {}), ...(attributes.meta_business_app_status === 'active' || attributes.meta_business_app_status === 'offboarded' || attributes.meta_business_app_status === 'not_applicable' ? { meta_business_app_status: attributes.meta_business_app_status } : {}), ...(typeof attributes.meta_history_available === 'boolean' ? { meta_history_available: attributes.meta_history_available } : {}), ...(typeof attributes.meta_history_authorized === 'boolean' ? { meta_history_authorized: attributes.meta_history_authorized } : {}), ...(isMetaHistoryStatus(attributes.meta_history_status) ? { meta_history_status: attributes.meta_history_status } : {}) } : null,
     evolutionInstanceName: typeof attributes.evolution_instance_name === 'string' ? attributes.evolution_instance_name : null,
     wahaSessionName: typeof attributes.waha_session_name === 'string' ? attributes.waha_session_name : null,
   };
@@ -79,7 +88,7 @@ export const metaCloudMetadataForInbox = (inbox: Inbox): MetaCloudInboxMetadata 
     ...(attributes.meta_business_app_status === 'active' || attributes.meta_business_app_status === 'offboarded' || attributes.meta_business_app_status === 'not_applicable' ? { meta_business_app_status: attributes.meta_business_app_status } : {}),
     ...(typeof attributes.meta_history_available === 'boolean' ? { meta_history_available: attributes.meta_history_available } : {}),
     ...(typeof attributes.meta_history_authorized === 'boolean' ? { meta_history_authorized: attributes.meta_history_authorized } : {}),
-    ...(attributes.meta_history_status === 'not_available' || attributes.meta_history_status === 'waiting' || attributes.meta_history_status === 'receiving' || attributes.meta_history_status === 'ready' || attributes.meta_history_status === 'importing' || attributes.meta_history_status === 'synced' || attributes.meta_history_status === 'failed' ? { meta_history_status: attributes.meta_history_status } : {}),
+    ...(isMetaHistoryStatus(attributes.meta_history_status) ? { meta_history_status: attributes.meta_history_status } : {}),
   };
 };
 
