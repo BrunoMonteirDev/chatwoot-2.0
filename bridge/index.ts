@@ -28,6 +28,7 @@ import { WahaHistoryStore, type WahaHistoryJob, type WahaHistoryRange } from './
 import { connectionStatusPatch, evolutionConnectionStatus, metaConnectionStatus, type ConnectionStatus } from './connectionStatus.js';
 import { groupMetadataCache, type GroupMetadata } from './groupMetadata.js';
 import { contactProfileSyncPlan } from './contactProfile.js';
+import { resolveGroupParticipantIdentity } from './groupParticipantIdentity.js';
 
 const app = express();
 const templateHeaderUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: config.maxMediaBytes, files: 1 } });
@@ -40,6 +41,24 @@ const wahaSessions = new WahaSessionStore(config.wahaSessionOwnershipFile);
 const wahaHistory = new WahaHistoryStore(config.wahaHistoryFile);
 const historyImports = new Map<number, Promise<void>>();
 const wahaHistoryImports = new Map<number, Promise<void>>();
+
+const syncGroupParticipantContact = async (
+  inbox: { identifier: string },
+  input: Record<string, unknown>,
+  transport: 'waha' | 'evolution',
+) => {
+  const identity = resolveGroupParticipantIdentity(input);
+  if (!identity.phone) return null;
+  const contact = await chatwootBridge.createOrFindContact(inbox.identifier, {
+    sourceId: `whatsapp:${identity.phone.replace(/^\+/, '')}`,
+    name: identity.displayName || identity.phone,
+    phoneNumber: identity.phone,
+    ...(identity.avatarUrl ? { avatarUrl: identity.avatarUrl } : {}),
+  });
+  if (transport === 'waha') await chatwootBridge.saveWahaIdentity(contact.id, identity.phone, identity.lid);
+  else await chatwootBridge.saveEvolutionIdentity(contact.id, identity.phone, identity.lid);
+  return contact;
+};
 // WAHA can emit its own `fromMe` webhook before the send endpoint returns the
 // provider message id. During that small window, Chatwoot still owns the
 // outgoing bubble and the echo must not become a second "mobile" bubble.
@@ -1400,7 +1419,10 @@ app.post('/webhooks/waha', (request, response) => {
         await chatwootBridge.withAccount(inbox.accountId, async () => {
           const { contact, conversation } = await conversationForWahaIdentity(inbox, message);
           conversationId = conversation.id;
-          if (message.chatType === 'group') await chatwootBridge.saveEvolutionGroup(contact.id, message.remoteJid, message.name, { participants: message.participantJid ? [{ jid: message.participantJid, name: message.participantName }] : undefined });
+          if (message.chatType === 'group') {
+            await chatwootBridge.saveEvolutionGroup(contact.id, message.remoteJid, message.name, { participants: message.participantJid ? [{ jid: message.participantJid, name: message.participantName }] : undefined });
+            await syncGroupParticipantContact(inbox, { participant: message.participantJid, pushName: message.participantName, avatarUrl: message.avatarUrl }, 'waha');
+          }
           // The public API message endpoint does not infer a Chatwoot internal
           // reply id from provider metadata reliably. Resolve the namespaced
           // WAHA key first and send both the internal and external identity.
@@ -1558,6 +1580,7 @@ app.post('/webhooks/evolution', async (request, response) => {
     console.info('[evolution-bridge] inbox found', { instance: event.instance, inboxId: inbox.id });
     console.info('[evolution-bridge] contact found or created', { sourceId: contact.source_id });
     console.info('[evolution-bridge] conversation found or created', { conversationId: conversation.id });
+    if (event.chatType === 'group') await syncGroupParticipantContact(inbox, { participant: event.participantJid, pushName: event.participantName }, 'evolution');
     const inReplyTo = await replyTargetId(conversation.id, 'evolution', event.quotedMessageId);
     const downloadedMedia = event.media ? await evolutionBridge.downloadMedia(event.instance, event.media) : undefined;
     if (event.fromMe && downloadedMedia) {
