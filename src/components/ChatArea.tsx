@@ -67,6 +67,7 @@ import { canSendWhatsAppMessage, type OperationalWhatsAppConnection } from '../i
 import { finiteAudioDuration, recordingFile, recordingMimeType, releaseRecordingResources, type AudioRecordingPhase } from '../features/audio/recording';
 import { documentPresentation, filesFromTransfer, hasFilesInTransfer, triggerAttachmentDownload } from '../features/attachments/fileUtils';
 import { shouldSendMessageOnEnter, type SendMessageShortcut } from '../features/messages/sendMessageShortcut';
+import { audioDurationLabel, isAtConversationBottom, preservedScrollTopAfterPrepend } from '../features/messages/scroll';
 import { useContactConversations } from '../features/contacts/useContactConversations';
 import { useConversationAttachments } from '../features/attachments/useConversationAttachments';
 import { groupMetadataClient, type GroupParticipant } from '../features/groups/metadata';
@@ -387,12 +388,6 @@ const AudioNoteCard: React.FC<{
 
   useEffect(() => () => { audioRef.current?.pause(); }, []);
 
-  const formatDuration = (seconds: number) => {
-    if (!Number.isFinite(seconds) || seconds < 0) return audioDuration;
-    const minutes = Math.floor(seconds / 60);
-    return `${minutes}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
-  };
-
   const togglePlayback = async () => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -429,7 +424,7 @@ const AudioNoteCard: React.FC<{
     : undefined;
 
   return (
-    <div className="py-1 px-1 w-[260px] sm:w-[310px] max-w-full select-none font-sans">
+    <div className="min-h-[76px] py-1 px-1 w-[260px] sm:w-[310px] max-w-full select-none font-sans">
       {/* Header: ~ Author Name (Yellow/Amber) + Phone Number (Gray) */}
       {(formattedAuthor || audioPhone) && (
         <div className="flex items-center justify-between text-xs font-semibold mb-2 px-0.5 min-w-0 overflow-hidden">
@@ -445,7 +440,7 @@ const AudioNoteCard: React.FC<{
       )}
 
       {/* Main Audio Player Row */}
-      <div className="flex items-center space-x-2 my-1 w-full min-w-0">
+      <div className="flex h-11 items-center space-x-2 my-1 w-full min-w-0">
         {/* Play / Pause button */}
         <button
           onClick={() => {
@@ -559,7 +554,7 @@ const AudioNoteCard: React.FC<{
 
       {/* Footer: duration on bottom-left, time on bottom-right */}
       <div className="flex justify-between items-center text-[11px] text-[#8696a0] font-sans mt-0.5 px-0.5">
-        <span>{durationSeconds ? `${formatDuration(currentSeconds)} / ${formatDuration(durationSeconds)}` : audioDuration}</span>
+        <span className="whitespace-nowrap">{durationSeconds ? `${audioDurationLabel(currentSeconds, audioDuration)} / ${audioDurationLabel(durationSeconds, audioDuration)}` : audioDuration}</span>
         <div className="flex items-center space-x-1 text-[11px] text-[#8696a0] ml-auto">
           <span>{time || '08:40'}</span>
           {isMe && (
@@ -1074,6 +1069,7 @@ export const ChatArea: React.FC<Props> = ({
   const prevMessagesLength = useRef(chat.messages.length);
   const previousChatId = useRef(chat.id);
   const previousScrollHeight = useRef<number | null>(null);
+  const initialScrollCompletedFor = useRef<string | null>(null);
 
   const focusMessage = (messageId: string) => {
     const element = document.getElementById(`msg-${messageId}`);
@@ -1083,11 +1079,11 @@ export const ChatArea: React.FC<Props> = ({
     window.setTimeout(() => element.classList.remove('bg-[#00a884]/20'), 2000);
   };
 
-  const scrollToBottom = () => {
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollTo({
         top: scrollContainerRef.current.scrollHeight,
-        behavior: 'smooth',
+        behavior,
       });
     }
     setIsUserScrolledUp(false);
@@ -1099,8 +1095,7 @@ export const ChatArea: React.FC<Props> = ({
     const el = scrollContainerRef.current;
     if (!el) return;
     onHistoryScrollChange?.(el.scrollTop);
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (distanceFromBottom > 80) {
+    if (!isAtConversationBottom(el.scrollHeight, el.scrollTop, el.clientHeight)) {
       setIsUserScrolledUp(true);
     } else {
       setIsUserScrolledUp(false);
@@ -1113,12 +1108,33 @@ export const ChatArea: React.FC<Props> = ({
     }
   };
 
+  // Each opened conversation gets exactly one initial positioning after its
+  // first complete message page has rendered. Attachments/audio metadata may
+  // alter their own DOM later, but never re-run this initial positioning.
+  useEffect(() => {
+    if (historyStatus !== 'ready' || initialScrollCompletedFor.current === chat.id) return;
+    const conversationId = chat.id;
+    const frame = window.requestAnimationFrame(() => {
+      if (previousChatId.current !== conversationId || initialScrollCompletedFor.current === conversationId) return;
+      const el = scrollContainerRef.current;
+      if (!el) return;
+      el.scrollTop = el.scrollHeight;
+      initialScrollCompletedFor.current = conversationId;
+      prevMessagesLength.current = chat.messages.length;
+      setIsUserScrolledUp(false);
+      setUnreadBelowCount(0);
+      onReachLatestMessage?.();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [chat.id, chat.messages.length, historyStatus]);
+
   // New incoming messages never move an agent who is reading older content.
   // The floating button below is the explicit WhatsApp-like notification.
   useEffect(() => {
     if (previousChatId.current !== chat.id) {
       previousChatId.current = chat.id;
       prevMessagesLength.current = chat.messages.length;
+      initialScrollCompletedFor.current = null;
       return;
     }
     const isNewMessage = chat.messages.length > prevMessagesLength.current;
@@ -1126,19 +1142,19 @@ export const ChatArea: React.FC<Props> = ({
 
     const lastMessage = chat.messages[chat.messages.length - 1];
 
-    if (!lastMessage) return;
+    if (!lastMessage || initialScrollCompletedFor.current !== chat.id) return;
 
     // Realtime, polling, reaction/edit updates and a page prepended above can
     // all replace `chat.messages`. They must never pull the reader to the
     // bottom merely because the latest existing message was sent by us.
     const isPrependingOlderMessages = previousScrollHeight.current !== null;
     if (isNewMessage && !isPrependingOlderMessages && lastMessage.sender === 'me') {
-      scrollToBottom();
+      scrollToBottom('auto');
     } else if (isNewMessage && !isPrependingOlderMessages) {
       if (isUserScrolledUp) {
         setUnreadBelowCount((prev) => prev + 1);
       } else {
-        scrollToBottom();
+        scrollToBottom('auto');
       }
     }
   }, [chat.id, chat.messages, isUserScrolledUp]);
@@ -1147,19 +1163,9 @@ export const ChatArea: React.FC<Props> = ({
   useEffect(() => {
     const el = scrollContainerRef.current;
     if (!el || previousScrollHeight.current === null || isLoadingOlder) return;
-    el.scrollTop += el.scrollHeight - previousScrollHeight.current;
+    el.scrollTop = preservedScrollTopAfterPrepend(el.scrollTop, previousScrollHeight.current, el.scrollHeight);
     previousScrollHeight.current = null;
   }, [chat.messages, isLoadingOlder]);
-
-  // Restore the per-conversation position. New conversations without a saved
-  // position retain the familiar bottom-of-chat behavior.
-  useEffect(() => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    const restore = () => { el.scrollTop = historyScrollTop || el.scrollHeight; };
-    const frame = window.requestAnimationFrame(restore);
-    return () => window.cancelAnimationFrame(frame);
-  }, [chat.id, historyScrollTop]);
 
   // Voice recording timer
   useEffect(() => {
