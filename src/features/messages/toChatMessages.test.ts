@@ -44,7 +44,7 @@ describe('toChatMessages reactions', () => {
     const [item] = toChatMessages([baseMessage({ contentAttributes: { whatsapp_participant_jid: '12345@lid', whatsapp_participant_name: 'Ana' } })]);
     expect(item.senderName).toBe('Ana');
     expect(item.senderIdentity).toBe('12345@lid');
-    expect(toChatMessages([baseMessage({ senderName: null, contentAttributes: { whatsapp_participant_jid: '12345@lid' } })])[0].senderName).toBe('12345@lid');
+    expect(toChatMessages([baseMessage({ senderName: null, contentAttributes: { whatsapp_participant_jid: '12345@lid' } })])[0].senderName).toBe('Participante');
   });
 
   it('expõe o marcador normalizado de mensagem encaminhada', () => {

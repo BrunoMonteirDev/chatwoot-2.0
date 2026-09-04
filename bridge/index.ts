@@ -70,6 +70,11 @@ const queueWahaOutgoing = (session: string, destination: string, content: string
   pendingWahaOutgoing.set(key, { session, destination: wahaDestination(destination), content: content.trim(), media, expiresAt: Date.now() + 30_000 });
   return key;
 };
+const applyMentionReplacements = (content: string, replacements: Array<{ token: string; text: string }> = []) => {
+  let result = content;
+  for (const replacement of replacements) result = result.replace(replacement.token, replacement.text);
+  return result;
+};
 const consumePendingWahaOutgoing = (session: string, message: { remoteJid: string; content: string; media?: unknown }) => {
   const destination = wahaDestination(message.remoteJid);
   const content = message.content.trim();
@@ -163,7 +168,11 @@ app.get('/groups/metadata', async (request, response) => {
       try { await chatwootBridge.saveEvolutionGroup(target.contactId, groupJid, metadata.subject); }
       catch (error) { console.warn('[groups] could not persist provider subject', { conversationId, groupJid, error: error instanceof Error ? error.message : 'unknown' }); }
     }
-    return response.json({ group: metadata, cached: Boolean(cached) });
+    const participants = metadata.participants.map((participant) => {
+      const identity = resolveGroupParticipantIdentity({ participant: participant.jid, participantAlt: participant.phoneNumber && /^\d{8,15}@(c\.us|s\.whatsapp\.net)$/.test(participant.phoneNumber) ? participant.phoneNumber : undefined, phone: participant.phoneNumber, name: participant.name, avatarUrl: participant.avatarUrl });
+      return { ...participant, ...identity, jid: participant.jid, name: identity.displayName || participant.name };
+    });
+    return response.json({ group: { ...metadata, participants }, cached: Boolean(cached) });
   } catch (error) { return response.status(502).json({ error: error instanceof Error ? error.message : 'Não foi possível carregar o grupo.' }); }
 });
 
@@ -1784,8 +1793,9 @@ app.post('/webhooks/chatwoot', async (request, response) => {
               sentMessages.push(await wahaTransport.sendMedia(session, event.number, attachment, caption, replyTo));
             }
           } else {
-            pendingKeys.push(queueWahaOutgoing(session, event.number, event.content, false));
-            sentMessages.push(await wahaTransport.sendText(session, event.number, event.content, replyTo));
+            const content = applyMentionReplacements(event.content, event.whatsappMentionReplacements);
+            pendingKeys.push(queueWahaOutgoing(session, event.number, content, false));
+            sentMessages.push(await wahaTransport.sendText(session, event.number, content, replyTo, event.whatsappMentions));
           }
         } catch (error) {
           pendingKeys.forEach(key => pendingWahaOutgoing.delete(key));

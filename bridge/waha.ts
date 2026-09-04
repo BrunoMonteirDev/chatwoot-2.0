@@ -198,8 +198,8 @@ export const wahaTransport = {
   async leaveGroup(session: string, groupId: string) {
     await request(`/api/${namePath(session)}/groups/${encodeURIComponent(groupId)}/leave`, { method: 'POST' });
   },
-  async sendText(session: string, chatId: string, text: string, replyTo?: string) {
-    return sent(await request('/api/sendText', { method: 'POST', body: JSON.stringify({ session, chatId: normalizeWahaChatId(chatId), text, ...(replyTo ? { reply_to: replyTo } : {}) }) }));
+  async sendText(session: string, chatId: string, text: string, replyTo?: string, mentions?: string[]) {
+    return sent(await request('/api/sendText', { method: 'POST', body: JSON.stringify({ session, chatId: normalizeWahaChatId(chatId), text, ...(replyTo ? { reply_to: replyTo } : {}), ...(mentions?.length ? { mentions } : {}) }) }));
   },
   async sendMedia(session: string, chatId: string, attachment: OutgoingAttachment, caption = '', replyTo?: string) {
     const file = await fileData(attachment);

@@ -68,6 +68,18 @@ describe('parseOutgoingChatwootMessage', () => {
     })).toMatchObject({ number: '120363024158769234@g.us', chatType: 'group' });
   });
 
+  it('preserva somente IDs de participantes reais para menções de grupo', () => {
+    const event = parseOutgoingChatwootMessage({
+      ...payload,
+      conversation: { id: 31, inbox_id: 7, contact_inbox: { source_id: 'whatsapp:group:120363024158769234%40g%2Eus' } },
+      content_attributes: {
+        whatsapp_mentions: ['5511999999999@c.us', '5511999999999@c.us', '120363024158769234@g.us', 'all'],
+        whatsapp_mention_replacements: [{ token: '@Ana', text: '@5511999999999' }, { token: 'Ana', text: '@5511999999999' }],
+      },
+    });
+    expect(event).toMatchObject({ whatsappMentions: ['5511999999999@c.us', 'all'], whatsappMentionReplacements: [{ token: '@Ana', text: '@5511999999999' }] });
+  });
+
   it('envia normalmente quando uma referência interna não possui ID externo', () => {
     const event = parseOutgoingChatwootMessage({
       ...payload,

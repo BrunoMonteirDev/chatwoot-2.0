@@ -69,8 +69,9 @@ import { documentPresentation, filesFromTransfer, hasFilesInTransfer, triggerAtt
 import { shouldSendMessageOnEnter, type SendMessageShortcut } from '../features/messages/sendMessageShortcut';
 import { useContactConversations } from '../features/contacts/useContactConversations';
 import { useConversationAttachments } from '../features/attachments/useConversationAttachments';
-import { groupMetadataClient } from '../features/groups/metadata';
+import { groupMetadataClient, type GroupParticipant } from '../features/groups/metadata';
 import { participantColor, participantLabel, participantPhone } from '../features/groups/participant';
+import { mentionReplacements, mentionTargetFor, participantMentionLabel, pruneMentionSelections, type MentionSelection } from '../features/groups/mentions';
 import { isPhoneDefaultContactName, providerProfileClient } from '../features/contacts/providerProfile';
 
 
@@ -574,7 +575,7 @@ interface Props {
   chat: Chat;
   allChats?: Chat[];
   onSelectChat?: (chat: Chat) => void;
-  onSendMessage: (chatId: string, text: string, attachments?: File[], isPrivate?: boolean, replyTo?: ReplyTo | null) => void | Promise<boolean | void>;
+  onSendMessage: (chatId: string, text: string, attachments?: File[], isPrivate?: boolean, replyTo?: ReplyTo | null, whatsappMentions?: string[], whatsappMentionReplacements?: Array<{ token: string; text: string }>) => void | Promise<boolean | void>;
   onImageClick: (url: string, title?: string, subtitle?: string) => void;
   onSearchInChat: () => void;
   isDarkMode?: boolean;
@@ -759,6 +760,8 @@ export const ChatArea: React.FC<Props> = ({
   // Mentions State
   const [showMentionsPopup, setShowMentionsPopup] = useState(false);
   const [mentionFilterQuery, setMentionFilterQuery] = useState('');
+  const [selectedMentions, setSelectedMentions] = useState<MentionSelection[]>([]);
+  const [mentionError, setMentionError] = useState<string | null>(null);
 
   // Quick Responses State
   const [showQuickResponsesPopup, setShowQuickResponsesPopup] = useState(false);
@@ -783,7 +786,7 @@ export const ChatArea: React.FC<Props> = ({
   }, []);
   const [replyTo, setReplyTo] = useState<ReplyTo | null>(null);
   const conversationInbox = conversation ? inboxes.find((inbox) => inbox.id === conversation.inboxId) : undefined;
-  const [groupParticipants, setGroupParticipants] = useState<Record<string, { jid: string; name?: string; phoneNumber?: string; avatarUrl?: string }>>({});
+  const [groupParticipants, setGroupParticipants] = useState<Record<string, GroupParticipant>>({});
   const [providerContactProfile, setProviderContactProfile] = useState<{ name?: string; avatarUrl?: string }>({});
   const [isSyncingContactProfile, setIsSyncingContactProfile] = useState(false);
   const automaticallySyncedContactProfiles = useRef(new Set<string>());
@@ -894,35 +897,36 @@ export const ChatArea: React.FC<Props> = ({
     else setForwardError(result.error || 'Não foi possível encaminhar a mensagem.');
   };
 
-  // Derived group members for mentions popup
+  // Group Details is the single source of participant identities. Never derive
+  // mention targets from a message author, group title, or rendered label.
   const groupMembers = React.useMemo(() => {
     const membersMap = new Map<string, GroupMember>();
-    defaultGroupMembers.forEach((m) => membersMap.set(m.name.toLowerCase(), m));
-
-    // Also include any message sender names in current chat
-    chat.messages.forEach((msg) => {
-      if (msg.senderName && msg.senderName !== 'me') {
-        const key = msg.senderName.toLowerCase();
-        if (!membersMap.has(key)) {
-          membersMap.set(key, {
-            id: `msg-sender-${msg.senderName}`,
-            name: msg.senderName,
-          });
-        }
-      }
+    defaultGroupMembers.forEach((m) => membersMap.set(m.providerId, m));
+    Object.values(groupParticipants).forEach((participant) => {
+      const providerId = participant.providerId || participant.jid;
+      if (!providerId || membersMap.has(providerId)) return;
+      const phone = participant.phone || participantPhone(participant.phoneJid || participant.jid, participant.phoneNumber);
+      const name = participantMentionLabel({ providerId, lid: participant.lid, phoneJid: participant.phoneJid, phone, displayName: participant.displayName || participant.name, avatarUrl: participant.avatarUrl, contactId: participant.contactId });
+      membersMap.set(providerId, { id: providerId, providerId, lid: participant.lid, phoneJid: participant.phoneJid, phone, displayName: participant.displayName || participant.name, avatarUrl: participant.avatarUrl, contactId: participant.contactId, name });
     });
 
     return Array.from(membersMap.values());
-  }, [chat]);
+  }, [groupParticipants]);
 
-  const handleSelectMention = (mentionName: string) => {
+  const handleSelectMention = (member: GroupMember) => {
     const lastAtIndex = inputText.lastIndexOf('@');
+    const mentionName = member.name.replace(/^~\s*/, '');
+    const token = `@${mentionName}`;
     if (lastAtIndex !== -1) {
       const before = inputText.slice(0, lastAtIndex);
-      setInputText(`${before}@${mentionName} `);
+      setInputText(`${before}${token} `);
     } else {
-      setInputText((prev) => `${prev}@${mentionName} `);
+      setInputText((prev) => `${prev}${token} `);
     }
+    setMentionError(null);
+    setSelectedMentions((current) => member.providerId === 'all'
+      ? [...current.filter((selection) => selection.providerId !== 'all'), { providerId: 'all', token }]
+      : [...current, { providerId: member.providerId, ...(mentionTargetFor(member) ? { phoneJid: mentionTargetFor(member) } : {}), token }]);
     setShowMentionsPopup(false);
     if (textareaRef.current) {
       textareaRef.current.focus();
@@ -930,7 +934,7 @@ export const ChatArea: React.FC<Props> = ({
   };
 
   useEffect(() => {
-    if (!chat.isGroup) setShowMentionsPopup(false);
+    if (!chat.isGroup) { setShowMentionsPopup(false); setSelectedMentions([]); }
   }, [chat.id, chat.isGroup]);
 
 
@@ -1334,9 +1338,21 @@ export const ChatArea: React.FC<Props> = ({
 
     const content = inputText.trim();
     const files = selectedFiles;
+    const activeMentions = pruneMentionSelections(content, selectedMentions);
+    const unresolvedMention = activeMentions.find((selection) => selection.providerId !== 'all' && !selection.phoneJid);
+    if (unresolvedMention) {
+      setMentionError('Este participante ainda não possui um telefone WhatsApp resolvido para menção.');
+      return;
+    }
+    if (activeMentions.length && files.length) {
+      setMentionError('Envie as menções em uma mensagem de texto, sem anexos.');
+      return;
+    }
+    const whatsappMentions = activeMentions.map((selection) => selection.phoneJid || selection.providerId);
+    const whatsappMentionReplacements = mentionReplacements(activeMentions);
     const draftKey = `${chat.id}:${messageMode}:${content}:${files.map((file) => `${file.name}:${file.size}`).join('|')}`;
     if (sendingDraftsRef.current.has(draftKey)) return;
-    const submission = onSendMessage(chat.id, content, files, messageMode === 'privada', replyTo);
+    const submission = onSendMessage(chat.id, content, files, messageMode === 'privada', replyTo, whatsappMentions, whatsappMentionReplacements);
     if (submission && typeof (submission as Promise<void>).then === 'function') {
       sendingDraftsRef.current.add(draftKey);
       setIsSendingMessage(true);
@@ -1344,6 +1360,8 @@ export const ChatArea: React.FC<Props> = ({
         if (sent !== false) {
           setInputText('');
           setSelectedFiles([]);
+          setSelectedMentions([]);
+          setMentionError(null);
           setShowEmojiPicker(false);
           setReplyTo(null);
         }
@@ -1355,6 +1373,8 @@ export const ChatArea: React.FC<Props> = ({
     }
     setInputText('');
     setSelectedFiles([]);
+    setSelectedMentions([]);
+    setMentionError(null);
     setShowEmojiPicker(false);
     setReplyTo(null);
   };
@@ -2402,6 +2422,8 @@ export const ChatArea: React.FC<Props> = ({
                 onChange={(e) => {
                   const val = e.target.value;
                   setInputText(val);
+                  setSelectedMentions((current) => pruneMentionSelections(val, current));
+                  setMentionError(null);
 
                   // Quick responses
                   if (val.startsWith('/')) {
@@ -2446,6 +2468,7 @@ export const ChatArea: React.FC<Props> = ({
                     : 'text-[#111b21] placeholder-[#667781]'
                 }`}
               />
+              {mentionError && <p className="px-1 pt-1 text-xs text-red-400">{mentionError}</p>}
               <button
                 type="button"
                 onClick={() => setMessageMode((current) => current === 'responder' ? 'privada' : 'responder')}

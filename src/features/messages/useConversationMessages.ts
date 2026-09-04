@@ -110,7 +110,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
 
   const createEchoId = () => globalThis.crypto?.randomUUID?.() || `cw-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-  const send = useCallback(async (content: string, isPrivate: boolean, files: File[] = [], inReplyTo?: number) => {
+  const send = useCallback(async (content: string, isPrivate: boolean, files: File[] = [], inReplyTo?: number, whatsappMentions?: string[], whatsappMentionReplacements?: Array<{ token: string; text: string }>) => {
     if (!accountId || !conversationId || (!content.trim() && files.length === 0)) return null;
     const echoId = createEchoId();
     const optimistic: ConversationMessage = {
@@ -135,7 +135,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
     setMessages(current => [...current, optimistic]);
     setStatus('ready');
     try {
-      const created = await messageService.create({ accountId, conversationId, content: optimistic.content, private: isPrivate, echoId, files, inReplyTo });
+      const created = await messageService.create({ accountId, conversationId, content: optimistic.content, private: isPrivate, echoId, files, inReplyTo, whatsappMentions, whatsappMentionReplacements });
       setMessages(current => current.map(message => message.echoId === echoId || message.id === optimistic.id ? created : message));
       pendingMessageFiles.current.delete(echoId);
       return created;

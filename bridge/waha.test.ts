@@ -81,6 +81,13 @@ describe('WAHA session transport', () => {
     expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({ session: 'empresa', chatId: '5511999999999@c.us', messageId: 'message-id', reaction: '👍' });
   });
 
+  it('sends group mentions as supplied participant JIDs, never as the group JID', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'mention-id', to: '120363024158769234@g.us' })));
+    vi.stubGlobal('fetch', fetchMock);
+    await wahaTransport.sendText('empresa', '120363024158769234@g.us', 'Olá @5511999999999', undefined, ['5511999999999@c.us']);
+    expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({ session: 'empresa', chatId: '120363024158769234@g.us', text: 'Olá @5511999999999', mentions: ['5511999999999@c.us'] });
+  });
+
   it('sends each attachment independently and only marks OGG/Opus as a voice note', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(Buffer.from('first-file')))

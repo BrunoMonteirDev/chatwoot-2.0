@@ -1,5 +1,6 @@
 export interface OutgoingAttachment { url: string; fileType: string; contentType?: string; fileName?: string; }
-export interface OutgoingChatwootMessage { accountId: number; messageId: number; conversationId: number; inboxId: number; sourceId: string; number: string; chatType: 'private' | 'group'; content: string; attachments: OutgoingAttachment[]; quotedMessageId?: string; quotedExternalId?: string; }
+export interface OutgoingMentionReplacement { token: string; text: string; }
+export interface OutgoingChatwootMessage { accountId: number; messageId: number; conversationId: number; inboxId: number; sourceId: string; number: string; chatType: 'private' | 'group'; content: string; attachments: OutgoingAttachment[]; quotedMessageId?: string; quotedExternalId?: string; whatsappMentions?: string[]; whatsappMentionReplacements?: OutgoingMentionReplacement[]; }
 
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue => value && typeof value === 'object' ? value as RecordValue : {};
@@ -13,6 +14,15 @@ const groupJidForSourceId = (sourceId: string) => {
     return undefined;
   }
 };
+const validMentionJid = (value: unknown): value is string => typeof value === 'string' && (/^\d{8,15}@(c\.us|s\.whatsapp\.net)$/.test(value) || value === 'all');
+const mentionReplacements = (value: unknown): OutgoingMentionReplacement[] => Array.isArray(value)
+  ? value.flatMap((item): OutgoingMentionReplacement[] => {
+    const replacement = record(item);
+    return typeof replacement.token === 'string' && replacement.token.startsWith('@') && replacement.token.length <= 160 && typeof replacement.text === 'string' && /^@\d{8,15}$/.test(replacement.text)
+      ? [{ token: replacement.token, text: replacement.text }]
+      : [];
+  })
+  : [];
 
 export const parseOutgoingChatwootMessage = (payload: unknown): OutgoingChatwootMessage | null => {
   const root = record(payload);
@@ -54,5 +64,9 @@ export const parseOutgoingChatwootMessage = (payload: unknown): OutgoingChatwoot
     : undefined;
   const number = groupJid || sourceNumber || (senderNumber?.match(/^\d{8,15}$/) ? senderNumber : undefined);
   if (!number) return null;
-  return { accountId: Number(accountId), messageId: Number(messageId), conversationId: Number(conversationId), inboxId: Number(inboxId), sourceId, number, chatType: groupJid ? 'group' : 'private', content: typeof content === 'string' ? content.trim() : '', attachments, ...(quotedMessageId ? { quotedMessageId } : {}), ...(quotedExternalId ? { quotedExternalId } : {}) };
+  const whatsappMentions = Array.isArray(contentAttributes.whatsapp_mentions) ? [...new Set(contentAttributes.whatsapp_mentions.filter(validMentionJid))] : [];
+  const whatsappMentionReplacements = mentionReplacements(contentAttributes.whatsapp_mention_replacements);
+  // A mention payload only makes sense for a group text. Drop arbitrary
+  // attributes from private/media messages before they leave Chatwoot.
+  return { accountId: Number(accountId), messageId: Number(messageId), conversationId: Number(conversationId), inboxId: Number(inboxId), sourceId, number, chatType: groupJid ? 'group' : 'private', content: typeof content === 'string' ? content.trim() : '', attachments, ...(quotedMessageId ? { quotedMessageId } : {}), ...(quotedExternalId ? { quotedExternalId } : {}), ...(groupJid && attachments.length === 0 && whatsappMentions.length ? { whatsappMentions } : {}), ...(groupJid && attachments.length === 0 && whatsappMentionReplacements.length ? { whatsappMentionReplacements } : {}) };
 };

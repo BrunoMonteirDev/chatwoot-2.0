@@ -18,6 +18,8 @@ export interface CreateMessageParams {
   echoId: string;
   files?: File[];
   inReplyTo?: number;
+  whatsappMentions?: string[];
+  whatsappMentionReplacements?: Array<{ token: string; text: string }>;
 }
 
 export interface MessageHistoryPage {
@@ -49,10 +51,10 @@ export const messageService = {
     return { messages, hasOlderMessages: messages.length === MESSAGE_PAGE_SIZE };
   },
 
-  async create({ accountId, conversationId, content, private: isPrivate, echoId, files = [], inReplyTo }: CreateMessageParams): Promise<ConversationMessage> {
+  async create({ accountId, conversationId, content, private: isPrivate, echoId, files = [], inReplyTo, whatsappMentions = [], whatsappMentionReplacements = [] }: CreateMessageParams): Promise<ConversationMessage> {
     const payload = files.length
       ? buildAttachmentPayload(content, isPrivate, echoId, files, inReplyTo)
-      : { content, private: isPrivate, echo_id: echoId, ...(inReplyTo ? { content_attributes: { in_reply_to: inReplyTo } } : {}) };
+      : { content, private: isPrivate, echo_id: echoId, ...((inReplyTo || whatsappMentions.length || whatsappMentionReplacements.length) ? { content_attributes: { ...(inReplyTo ? { in_reply_to: inReplyTo } : {}), ...(whatsappMentions.length ? { whatsapp_mentions: whatsappMentions } : {}), ...(whatsappMentionReplacements.length ? { whatsapp_mention_replacements: whatsappMentionReplacements } : {}) } } : {}) };
     const response = await chatwootApiClient.post<ChatwootMessageDto>(
       `/api/v1/accounts/${accountId}/conversations/${conversationId}/messages`,
       payload

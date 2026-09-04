@@ -1,12 +1,8 @@
 import React from 'react';
 import { Users } from 'lucide-react';
+import type { GroupParticipantIdentity } from '../features/groups/mentions';
 
-export interface GroupMember {
-  id: string;
-  name: string;
-  displayName?: string;
-  avatar?: string;
-}
+export interface GroupMember extends GroupParticipantIdentity { id: string; name: string; }
 
 // Participants originate from the selected group's Evolution metadata and
 // received messages. No placeholder people are shown in production.
@@ -17,7 +13,7 @@ interface MentionsPopupProps {
   onClose: () => void;
   members: GroupMember[];
   filterQuery: string;
-  onSelectMember: (mentionText: string) => void;
+  onSelectMember: (member: GroupMember) => void;
   isDarkMode?: boolean;
 }
 
@@ -60,7 +56,7 @@ export const MentionsPopup: React.FC<MentionsPopupProps> = ({
           {/* 'todos' option at the top matching screenshot */}
           {showTodos && (
             <div
-              onClick={() => onSelectMember('todos')}
+              onClick={() => onSelectMember({ id: 'all', providerId: 'all', name: 'todos' })}
               className={`p-2.5 rounded-xl flex items-center space-x-3 cursor-pointer transition-colors ${
                 isDarkMode
                   ? 'hover:bg-[#202c33] active:bg-[#2a3942]'
@@ -85,7 +81,7 @@ export const MentionsPopup: React.FC<MentionsPopupProps> = ({
           {filteredMembers.map((member) => (
             <div
               key={member.id}
-              onClick={() => onSelectMember(member.name.replace(/^~\s*/, ''))}
+              onClick={() => onSelectMember(member)}
               className={`p-2.5 rounded-xl flex items-center space-x-3 cursor-pointer transition-colors ${
                 isDarkMode
                   ? 'hover:bg-[#202c33] active:bg-[#2a3942]'
@@ -111,9 +107,9 @@ export const MentionsPopup: React.FC<MentionsPopupProps> = ({
                 <span className="font-medium text-[15px] leading-snug truncate">
                   {member.name}
                 </span>
-                {member.displayName && (
+                {member.phone && (
                   <span className="text-xs text-[#8696a0] truncate mt-0.5">
-                    {member.displayName}
+                    {member.phone}
                   </span>
                 )}
               </div>

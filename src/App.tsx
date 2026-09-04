@@ -784,14 +784,14 @@ export default function App() {
   }, [currentAccount, filteredAndSortedChats]);
 
   // Handle sending message
-  const handleSendMessage = (chatId: string, text: string, attachments?: File[], isPrivate?: boolean, replyTo?: import('./types').ReplyTo | null) => {
+  const handleSendMessage = (chatId: string, text: string, attachments?: File[], isPrivate?: boolean, replyTo?: import('./types').ReplyTo | null, whatsappMentions?: string[], whatsappMentionReplacements?: Array<{ token: string; text: string }>) => {
     if (!canSendWhatsAppMessage(whatsappConnection, Boolean(isPrivate))) {
       addToast('O WhatsApp desta inbox está desconectado. Reconecte a sessão para enviar mensagens.', 'error');
       return Promise.resolve(false);
     }
     if (selectedConversationId && chatId === String(selectedConversationId)) {
       const inReplyTo = replyTo?.id && /^\d+$/.test(replyTo.id) ? Number(replyTo.id) : undefined;
-      return messageHistory.send(text, Boolean(isPrivate), attachments, inReplyTo).then((message) => {
+      return messageHistory.send(text, Boolean(isPrivate), attachments, inReplyTo, whatsappMentions, whatsappMentionReplacements).then((message) => {
         if (message) applyOutgoingMessage(message);
         return Boolean(message);
       });
