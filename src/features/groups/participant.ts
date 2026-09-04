@@ -1,6 +1,6 @@
 export const participantIdentity = (jid?: string | null, phone?: string | null) => jid || phone?.replace(/\D/g, '') || 'unknown-participant';
 export const participantPhone = (jid?: string | null, phone?: string | null) => {
-  const digits = phone?.replace(/\D/g, '') || jid?.match(/^(\d{8,15})@/)?.[1];
+  const digits = phone?.replace(/\D/g, '') || jid?.match(/^(\d{8,15})@(c\.us|s\.whatsapp\.net)$/)?.[1];
   return digits ? `+${digits}` : '';
 };
 // Never expose a LID while a human-readable name or a resolved number exists.
@@ -11,7 +11,7 @@ export const participantLabel = (name?: string | null, jid?: string | null, phon
   if (displayName && displayPhone) return `${displayName} · ${displayPhone}`;
   if (displayName) return displayName;
   if (displayPhone) return displayPhone;
-  return jid?.endsWith('@lid') ? jid : 'Participante';
+  return 'Participante';
 };
 export const participantColor = (identity: string) => {
   let hash = 0; for (let i = 0; i < identity.length; i += 1) hash = ((hash << 5) - hash + identity.charCodeAt(i)) | 0;
