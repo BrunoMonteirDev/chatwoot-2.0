@@ -67,7 +67,7 @@ const emptyUser: UserProfile = { name: '', phone: '', about: '', avatar: '' };
 const emptyAccount: MultiTenantAccount = { id: '', name: '', role: '' };
 // This is also the route allow-list. Retired modules cannot be reopened by
 // manually entering an old settings URL.
-const settingsTabs: SettingsTab[] = ['perfil', 'conta', 'agentes', 'times', 'caixas', 'etiquetas', 'atributos', 'automacao', 'macros', 'respostas', 'agendadas', 'integracoes', 'auditoria', 'permissoes'];
+const settingsTabs: SettingsTab[] = ['perfil', 'conta', 'agentes', 'times', 'caixas', 'etiquetas', 'atributos', 'automacao', 'macros', 'respostas', 'agendadas', 'apps', 'integracoes', 'auditoria', 'permissoes'];
 const isSettingsTab = (value: string | undefined): value is SettingsTab => Boolean(value && settingsTabs.includes(value as SettingsTab));
 
 export default function App() {
@@ -1126,6 +1126,7 @@ export default function App() {
             selectedInboxId={selectedSettingsInboxId ? Number(selectedSettingsInboxId) : null}
             onOpenInbox={navigateToSettingsInbox}
             accountId={currentAccount?.id ?? null}
+            canManageDashboardApps={currentAccount?.permissions.includes('administrator') || currentAccount?.permissions.includes('integrations_manage')}
             inboxes={inboxes}
             inboxesStatus={inboxesStatus}
             inboxesError={inboxesError}

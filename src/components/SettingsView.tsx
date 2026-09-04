@@ -1446,7 +1446,7 @@ export const SettingsView: React.FC<Props> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                 <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-[#182228] border-[#2a3942]' : 'bg-[#f0f2f5] border-[#d1d7db]'}`}>
                   <div className="flex items-center justify-between gap-3"><div><h4 className="font-bold text-sm">Painel de Apps</h4><p className="text-xs text-[#8696a0] mt-1">Instale e organize os apps permitidos para o atendimento.</p></div><LayoutGrid className="w-5 h-5 text-[#00a884]" /></div>
-                  <button type="button" onClick={() => showToast('Painel de Apps aberto')} className="mt-3 text-xs font-bold text-[#00a884] hover:underline cursor-pointer">Gerenciar painel</button>
+                  <button type="button" onClick={() => handleTabSelect('apps')} className="mt-3 text-xs font-bold text-[#00a884] hover:underline cursor-pointer">Gerenciar painel</button>
                 </div>
                 <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-[#182228] border-[#2a3942]' : 'bg-[#f0f2f5] border-[#d1d7db]'}`}>
                   <div className="flex items-center justify-between gap-3"><div><h4 className="font-bold text-sm">Aplicações Autônomas</h4><p className="text-xs text-[#8696a0] mt-1">Aplicativos externos exibidos com contexto da conversa.</p></div><ExternalLink className="w-5 h-5 text-[#00a884]" /></div>
