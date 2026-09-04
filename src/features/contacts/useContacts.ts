@@ -55,7 +55,7 @@ export const useContacts = (accountId: number | null) => {
     if (!accountId || isCreating) return null;
     setIsCreating(true);
     try {
-      const contact = await contactService.create({ accountId, ...input });
+      const { contact } = await contactService.create({ accountId, ...input });
       setContacts((current) => [contact, ...current.filter((item) => item.id !== contact.id)]);
       setTotalCount((count) => count + 1);
       return contact;

@@ -1,5 +1,4 @@
 import type { AccountLabel, ContactNote, ContactProfile } from '../../domain/currentUser';
-import { normalizeBrazilianPhone } from '../../../phone';
 import { chatwootApiClient } from './client';
 import { normalizeContact, normalizeContactNote, normalizeLabel } from './normalizers';
 import type { ChatwootContactDto, ChatwootContactLabelsResponse, ChatwootContactNoteDto, ChatwootContactResponse, ChatwootContactsResponse, ChatwootLabelsResponse } from './types';
@@ -35,6 +34,11 @@ export interface ContactPage {
   currentPage: number;
 }
 
+export interface CreatedContact {
+  contact: ContactProfile;
+  existing: boolean;
+}
+
 export type ContactBulkLabelAction = 'add' | 'remove';
 
 const path = (accountId: number, contactId: number) => `/api/v1/accounts/${accountId}/contacts/${contactId}`;
@@ -57,22 +61,30 @@ export const contactService = {
     };
   },
 
+  async search(accountId: number, query: string, signal?: AbortSignal): Promise<ContactProfile[]> {
+    const response = await chatwootApiClient.get<ChatwootContactsResponse>(
+      `/api/v1/accounts/${accountId}/contacts/search?q=${encodeURIComponent(query)}&include_contact_inboxes=false`,
+      { signal }
+    );
+    return response.payload.map(normalizeContact);
+  },
+
   async get(accountId: number, contactId: number, signal?: AbortSignal): Promise<ContactProfile> {
     const response = await chatwootApiClient.get<ChatwootContactResponse>(path(accountId, contactId), { signal });
     return normalizeContact(response.payload);
   },
 
-  async create({ accountId, name, phoneNumber, email, inboxId }: CreateContactParams): Promise<ContactProfile> {
-    const response = await chatwootApiClient.post<{ payload: { contact: ChatwootContactDto } }>(
+  async create({ accountId, name, phoneNumber, email, inboxId }: CreateContactParams): Promise<CreatedContact> {
+    const response = await chatwootApiClient.post<{ payload: { contact: ChatwootContactDto; existing?: boolean } }>(
       `/api/v1/accounts/${accountId}/contacts`,
       {
         name,
-        ...(phoneNumber ? { phone_number: normalizeBrazilianPhone(phoneNumber) } : {}),
+        ...(phoneNumber ? { phone_number: phoneNumber } : {}),
         ...(email ? { email } : {}),
         ...(inboxId ? { inbox_id: inboxId } : {}),
       }
     );
-    return normalizeContact(response.payload.contact);
+    return { contact: normalizeContact(response.payload.contact), existing: Boolean(response.payload.existing) };
   },
 
   async update(accountId: number, contact: ContactProfile, update: ContactUpdate): Promise<ContactProfile> {
@@ -84,7 +96,7 @@ export const contactService = {
     const response = await chatwootApiClient.patch<ChatwootContactResponse>(path(accountId, contact.id), {
       ...(update.name === undefined ? {} : { name: update.name }),
       ...(update.email === undefined ? {} : { email: update.email }),
-      ...(update.phoneNumber === undefined ? {} : { phone_number: update.phoneNumber === null ? null : normalizeBrazilianPhone(update.phoneNumber) }),
+      ...(update.phoneNumber === undefined ? {} : { phone_number: update.phoneNumber }),
       ...(update.identifier === undefined ? {} : { identifier: update.identifier }),
       ...(update.blocked === undefined ? {} : { blocked: update.blocked }),
       additional_attributes: additionalAttributes,

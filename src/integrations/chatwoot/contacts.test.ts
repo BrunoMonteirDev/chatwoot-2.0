@@ -34,11 +34,11 @@ describe('contactService', () => {
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ payload: { contact: contactPayload } }), { status: 200 }));
 
     await expect(contactService.create({ accountId: 2, name: 'Maria', phoneNumber: '+5544984532595', email: 'maria@example.test' }))
-      .resolves.toMatchObject({ id: 9, name: 'Maria' });
+      .resolves.toMatchObject({ contact: { id: 9, name: 'Maria' }, existing: false });
     expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/v1/accounts/2/contacts');
     expect((vi.mocked(fetch).mock.calls[0][1] as RequestInit).method).toBe('POST');
     expect(JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string)).toEqual({
-      name: 'Maria', phone_number: '+554484532595', email: 'maria@example.test',
+      name: 'Maria', phone_number: '+5544984532595', email: 'maria@example.test',
     });
   });
 
