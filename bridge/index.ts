@@ -143,10 +143,13 @@ const loadGroupMetadata = async (transport: 'evolution' | 'waha', configuration:
 app.get('/groups/metadata', async (request, response) => {
   if (!(await requireBridgeUser(request, response))) return;
   const inboxId = Number(request.query.inboxId); const conversationId = Number(request.query.conversationId);
-  if (!Number.isInteger(inboxId) || !Number.isInteger(conversationId)) return response.status(400).json({ error: 'Inbox e conversa são obrigatórias.' });
+  const accountId = Number(request.query.accountId);
+  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !Number.isInteger(conversationId)) return response.status(400).json({ error: 'Conta, inbox e conversa são obrigatórias.' });
   try {
-    const inbox = await chatwootBridge.findWhatsAppInboxById(inboxId);
-    const target = await chatwootBridge.conversationGroupTargetDetails(conversationId, inboxId);
+    const { inbox, target } = await chatwootBridge.withAccount(accountId, async () => ({
+      inbox: await chatwootBridge.findWhatsAppInboxById(inboxId),
+      target: await chatwootBridge.conversationGroupTargetDetails(conversationId, inboxId),
+    }));
     const groupJid = target.groupJid;
     const transport = groupTransport(inbox.configuration, request.query.transport);
     if (!transport) return response.status(409).json({ error: 'Não foi possível determinar o transporte deste grupo.', category: 'transport_unavailable' });

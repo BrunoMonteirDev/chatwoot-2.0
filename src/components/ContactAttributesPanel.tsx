@@ -67,6 +67,7 @@ interface Props {
   activeTab?: 'contact' | 'attributes' | 'content';
   onTabChange?: (tab: 'contact' | 'attributes' | 'content') => void;
   conversationId?: number;
+  accountId?: number;
   inboxId?: number;
   groupTransport?: WhatsAppTransport | null;
   onOpenConversationSearch?: () => void;
@@ -84,6 +85,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
   activeTab: _activeTab = 'contact',
   onTabChange,
   conversationId,
+  accountId,
   inboxId,
   groupTransport,
   onOpenConversationSearch,
@@ -131,9 +133,9 @@ export const ContactAttributesPanel: React.FC<Props> = ({
   const [leavingGroup, setLeavingGroup] = useState(false);
 
   useEffect(() => {
-    if (!conversationId || !inboxId) return;
+    if (!accountId || !conversationId || !inboxId) return;
     let active = true;
-    void groupMetadataClient.get(inboxId, conversationId, groupTransport).then(({ group }) => {
+    void groupMetadataClient.get(accountId, inboxId, conversationId, groupTransport).then(({ group }) => {
       if (!active) return;
       setGroupMetadata(group); setDescriptionDraft(group.description || '');
       if (group.subject?.trim()) onGroupSubjectResolved?.(group.subject.trim());
@@ -143,7 +145,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
       }));
     }).catch(error => { if (active) setGroupError(error instanceof Error ? error.message : 'Não foi possível carregar o grupo.'); });
     return () => { active = false; };
-  }, [conversationId, inboxId, groupTransport]);
+  }, [accountId, conversationId, inboxId, groupTransport]);
 
   const saveDescription = async () => {
     if (!conversationId || !inboxId || !groupMetadata?.transport) return;

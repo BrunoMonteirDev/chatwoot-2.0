@@ -13,7 +13,7 @@ const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
   return body as T;
 };
 export const groupMetadataClient = {
-  get: (inboxId: number, conversationId: number, transport?: WhatsAppTransport | null) => request<{ group: GroupMetadata }>(`/groups/metadata?${new URLSearchParams({ inboxId: String(inboxId), conversationId: String(conversationId), ...(transport ? { transport } : {}) })}`),
+  get: (accountId: number, inboxId: number, conversationId: number, transport?: WhatsAppTransport | null) => request<{ group: GroupMetadata }>(`/groups/metadata?${new URLSearchParams({ accountId: String(accountId), inboxId: String(inboxId), conversationId: String(conversationId), ...(transport ? { transport } : {}) })}`),
   updateDescription: (inboxId: number, conversationId: number, transport: WhatsAppTransport, description: string) => request<{ group: GroupMetadata }>('/groups/description', { method: 'PATCH', body: JSON.stringify({ inboxId, conversationId, transport, description }) }),
   addParticipant: (inboxId: number, conversationId: number, transport: WhatsAppTransport, participant: string) => request<{ group: GroupMetadata }>('/groups/participants', { method: 'POST', body: JSON.stringify({ inboxId, conversationId, transport, participant }) }),
   leave: (inboxId: number, conversationId: number, transport: WhatsAppTransport) => request<void>('/groups/leave', { method: 'POST', body: JSON.stringify({ inboxId, conversationId, transport }) }),
