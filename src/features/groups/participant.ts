@@ -1,17 +1,21 @@
 export const participantIdentity = (jid?: string | null, phone?: string | null) => jid || phone?.replace(/\D/g, '') || 'unknown-participant';
 export const participantPhone = (jid?: string | null, phone?: string | null) => {
   const digits = phone?.replace(/\D/g, '') || jid?.match(/^(\d{8,15})@/)?.[1];
-  return digits ? `+${digits}` : '';
+  if (!digits) return '';
+  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
+    const local = digits.slice(4);
+    return `+55 ${digits.slice(2, 4)} ${local.length === 9 ? `${local.slice(0, 5)}-${local.slice(5)}` : `${local.slice(0, 4)}-${local.slice(4)}`}`;
+  }
+  return `+${digits}`;
 };
-// Never expose a LID while a human-readable name or a resolved number exists.
-// It is only a last-resort identity when WhatsApp has not supplied either.
+// A LID is a provider implementation detail, never a label for an agent.
 export const participantLabel = (name?: string | null, jid?: string | null, phone?: string | null) => {
   const displayName = name?.trim();
   const displayPhone = participantPhone(jid, phone);
   if (displayName && displayPhone) return `${displayName} · ${displayPhone}`;
   if (displayName) return displayName;
   if (displayPhone) return displayPhone;
-  return jid?.endsWith('@lid') ? jid : 'Participante';
+  return 'Participante';
 };
 export const participantColor = (identity: string) => {
   let hash = 0; for (let i = 0; i < identity.length; i += 1) hash = ((hash << 5) - hash + identity.charCodeAt(i)) | 0;

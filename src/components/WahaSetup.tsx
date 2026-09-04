@@ -9,7 +9,7 @@ import { MetaCloudSetup } from './MetaCloudSetup';
 type Props = { accountId: number; inbox: Inbox; webhookUrl: string; isDarkMode: boolean; onSaved: () => Promise<void> | void };
 const statusLabel: Record<string, string> = { STOPPED: 'Parada', STARTING: 'Iniciando', SCAN_QR_CODE: 'Aguardando QR Code', WORKING: 'Conectada', FAILED: 'Erro' };
 
-export const WahaSetup = ({ accountId, inbox, isDarkMode, onSaved }: Props) => {
+export const WahaSetup = ({ accountId, inbox, webhookUrl, isDarkMode, onSaved }: Props) => {
   const context = { accountId, inboxId: inbox.id };
   const [sessions, setSessions] = useState<WahaSession[]>([]);
   const [selected, setSelected] = useState(inbox.additionalAttributes.waha_session_name as string || '');
@@ -142,6 +142,11 @@ export const WahaSetup = ({ accountId, inbox, isDarkMode, onSaved }: Props) => {
   };
   const qrSrc = qr ? (qr.data.startsWith('data:') ? qr.data : `data:${qr.mimetype};base64,${qr.data}`) : null;
   const isConnected = current?.status === 'WORKING';
+  // A QR is only valid while the session is waiting for a scan. Keeping it on
+  // screen after WAHA confirms the connection invites a second, invalid scan.
+  useEffect(() => {
+    if (isConnected) setQr(null);
+  }, [isConnected]);
   const hasSession = sessions.length > 0;
   const isAssociated = selected.length > 0 && associatedSession === selected;
   const selectedAgents = agents.filter((agent) => members.includes(agent.id));

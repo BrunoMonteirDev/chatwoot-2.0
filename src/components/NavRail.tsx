@@ -213,6 +213,7 @@ export const NavRail: React.FC<Props> = ({
 
   // Multi-Tenant Account Switcher state
   const availableAccounts = accounts || [];
+  const canSwitchAccounts = availableAccounts.length > 1;
   const [internalAccount, setInternalAccount] = useState<MultiTenantAccount>({ id: '', name: '', role: '' });
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
   const [accountSearch, setAccountSearch] = useState('');
@@ -303,8 +304,10 @@ export const NavRail: React.FC<Props> = ({
               <div className="flex items-center justify-between">
                 <button
                   type="button"
-                  onClick={() => setShowAccountDropdown((prev) => !prev)}
-                  className={`flex items-center space-x-2 px-1.5 py-1 rounded-lg text-sm font-semibold transition-colors cursor-pointer max-w-[190px] ${
+                  onClick={() => canSwitchAccounts && setShowAccountDropdown((prev) => !prev)}
+                  aria-haspopup={canSwitchAccounts ? 'menu' : undefined}
+                  aria-expanded={canSwitchAccounts ? showAccountDropdown : undefined}
+                  className={`flex items-center space-x-2 px-1.5 py-1 rounded-lg text-sm font-semibold transition-colors max-w-[190px] ${canSwitchAccounts ? 'cursor-pointer' : 'cursor-default'} ${
                     showAccountDropdown
                       ? isDarkMode
                         ? 'bg-[#242525] text-white'
@@ -313,17 +316,17 @@ export const NavRail: React.FC<Props> = ({
                       ? 'hover:bg-[#242525] text-white'
                       : 'hover:bg-[#e9edef] text-[#111b21]'
                   }`}
-                  title="Alterar conta"
+                  title={canSwitchAccounts ? 'Alterar conta' : currentAcc.name}
                 >
-                  <div className="w-6 h-6 rounded-md bg-[#00a884] text-white flex items-center justify-center font-bold text-[11px] shrink-0">
-                    {currentAcc.id === '22' ? '3c' : currentAcc.id}
+                  <div aria-hidden="true" className="w-6 h-6 rounded-md bg-[#00a884] text-white flex items-center justify-center font-bold text-[11px] shrink-0">
+                    {currentAcc.name.trim().slice(0, 2).toUpperCase() || 'C'}
                   </div>
                   <span className="truncate max-w-[120px]">{currentAcc.name}</span>
-                  <ChevronDown
+                  {canSwitchAccounts && <ChevronDown
                     className={`w-4 h-4 opacity-70 shrink-0 transition-transform duration-200 ${
                       showAccountDropdown ? 'rotate-180' : ''
                     }`}
-                  />
+                  />}
                 </button>
 
                 <button
@@ -341,7 +344,7 @@ export const NavRail: React.FC<Props> = ({
               </div>
 
               {/* Multi-Tenant Account Switcher Dropdown Menu (Chatwoot style) */}
-              {showAccountDropdown && (
+              {canSwitchAccounts && showAccountDropdown && (
                 <>
                   <div
                     className="fixed inset-0 z-40"
@@ -388,7 +391,6 @@ export const NavRail: React.FC<Props> = ({
                       {availableAccounts.filter(
                         (acc) =>
                           acc.name.toLowerCase().includes(accountSearch.toLowerCase()) ||
-                          acc.id.includes(accountSearch) ||
                           acc.role.toLowerCase().includes(accountSearch.toLowerCase())
                       ).map((acc) => {
                         const isSelected = currentAcc.id === acc.id;
@@ -408,7 +410,7 @@ export const NavRail: React.FC<Props> = ({
                           >
                             <div className="flex items-center space-x-2 truncate pr-2 min-w-0">
                               <span className="font-semibold text-xs sm:text-sm truncate">
-                                {acc.id} - {acc.name}
+                                {acc.name}
                               </span>
                               <span
                                 className={`text-[11px] shrink-0 font-normal ${
@@ -467,14 +469,14 @@ export const NavRail: React.FC<Props> = ({
             <div className="flex flex-col items-center space-y-2 relative">
               <button
                 type="button"
-                onClick={() => setShowAccountDropdown((prev) => !prev)}
-                title={`Conta atual: ${currentAcc.id} - ${currentAcc.name}`}
-                className={`p-1 rounded-lg transition-colors cursor-pointer ${
+                onClick={() => canSwitchAccounts && setShowAccountDropdown((prev) => !prev)}
+                title={canSwitchAccounts ? `Conta atual: ${currentAcc.name}` : currentAcc.name}
+                className={`p-1 rounded-lg transition-colors ${canSwitchAccounts ? 'cursor-pointer' : 'cursor-default'} ${
                   isDarkMode ? 'hover:bg-[#2a3942]' : 'hover:bg-[#e9edef]'
                 }`}
               >
                 <div className="w-7 h-7 rounded-md bg-[#00a884] text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs">
-                  {currentAcc.id === '22' ? '3c' : currentAcc.id}
+                  {currentAcc.name.trim().slice(0, 2).toUpperCase() || 'C'}
                 </div>
               </button>
 
@@ -491,7 +493,7 @@ export const NavRail: React.FC<Props> = ({
                 <PanelLeftOpen className="w-5 h-5" />
               </button>
 
-              {showAccountDropdown && (
+              {canSwitchAccounts && showAccountDropdown && (
                 <>
                   <div
                     className="fixed inset-0 z-40"
@@ -529,7 +531,7 @@ export const NavRail: React.FC<Props> = ({
                           >
                             <div className="flex items-center space-x-2 truncate pr-2 min-w-0">
                               <span className="font-semibold text-xs truncate">
-                                {acc.id} - {acc.name}
+                                {acc.name}
                               </span>
                               <span className="text-[10px] text-[#8696a0] font-normal">
                                 | {acc.role}
@@ -1079,8 +1081,8 @@ export const NavRail: React.FC<Props> = ({
             {isExpanded && <span className="ml-3 truncate">Contatos</span>}
           </button>
 
-          {/* 5. Relatórios */}
-          <button
+          {/* Unfinished modules stay intentionally unavailable until enabled. */}
+          {false && <button
             onClick={() => onTabChange('status')}
             title="Relatórios"
             className={`w-full flex items-center px-2.5 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
@@ -1095,10 +1097,9 @@ export const NavRail: React.FC<Props> = ({
           >
             <BarChart2 className="w-4.5 h-4.5 shrink-0" />
             {isExpanded && <span className="ml-3 truncate">Relatórios</span>}
-          </button>
+          </button>}
 
-          {/* 6. Campanhas */}
-          <button
+          {false && <button
             onClick={() => onTabChange('calls')}
             title="Campanhas"
             className={`w-full flex items-center px-2.5 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
@@ -1113,10 +1114,9 @@ export const NavRail: React.FC<Props> = ({
           >
             <Megaphone className="w-4.5 h-4.5 shrink-0" />
             {isExpanded && <span className="ml-3 truncate">Campanhas</span>}
-          </button>
+          </button>}
 
-          {/* 7. Central de Ajuda */}
-          <button
+          {false && <button
             onClick={() => onTabChange('settings')}
             title="Central de Ajuda"
             className={`w-full flex items-center px-2.5 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
@@ -1127,7 +1127,7 @@ export const NavRail: React.FC<Props> = ({
           >
             <HelpCircle className="w-4.5 h-4.5 shrink-0" />
             {isExpanded && <span className="ml-3 truncate">Central de Ajuda</span>}
-          </button>
+          </button>}
 
           {/* 8. Configurações Accordion Section */}
           <div

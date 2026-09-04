@@ -632,6 +632,24 @@ const profileForLiveWahaMessage = async (message: IncomingWahaMessage): Promise<
   };
 };
 
+// WAHA's LID is not a phone number. Resolve it once during ingestion and keep
+// the mapping in the existing persistent identity store, scoped to tenant,
+// inbox and session so separate accounts can never share an identity.
+const resolveGroupParticipantIdentity = async (message: IncomingWahaMessage, accountId: number, inboxId: number): Promise<IncomingWahaMessage> => {
+  const participant = message.participantJid;
+  if (!participant || !participant.endsWith('@lid') || message.fromMe) return message;
+  const lid = participant.slice(0, -4);
+  const key = `participant:${accountId}:${inboxId}:${message.session}:${lid}`;
+  try {
+    const cached = await identities.find([key]);
+    const phoneJid = cached || await wahaTransport.resolveLid(message.session, lid).then(phone => phone ? `${phone}@c.us` : undefined);
+    if (!phoneJid) return message;
+    if (!cached) await identities.save([key], phoneJid);
+    const digits = phoneJid.match(/^(\d{8,15})@/)?.[1];
+    return { ...message, participantJid: phoneJid, ...(digits ? { participantPhone: `+${digits}` } : {}) };
+  } catch { return message; }
+};
+
 const historyProfileFor = async (session: string, message: IncomingWahaMessage, profiles: WahaHistoryProfiles): Promise<IncomingWahaMessage> => {
   let phoneNumber = message.phoneNumber;
   if (!phoneNumber && message.lid) {
@@ -1367,7 +1385,7 @@ const deliverOfficialHybridWahaInbound = async (message: IncomingWahaMessage) =>
     payload: {
       external_id: message.externalId, provider_message_key: message.providerMessageKey,
       remote_jid: message.remoteJid, group_name: message.groupName || message.name,
-      participant_jid: message.participantJid, participant_name: message.participantName,
+      participant_jid: message.participantJid, participant_name: message.participantName, participant_phone: message.participantPhone, participant_avatar_url: message.participantAvatarUrl,
       quoted_message_id: message.quotedMessageId, from_me: message.fromMe, content: message.content,
       media: message.media && { kind: message.media.kind, mimetype: message.media.mimetype, filename: message.media.filename }
     }
@@ -1622,7 +1640,10 @@ app.post('/webhooks/waha', (request, response) => {
       try {
         const legacyInbox = await legacyWahaInboxForWebhook(message.session);
         if (!legacyInbox) {
-          const official = await deliverOfficialHybridWahaInbound(message);
+          const officialOwnership = await wahaSessions.get(message.session);
+          if (!officialOwnership) throw new WahaSessionOwnershipError('not_found');
+          const officialMessage = await resolveGroupParticipantIdentity(message, officialOwnership.accountId, officialOwnership.inboxId);
+          const official = await deliverOfficialHybridWahaInbound(officialMessage);
           if (official.handled) {
             await dedup.commit(key);
             console.info('[waha] official hybrid inbound handled', { session: message.session, messageId: message.externalId, ignored: official.ignored });
@@ -1631,6 +1652,7 @@ app.post('/webhooks/waha', (request, response) => {
           throw new WahaSessionOwnershipError('not_found');
         }
         const inbox = legacyInbox;
+        const resolvedMessage = await resolveGroupParticipantIdentity(message, inbox.accountId, inbox.id);
         if (message.fromMe && consumePendingWahaOutgoing(message.session, message)) {
           await dedup.commit(key);
           console.info('[waha] platform echo ignored', { session: message.session, messageId: message.externalId });
@@ -1638,14 +1660,14 @@ app.post('/webhooks/waha', (request, response) => {
         }
         let conversationId: number | undefined;
         await chatwootBridge.withAccount(inbox.accountId, async () => {
-          const { contact, conversation } = await conversationForWahaIdentity(inbox, message);
+          const { contact, conversation } = await conversationForWahaIdentity(inbox, resolvedMessage);
           conversationId = conversation.id;
-          if (message.chatType === 'group') await chatwootBridge.saveEvolutionGroup(contact.id, message.remoteJid, message.name, { participants: message.participantJid ? [{ jid: message.participantJid, name: message.participantName }] : undefined });
+          if (resolvedMessage.chatType === 'group') await chatwootBridge.saveEvolutionGroup(contact.id, resolvedMessage.remoteJid, resolvedMessage.name, { participants: resolvedMessage.participantJid ? [{ jid: resolvedMessage.participantJid, name: resolvedMessage.participantName, phoneNumber: resolvedMessage.participantPhone }] : undefined });
           // The public API message endpoint does not infer a Chatwoot internal
           // reply id from provider metadata reliably. Resolve the namespaced
           // WAHA key first and send both the internal and external identity.
-          const inReplyTo = await replyTargetId(conversation.id, 'waha', message.quotedMessageId);
-          const context = { chatType: message.chatType, participantJid: message.participantJid, participantName: message.participantName, isForwarded: message.isForwarded, forwardingScore: message.forwardingScore, providerMessageKey: message.providerMessageKey };
+          const inReplyTo = await replyTargetId(conversation.id, 'waha', resolvedMessage.quotedMessageId);
+          const context = { chatType: resolvedMessage.chatType, participantJid: resolvedMessage.participantJid, participantName: resolvedMessage.participantName, participantPhone: resolvedMessage.participantPhone, participantAvatarUrl: resolvedMessage.participantAvatarUrl, isForwarded: resolvedMessage.isForwarded, forwardingScore: resolvedMessage.forwardingScore, providerMessageKey: resolvedMessage.providerMessageKey };
           if (message.media) {
             const media = await wahaTransport.downloadMedia(message.media);
             if (message.fromMe) await chatwootBridge.createMobileOutgoingTransportMediaMessage(conversation.id, 'waha', message.content, message.externalId, media, message.quotedMessageId, message.remoteJid, inReplyTo, context);

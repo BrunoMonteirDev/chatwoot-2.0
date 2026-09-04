@@ -39,6 +39,8 @@ export interface EvolutionMessageContext {
   chatType?: 'private' | 'group';
   participantJid?: string;
   participantName?: string;
+  participantPhone?: string;
+  participantAvatarUrl?: string;
   isForwarded?: boolean;
   forwardingScore?: number;
   providerMessageKey?: string;
@@ -167,6 +169,8 @@ const transportMessageAttributes = (transport: WhatsAppTransport, messageType: '
   ...(context.chatType === 'group' ? { whatsapp_chat_type: 'group' } : {}),
   ...(context.participantJid ? { whatsapp_participant_jid: context.participantJid } : {}),
   ...(context.participantName ? { whatsapp_participant_name: context.participantName } : {}),
+  ...(context.participantPhone ? { whatsapp_participant_phone: context.participantPhone } : {}),
+  ...(context.participantAvatarUrl ? { whatsapp_participant_avatar_url: context.participantAvatarUrl } : {}),
   ...(context.isForwarded ? { whatsapp_is_forwarded: true } : {}),
   ...(typeof context.forwardingScore === 'number' ? { whatsapp_forwarding_score: context.forwardingScore } : {}),
   ...(transport === 'waha' && context.providerMessageKey ? { whatsapp_provider_message_key: context.providerMessageKey } : {}),

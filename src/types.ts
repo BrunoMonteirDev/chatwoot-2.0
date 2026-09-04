@@ -17,6 +17,8 @@ export interface Attachment {
   size?: string;
   pages?: string;
   previewUrl?: string;
+  width?: number;
+  height?: number;
 }
 
 export interface ReplyTo {

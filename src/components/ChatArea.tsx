@@ -61,9 +61,11 @@ import type { ContactUpdate } from '../integrations/chatwoot/contacts';
 import { useCannedResponses } from '../features/cannedResponses/useCannedResponses';
 import { quickNotesStorage, QUICK_NOTES_UPDATED_EVENT } from '../features/quickNotes/storage';
 import { MetaTemplatePicker } from './MetaTemplatePicker';
+import { RetryableImage } from './RetryableImage';
 import { ForwardMessageModal } from './ForwardMessageModal';
 import { metaCloudMetadataForInbox } from '../integrations/whatsapp/provider';
-import { canSendWhatsAppMessage, type OperationalWhatsAppConnection } from '../integrations/whatsapp/connection';
+import { canSendCapabilityMessage, canSendWhatsAppMessage, type OperationalWhatsAppConnection, type WhatsAppSendCapability } from '../integrations/whatsapp/connection';
+import { composerNotice } from '../features/messages/composerCapability';
 import { finiteAudioDuration, recordingFile, recordingMimeType, releaseRecordingResources, type AudioRecordingPhase } from '../features/audio/recording';
 import { documentPresentation, filesFromTransfer, hasFilesInTransfer, triggerAttachmentDownload } from '../features/attachments/fileUtils';
 import { shouldSendMessageOnEnter, type SendMessageShortcut } from '../features/messages/sendMessageShortcut';
@@ -609,7 +611,7 @@ interface Props {
   onMarkConversationRead?: () => void;
   onMarkConversationUnread?: () => void;
   onReachLatestMessage?: () => void;
-  historyScrollTop?: number;
+  historyScrollTop?: number | null;
   onHistoryScrollChange?: (scrollTop: number) => void;
   realtimeConnectionStatus?: RealtimeConnectionStatus;
   typingName?: string | null;
@@ -625,6 +627,7 @@ interface Props {
   accountId?: number | null;
   inboxes?: Inbox[];
   whatsappConnection?: OperationalWhatsAppConnection | null;
+  whatsappSendCapability?: WhatsAppSendCapability | null;
   sendMessageShortcut?: SendMessageShortcut;
   onCopyConversationLink?: () => void;
   onOpenDirectConversation?: (conversationId: number) => void;
@@ -671,7 +674,7 @@ export const ChatArea: React.FC<Props> = ({
   onMarkConversationRead,
   onMarkConversationUnread,
   onReachLatestMessage,
-  historyScrollTop = 0,
+  historyScrollTop = null,
   onHistoryScrollChange,
   realtimeConnectionStatus = 'disconnected',
   typingName,
@@ -687,6 +690,7 @@ export const ChatArea: React.FC<Props> = ({
   accountId = null,
   inboxes = [],
   whatsappConnection = null,
+  whatsappSendCapability = null,
   sendMessageShortcut = 'enter',
   onCopyConversationLink,
   onOpenDirectConversation,
@@ -829,7 +833,8 @@ export const ChatArea: React.FC<Props> = ({
       if (profile.name || profile.avatarUrl) onContactProfileResolved?.(profile);
     } finally { setIsSyncingContactProfile(false); }
   };
-  const externalSendBlocked = !canSendWhatsAppMessage(whatsappConnection, messageMode === 'privada');
+  const composerBlockNotice = composerNotice(whatsappSendCapability, whatsappConnection, messageMode === 'privada');
+  const externalSendBlocked = !canSendWhatsAppMessage(whatsappConnection, messageMode === 'privada') || !canSendCapabilityMessage(whatsappSendCapability, messageMode === 'privada');
   const canUseMetaTemplates = !externalSendBlocked && Boolean(conversationInbox && metaCloudMetadataForInbox(conversationInbox));
 
   // Context Menu State
@@ -1065,6 +1070,7 @@ export const ChatArea: React.FC<Props> = ({
     }
   }, [inputText, isExpandedInput]);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const restoredConversationRef = useRef<string | null>(null);
   const timerRef = useRef<any>(null);
   const prevMessagesLength = useRef(chat.messages.length);
   const previousChatId = useRef(chat.id);
@@ -1078,11 +1084,11 @@ export const ChatArea: React.FC<Props> = ({
     window.setTimeout(() => element.classList.remove('bg-[#00a884]/20'), 2000);
   };
 
-  const scrollToBottom = () => {
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollTo({
         top: scrollContainerRef.current.scrollHeight,
-        behavior: 'smooth',
+        behavior,
       });
     }
     setIsUserScrolledUp(false);
@@ -1128,12 +1134,12 @@ export const ChatArea: React.FC<Props> = ({
     // bottom merely because the latest existing message was sent by us.
     const isPrependingOlderMessages = previousScrollHeight.current !== null;
     if (isNewMessage && !isPrependingOlderMessages && lastMessage.sender === 'me') {
-      scrollToBottom();
+      scrollToBottom('auto');
     } else if (isNewMessage && !isPrependingOlderMessages) {
       if (isUserScrolledUp) {
         setUnreadBelowCount((prev) => prev + 1);
       } else {
-        scrollToBottom();
+        scrollToBottom('auto');
       }
     }
   }, [chat.id, chat.messages, isUserScrolledUp]);
@@ -1151,8 +1157,9 @@ export const ChatArea: React.FC<Props> = ({
   useEffect(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
-    const restore = () => { el.scrollTop = historyScrollTop || el.scrollHeight; };
-    const frame = window.requestAnimationFrame(restore);
+    if (restoredConversationRef.current === chat.id) return;
+    restoredConversationRef.current = chat.id;
+    const frame = window.requestAnimationFrame(() => { el.scrollTop = historyScrollTop === null ? el.scrollHeight : historyScrollTop; });
     return () => window.cancelAnimationFrame(frame);
   }, [chat.id, historyScrollTop]);
 
@@ -1976,12 +1983,7 @@ export const ChatArea: React.FC<Props> = ({
                                   : 'border-[#e9edef] bg-[#f0f2f5] hover:border-[#00a884]'
                               }`}
                             >
-                              <img
-                                src={att.url}
-                                alt={att.title || 'Attachment'}
-                                className="w-full max-h-64 object-cover object-top transition-transform group-hover/img:scale-102 duration-200"
-                                referrerPolicy="no-referrer"
-                              />
+                              <RetryableImage src={att.url} fallbackSrc={att.previewUrl} alt={att.title || 'Attachment'} width={att.width} height={att.height} className="h-full max-h-64 w-full object-cover object-top transition-transform duration-200 group-hover/img:scale-102" />
                               {/* Overlay button */}
                               <div className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/60 hover:bg-black/80 flex items-center justify-center text-white opacity-0 group-hover/img:opacity-100 transition-opacity shadow-xs">
                                 <CornerUpRight className="w-4 h-4" />
@@ -2393,6 +2395,7 @@ export const ChatArea: React.FC<Props> = ({
             /* Middle Textarea Input */
             <div className="flex items-center gap-2 md:block">
             <div className={`w-full min-w-0 flex-1 rounded-[28px] px-4 py-1 relative md:rounded-none md:px-0 ${messageMode === 'privada' ? isDarkMode ? 'bg-[#1a1710] md:bg-transparent' : 'bg-[#fffbeb] md:bg-transparent' : isDarkMode ? 'bg-[#202c33] md:bg-transparent' : 'bg-[#f0f2f5] md:bg-transparent'}`}>
+              {composerBlockNotice ? <div role="status" className="flex min-h-[64px] items-center gap-3 py-2 text-sm"><div className="min-w-0"><p className="font-bold">{composerBlockNotice.title}</p><p className="text-xs text-[#8696a0]">{composerBlockNotice.description}</p></div><button type="button" onClick={() => composerBlockNotice.action === 'template' ? setShowTemplatePicker(true) : window.dispatchEvent(new CustomEvent('open-whatsapp-manager'))} className="ml-auto shrink-0 rounded-lg border border-[#00a884]/50 px-3 py-2 text-xs font-bold text-[#00a884]">{composerBlockNotice.action === 'template' ? 'Selecionar template' : 'Gerenciar conexão'}</button>{showTemplatePicker && conversation && <MetaTemplatePicker inboxId={conversation.inboxId} conversationId={conversation.id} onClose={() => setShowTemplatePicker(false)} />}</div> : <>
               <textarea
                 ref={textareaRef}
                 disabled={externalSendBlocked}
@@ -2445,6 +2448,7 @@ export const ChatArea: React.FC<Props> = ({
                     : 'text-[#111b21] placeholder-[#667781]'
                 }`}
               />
+              </>}
               <button
                 type="button"
                 onClick={() => setMessageMode((current) => current === 'responder' ? 'privada' : 'responder')}

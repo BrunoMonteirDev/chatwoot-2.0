@@ -157,6 +157,8 @@ const normalizeAttachment = (attachment: ChatwootAttachmentDto): ConversationAtt
   title: attachment.fallback_title || attachment.extension || null,
   contentType: attachment.content_type || null,
   size: attachment.file_size || null,
+  width: attachment.width || null,
+  height: attachment.height || null,
 });
 
 export const normalizeMessage = (message: ChatwootMessageDto): ConversationMessage => {
