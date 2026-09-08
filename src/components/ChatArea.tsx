@@ -38,6 +38,7 @@ import {
   SlidersHorizontal,
   Star,
   X,
+  MessageCircle,
 } from 'lucide-react';
 import { Chat, Message, Attachment, ReplyTo, LinkPreview, MessageReaction } from '../types';
 import { WhatsAppDoodleBg, WallpaperId } from './WhatsAppDoodleBg';
@@ -64,7 +65,7 @@ import { MetaTemplatePicker } from './MetaTemplatePicker';
 import { ForwardMessageModal } from './ForwardMessageModal';
 import { metaCloudMetadataForInbox } from '../integrations/whatsapp/provider';
 import { type OperationalWhatsAppConnection, type WhatsAppSendCapability } from '../integrations/whatsapp/connection';
-import { composerNotice } from '../features/messages/composerCapability';
+import { composerNotice, composerPresentation } from '../features/messages/composerCapability';
 import { finiteAudioDuration, recordingFile, recordingMimeType, releaseRecordingResources, type AudioRecordingPhase } from '../features/audio/recording';
 import { documentPresentation, filesFromTransfer, hasFilesInTransfer, triggerAttachmentDownload } from '../features/attachments/fileUtils';
 import { shouldSendMessageOnEnter, type SendMessageShortcut } from '../features/messages/sendMessageShortcut';
@@ -833,6 +834,7 @@ export const ChatArea: React.FC<Props> = ({
   };
   const activeComposerNotice = composerNotice(whatsappSendCapability, whatsappConnection, messageMode === 'privada');
   const externalSendBlocked = Boolean(activeComposerNotice);
+  const { templateOnly, showDisconnectedStatus: providerDisconnected } = composerPresentation(activeComposerNotice);
   const nativeMetaTemplatesAvailable = conversationInbox?.channelType === 'Channel::Whatsapp'
     && whatsappSendCapability?.applicable
     && whatsappSendCapability.can_send_message;
@@ -1618,9 +1620,9 @@ export const ChatArea: React.FC<Props> = ({
                 isDarkMode ? 'text-[#8696a0]' : 'text-[#667781]'
               }`}
             >
-              {externalSendBlocked ? `WhatsApp ${whatsappConnection?.transport || ''} desconectado — envio bloqueado` : typingName ? `${typingName} está digitando…` : chat.about || (chat.isGroup ? 'Clique para dados do grupo' : realtimeConnectionStatus === 'connected' ? 'online' : 'reconectando…')}
+              {providerDisconnected ? `WhatsApp ${whatsappConnection?.transport || ''} desconectado — envio bloqueado` : typingName ? `${typingName} está digitando…` : chat.about || (chat.isGroup ? 'Clique para dados do grupo' : realtimeConnectionStatus === 'connected' ? 'online' : 'reconectando…')}
             </span>
-            {externalSendBlocked && <span className="mt-1 inline-flex w-fit rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-500">Sessão WhatsApp desconectada</span>}
+            {providerDisconnected && <span className="mt-1 inline-flex w-fit rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-500">Sessão WhatsApp desconectada</span>}
           </div>
         </div>
 
@@ -2426,11 +2428,12 @@ export const ChatArea: React.FC<Props> = ({
           ) : (
             /* Middle Textarea Input */
             <div className="flex items-center gap-2 md:block">
-            {activeComposerNotice && <div className={`mb-2 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${activeComposerNotice.action === 'template' ? 'border-amber-500/30 bg-amber-500/10 text-amber-500' : 'border-red-500/30 bg-red-500/10 text-red-400'}`}>
+            {activeComposerNotice && <div className={`relative mb-2 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${templateOnly ? 'border-[#00a884]/35 bg-[#00a884]/10 text-[#00a884]' : 'border-red-500/30 bg-red-500/10 text-red-400'}`}>
               <span><strong>{activeComposerNotice.title}</strong> {activeComposerNotice.description}</span>
-              {activeComposerNotice.action === 'template' && canUseMetaTemplates && <button type="button" onClick={() => setShowTemplatePicker(true)} className="shrink-0 font-bold underline">Enviar template</button>}
+              {templateOnly && canUseMetaTemplates && <button type="button" onClick={() => setShowTemplatePicker(true)} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[#00a884] px-3 py-2 font-bold text-white hover:bg-[#008069]"><MessageCircle className="h-4 w-4" />Enviar template</button>}
+              {templateOnly && showTemplatePicker && conversation && accountId && <MetaTemplatePicker accountId={accountId} native={conversationInbox?.channelType === 'Channel::Whatsapp'} inboxId={conversation.inboxId} conversationId={conversation.id} onClose={() => setShowTemplatePicker(false)} />}
             </div>}
-            <div className={`w-full min-w-0 flex-1 rounded-[28px] px-4 py-1 relative md:rounded-none md:px-0 ${messageMode === 'privada' ? isDarkMode ? 'bg-[#1a1710] md:bg-transparent' : 'bg-[#fffbeb] md:bg-transparent' : isDarkMode ? 'bg-[#202c33] md:bg-transparent' : 'bg-[#f0f2f5] md:bg-transparent'}`}>
+            {!templateOnly && <div className={`w-full min-w-0 flex-1 rounded-[28px] px-4 py-1 relative md:rounded-none md:px-0 ${messageMode === 'privada' ? isDarkMode ? 'bg-[#1a1710] md:bg-transparent' : 'bg-[#fffbeb] md:bg-transparent' : isDarkMode ? 'bg-[#202c33] md:bg-transparent' : 'bg-[#f0f2f5] md:bg-transparent'}`}>
               <textarea
                 ref={textareaRef}
                 disabled={externalSendBlocked}
@@ -2510,11 +2513,11 @@ export const ChatArea: React.FC<Props> = ({
                 </button>
                 {canUseMetaTemplates && conversation && <div className="relative">
                   <button type="button" disabled={isSendingMessage} onClick={() => setShowTemplatePicker((current) => !current)} title="Enviar template Meta" className={`rounded-full p-1.5 ${showTemplatePicker ? 'text-[#00a884] bg-[#00a884]/10' : isDarkMode ? 'text-[#aebac1]' : 'text-[#54656f]'}`}><FileText className="h-5 w-5" /></button>
-                  {showTemplatePicker && <MetaTemplatePicker inboxId={conversation.inboxId} conversationId={conversation.id} onClose={() => setShowTemplatePicker(false)} />}
+                  {showTemplatePicker && accountId && <MetaTemplatePicker accountId={accountId} native={conversationInbox?.channelType === 'Channel::Whatsapp'} inboxId={conversation.inboxId} conversationId={conversation.id} onClose={() => setShowTemplatePicker(false)} />}
                 </div>}
               </div>
-            </div>
-            <button
+            </div>}
+            {!templateOnly && <button
               type="button"
               disabled={isSendingMessage || externalSendBlocked}
               onClick={() => {
@@ -2525,12 +2528,12 @@ export const ChatArea: React.FC<Props> = ({
               className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white shadow-md active:scale-95 disabled:opacity-40 md:hidden ${messageMode === 'privada' ? 'bg-amber-600' : 'bg-[#2563eb]'}`}
             >
               {!inputText.trim() && selectedFiles.length === 0 ? <Mic className="h-6 w-6" /> : messageMode === 'privada' ? <Lock className="h-5 w-5" /> : <SendHorizontal className="h-5 w-5" />}
-            </button>
+            </button>}
             </div>
           )}
 
           {/* Bottom Bar: Action Toolbar Icons (Left) & Send Button (Right) */}
-          {!isRecordingVoice && (
+          {!isRecordingVoice && !templateOnly && (
             <div className="hidden md:flex items-center justify-between border-t border-white/5 pt-1 gap-1">
               {/* Left Toolbar Icons */}
               <div className="flex items-center space-x-0.5 sm:space-x-1 overflow-x-auto no-scrollbar shrink min-w-0 pr-1">
@@ -2571,7 +2574,7 @@ export const ChatArea: React.FC<Props> = ({
                   >
                     <FileText className="w-5 h-5" />
                   </button>
-                  {showTemplatePicker && <MetaTemplatePicker inboxId={conversation.inboxId} conversationId={conversation.id} onClose={() => setShowTemplatePicker(false)} />}
+                  {showTemplatePicker && accountId && <MetaTemplatePicker accountId={accountId} native={conversationInbox?.channelType === 'Channel::Whatsapp'} inboxId={conversation.inboxId} conversationId={conversation.id} onClose={() => setShowTemplatePicker(false)} />}
                 </div>}
 
                 <button

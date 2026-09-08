@@ -13,6 +13,11 @@ export interface CreateEvolutionInboxParams { name: string; webhookUrl: string; 
 export interface SaveAgentParams { name: string; email?: string; role: 'agent' | 'administrator'; availability: 'online' | 'offline' | 'busy'; customRoleId?: number | null; }
 export interface SaveCustomRoleParams { name: string; description: string; permissions: string[]; }
 export interface SavePermissionProfileParams { name: string; description: string; kind: 'inbox' | 'system'; inboxPermissions: string[]; systemPermissions: string[]; }
+export type HybridWahaStatus = 'connected' | 'connecting' | 'disconnected' | 'error' | 'missing' | 'not_bound';
+export interface HybridWahaConfiguration { hybridEnabled: boolean; wahaSession: string | null; outOfWindowStrategy: 'template' | 'waha'; metaFailureStrategy: 'block' | 'waha'; }
+export interface HybridWahaBinding extends Pick<HybridWahaConfiguration, 'hybridEnabled' | 'wahaSession'> { wahaStatus: HybridWahaStatus; }
+export interface HybridWahaSession { name: string; status: string; connectionStatus: HybridWahaStatus; engine?: string; me?: { id?: string; pushName?: string }; }
+export interface HybridWahaQr { mimetype: string; data: string; }
 const normalizePermissionProfile = (dto: ChatwootPermissionProfileDto): PermissionProfile => ({ id: dto.id, name: dto.name, description: dto.description || null, kind: dto.kind || 'inbox', inboxPermissions: dto.inbox_permissions || [], systemPermissions: dto.system_permissions || [], isDefault: Boolean(dto.default) });
 const normalizeAutomationRule = (dto: ChatwootAutomationRuleDto): AutomationRule => ({ id: dto.id, name: dto.name, description: dto.description || null, eventName: dto.event_name, active: dto.active, createdAt: dto.created_on, conditions: dto.conditions.map(item => ({ attributeKey: item.attribute_key, filterOperator: item.filter_operator, queryOperator: item.query_operator || '', values: item.values || [] })), actions: dto.actions.map(item => { const params = item.action_params || []; if (item.action_name === 'send_webhook_event' && typeof params[0] === 'string' && params[0].trim().startsWith('{')) { try { return { actionName: item.action_name, actionParams: [JSON.parse(params[0])] }; } catch { /* Preserve malformed legacy values so they can be corrected in the editor. */ } } return { actionName: item.action_name, actionParams: params }; }) });
 
@@ -104,6 +109,21 @@ export const inboxService = {
     });
     return normalizeInbox(response);
   },
+
+  async syncWhatsAppTemplates(accountId: number, inboxId: number): Promise<void> {
+    await chatwootApiClient.post(`${root(accountId)}/inboxes/${inboxId}/sync_templates`, {});
+  },
+
+  async hybridWahaConfiguration(accountId: number, inboxId: number): Promise<HybridWahaConfiguration> { return normalizeHybridWahaConfiguration(await chatwootApiClient.get(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_configuration`)); },
+  async saveHybridWahaConfiguration(accountId: number, inboxId: number, value: Pick<HybridWahaConfiguration, 'hybridEnabled' | 'outOfWindowStrategy' | 'metaFailureStrategy'>): Promise<HybridWahaConfiguration> { return normalizeHybridWahaConfiguration(await chatwootApiClient.patch(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_configuration`, { hybrid_enabled: value.hybridEnabled, out_of_window_strategy: value.outOfWindowStrategy, meta_failure_strategy: value.metaFailureStrategy })); },
+  async hybridWahaBinding(accountId: number, inboxId: number): Promise<HybridWahaBinding> { return normalizeHybridWahaBinding(await chatwootApiClient.get(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_binding`)); },
+  async bindHybridWahaSession(accountId: number, inboxId: number, session: string): Promise<HybridWahaBinding> { return normalizeHybridWahaBinding(await chatwootApiClient.post(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_binding`, { waha_session: session })); },
+  async unbindHybridWahaSession(accountId: number, inboxId: number): Promise<void> { await chatwootApiClient.delete(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_binding`); },
+  async listHybridWahaSessions(accountId: number, inboxId: number): Promise<HybridWahaSession[]> { return (await chatwootApiClient.get<{ sessions: HybridWahaSession[] }>(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_sessions`)).sessions; },
+  async createHybridWahaSession(accountId: number, inboxId: number): Promise<HybridWahaSession> { return (await chatwootApiClient.post<{ session: HybridWahaSession }>(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_sessions`, {})).session; },
+  async hybridWahaSessionStatus(accountId: number, inboxId: number, session: string): Promise<HybridWahaSession> { return (await chatwootApiClient.get<{ session: HybridWahaSession }>(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_sessions/${encodeURIComponent(session)}`)).session; },
+  async operateHybridWahaSession(accountId: number, inboxId: number, session: string, operation: 'start' | 'restart' | 'logout' | 'qr'): Promise<{ session?: HybridWahaSession; qr?: HybridWahaQr }> { return chatwootApiClient.patch(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_sessions/${encodeURIComponent(session)}`, { operation }); },
+  async deleteHybridWahaSession(accountId: number, inboxId: number, session: string): Promise<void> { await chatwootApiClient.delete(`${root(accountId)}/inboxes/${inboxId}/hybrid_waha_sessions/${encodeURIComponent(session)}`); },
 
   delete(accountId: number, inboxId: number): Promise<void> {
     return chatwootApiClient.delete(`${root(accountId)}/inboxes/${inboxId}`);
@@ -203,3 +223,8 @@ export const inboxService = {
     return response.payload.map(normalizeAssignableAgent);
   },
 };
+
+const enumValue = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T => typeof value === 'string' && (allowed as readonly string[]).includes(value) ? value as T : fallback;
+const stringOrNull = (value: unknown) => typeof value === 'string' && value ? value : null;
+const normalizeHybridWahaConfiguration = (value: Record<string, unknown>): HybridWahaConfiguration => ({ hybridEnabled: value.hybrid_enabled === true, wahaSession: stringOrNull(value.waha_session), outOfWindowStrategy: enumValue(value.out_of_window_strategy, ['template', 'waha'] as const, 'template'), metaFailureStrategy: enumValue(value.meta_failure_strategy, ['block', 'waha'] as const, 'block') });
+const normalizeHybridWahaBinding = (value: Record<string, unknown>): HybridWahaBinding => ({ hybridEnabled: value.hybrid_enabled === true, wahaSession: stringOrNull(value.waha_session), wahaStatus: enumValue(value.waha_status, ['connected', 'connecting', 'disconnected', 'error', 'missing', 'not_bound'] as const, 'disconnected') });

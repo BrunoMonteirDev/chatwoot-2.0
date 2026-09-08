@@ -2,6 +2,12 @@ import type { OperationalWhatsAppConnection, WhatsAppSendCapability } from '../.
 
 export type ComposerNotice = { title: string; description: string; action: 'manager' | 'template' };
 
+export const composerPresentation = (notice: ComposerNotice | null) => ({
+  templateOnly: notice?.action === 'template',
+  showFreeform: notice?.action !== 'template',
+  showDisconnectedStatus: Boolean(notice && notice.action !== 'template'),
+});
+
 export const composerNotice = (
   capability: WhatsAppSendCapability | null | undefined,
   legacy: OperationalWhatsAppConnection | null | undefined,

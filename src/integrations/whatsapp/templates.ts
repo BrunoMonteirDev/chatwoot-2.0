@@ -1,4 +1,5 @@
 import { authenticatedBridgeHeaders } from '../bridge/auth';
+import { chatwootApiClient } from '../chatwoot/client';
 
 const bridgeUrl = (import.meta.env.VITE_BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
 
@@ -12,6 +13,8 @@ export interface WhatsAppTemplate {
   components: Array<{ type: string; text?: string; format?: string; buttons?: Array<{ type?: string; text?: string; url?: string }> }>;
   updatedAt: string | null;
 }
+
+export type MetaTemplateSendInput = { name: string; language: string; category?: string | null; namespace?: string | null; components?: Array<Record<string, unknown>>; processedParams?: Record<string, unknown>; content?: string };
 
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   if (!bridgeUrl) throw new Error('O bridge WhatsApp não está configurado neste ambiente.');
@@ -33,5 +36,23 @@ export const metaTemplateService = {
     form.append('template', JSON.stringify(template));
     form.append('header', header);
     return request<{ sourceId: string }>('/operations/templates', { method: 'POST', body: form });
+  },
+  async listNative(accountId: number, inboxId: number) {
+    const response = await chatwootApiClient.get<{ payload: WhatsAppTemplate[] }>(`/api/v1/accounts/${accountId}/inboxes/${inboxId}/message_templates`);
+    return response.payload;
+  },
+  sendNative(accountId: number, conversationId: number, template: MetaTemplateSendInput) {
+    return chatwootApiClient.post(`/api/v1/accounts/${accountId}/conversations/${conversationId}/messages`, {
+      content: template.content || `Template: ${template.name}`,
+      private: false,
+      echo_id: crypto.randomUUID(),
+      template_params: {
+        name: template.name,
+        namespace: template.namespace || '',
+        category: template.category || 'UTILITY',
+        language: template.language,
+        processed_params: template.processedParams || {},
+      },
+    });
   },
 };

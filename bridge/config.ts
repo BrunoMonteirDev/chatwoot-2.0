@@ -33,6 +33,7 @@ export const config = {
   wahaBaseUrl: optionalUrl('WAHA_BASE_URL'),
   wahaApiKey: process.env.WAHA_API_KEY || '',
   wahaWebhookSecret: process.env.WAHA_WEBHOOK_SECRET || '',
+  hybridWahaBridgeSecret: process.env.HYBRID_WAHA_BRIDGE_SECRET || '',
   wahaDefaultEngine: process.env.WAHA_DEFAULT_ENGINE || 'GOWS',
   wahaRequestTimeoutMs: Number(process.env.WAHA_REQUEST_TIMEOUT_MS || 15_000),
   wahaHistoryFile: process.env.BRIDGE_WAHA_HISTORY_FILE || './bridge/data/waha-history-imports.json',

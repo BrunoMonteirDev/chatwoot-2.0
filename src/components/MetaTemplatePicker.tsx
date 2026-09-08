@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2, X } from 'lucide-react';
+import { CheckCircle2, Loader2, X } from 'lucide-react';
 import { metaTemplateService, type WhatsAppTemplate } from '../integrations/whatsapp/templates';
 
 const fields = (text?: string) => [...(text || '').matchAll(/\{\{(\d+)\}\}/g)].map(match => Number(match[1])).filter((value, index, all) => all.indexOf(value) === index).sort((a, b) => a - b);
@@ -7,7 +7,10 @@ const component = (template: WhatsAppTemplate, type: string) => template.compone
 const keyFor = (scope: string, index: number) => `${scope}:${index}`;
 const buttonType = (button: { type?: string }) => (button.type || '').toUpperCase();
 
-export const MetaTemplatePicker = ({ inboxId, conversationId, onClose }: { inboxId: number; conversationId: number; onClose: () => void }) => {
+const categoryLabel = (category: string | null) => ({ UTILITY: 'Utilidade', MARKETING: 'Marketing', AUTHENTICATION: 'Authentication' }[String(category || '').toUpperCase()] || category || 'Meta');
+const bodyPreview = (template: WhatsAppTemplate) => component(template, 'BODY')?.text || component(template, 'HEADER')?.text || 'Template sem prévia textual.';
+
+export const MetaTemplatePicker = ({ accountId, inboxId, conversationId, native = false, onClose }: { accountId: number; inboxId: number; conversationId: number; native?: boolean; onClose: () => void }) => {
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
   const [selected, setSelected] = useState<WhatsAppTemplate | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -16,7 +19,7 @@ export const MetaTemplatePicker = ({ inboxId, conversationId, onClose }: { inbox
   const [state, setState] = useState<'loading' | 'ready' | 'sending' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => { let active = true; void metaTemplateService.list(inboxId).then(items => { if (active) { setTemplates(items.filter(item => item.status === 'APPROVED')); setState('ready'); } }).catch(cause => { if (active) { setError(cause instanceof Error ? cause.message : 'Não foi possível carregar os templates.'); setState('error'); } }); return () => { active = false; }; }, [inboxId]);
+  useEffect(() => { let active = true; const load = native ? metaTemplateService.listNative(accountId, inboxId) : metaTemplateService.list(inboxId); void load.then(items => { if (active) { setTemplates(items.filter(item => String(item.status).toUpperCase() === 'APPROVED')); setState('ready'); } }).catch(cause => { if (active) { setError(cause instanceof Error ? cause.message : 'Não foi possível carregar os templates.'); setState('error'); } }); return () => { active = false; }; }, [accountId, inboxId, native]);
 
   const listed = useMemo(() => templates.filter(template => `${template.name} ${template.language} ${template.category || ''}`.toLowerCase().includes(search.toLowerCase())), [search, templates]);
   const header = selected && component(selected, 'HEADER');
@@ -46,19 +49,28 @@ export const MetaTemplatePicker = ({ inboxId, conversationId, onClose }: { inbox
     });
     return result;
   };
+  const buildProcessedParams = () => ({
+    ...(headerVars.length ? { header: Object.fromEntries(headerVars.map(index => [String(index), value(keyFor('header', index))])) } : {}),
+    ...(bodyVars.length ? { body: Object.fromEntries(bodyVars.map(index => [String(index), value(keyFor('body', index))])) } : {}),
+    ...(dynamicButtons.length ? { buttons: dynamicButtons.map(index => ({ type: buttonType(buttons[index]) === 'URL' ? 'url' : 'copy_code', parameter: value(keyFor('button', index)) })) } : {}),
+  });
   const send = async () => {
     if (!selected || !valid) return;
     setState('sending'); setError(null);
-    try { await metaTemplateService.send(inboxId, conversationId, { name: selected.name, language: selected.language, components: buildComponents() }, headerFile); onClose(); }
+    try {
+      if (native) await metaTemplateService.sendNative(accountId, conversationId, { name: selected.name, language: selected.language, category: selected.category, namespace: (selected as WhatsAppTemplate & { namespace?: string }).namespace, processedParams: buildProcessedParams(), content: previewText(body?.text, 'body') });
+      else await metaTemplateService.send(inboxId, conversationId, { name: selected.name, language: selected.language, components: buildComponents() }, headerFile);
+      onClose();
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Não foi possível enviar o template.'); setState('ready'); }
   };
   const input = (label: string, key: string) => <label key={key} className="block text-xs text-[#aebac1]">{label}<input value={value(key)} onChange={event => update(key, event.target.value)} className="mt-1 w-full rounded-md border border-[#374248] bg-[#111b21] px-2.5 py-2 text-sm text-[#e9edef] outline-none focus:border-[#00a884]" /></label>;
 
-  return <div className="absolute bottom-full right-0 z-50 mb-2 w-[min(30rem,calc(100vw-2rem))] rounded-xl border border-[#374248] bg-[#202c33] p-3 text-[#e9edef] shadow-2xl">
+  return <div role="dialog" aria-label="Templates Meta" className="fixed inset-x-4 bottom-4 z-[10020] mx-auto max-h-[calc(100vh-2rem)] w-[min(34rem,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-[#374248] bg-[#202c33] p-3 text-[#e9edef] shadow-2xl md:bottom-8">
     <div className="mb-2 flex items-center justify-between"><h3 className="text-sm font-bold">Escolher template Meta</h3><button type="button" onClick={onClose} className="rounded p-1 text-[#aebac1] hover:bg-white/10"><X className="h-4 w-4" /></button></div>
     {state === 'loading' && <div className="flex items-center gap-2 p-4 text-sm text-[#aebac1]"><Loader2 className="h-4 w-4 animate-spin" />Carregando templates…</div>}
     {state !== 'loading' && <><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Buscar por nome ou idioma" className="mb-2 w-full rounded-md border border-[#374248] bg-[#111b21] px-2.5 py-2 text-sm outline-none focus:border-[#00a884]" />
-      {!selected ? <div className="max-h-64 space-y-1 overflow-y-auto">{listed.map(template => <button type="button" key={`${template.name}:${template.language}`} onClick={() => { setSelected(template); setValues({}); setHeaderFile(null); }} className="w-full rounded-lg px-3 py-2 text-left hover:bg-white/10"><span className="block text-sm font-semibold">{template.name}</span><span className="text-xs text-[#aebac1]">{template.language} · {template.category || 'Meta'}</span></button>)}{!listed.length && <p className="p-3 text-sm text-[#aebac1]">Nenhum template aprovado encontrado.</p>}</div>
+      {!selected ? <div className="max-h-80 space-y-2 overflow-y-auto">{listed.map(template => { const hasButtons = template.components.some(item => item.type.toUpperCase() === 'BUTTONS' && Boolean(item.buttons?.length)); return <button type="button" key={`${template.name}:${template.language}`} onClick={() => { setSelected(template); setValues({}); setHeaderFile(null); }} className="w-full rounded-lg border border-white/10 px-3 py-2 text-left hover:bg-white/10"><span className="flex items-center justify-between gap-2 text-sm font-semibold"><span>{template.name}</span><span className="rounded bg-[#00a884]/15 px-1.5 py-0.5 text-[10px] text-[#00a884]">{categoryLabel(template.category)}</span></span><span className="mt-1 block line-clamp-2 text-xs text-[#d1d7db]">{bodyPreview(template)}</span><span className="mt-1 flex items-center gap-2 text-[11px] text-[#8696a0]"><span>{template.language}</span><span><CheckCircle2 className="mr-1 inline h-3 w-3 text-[#00a884]" />Aprovado</span>{hasButtons && <span>Possui botões</span>}</span></button>; })}{!listed.length && <p className="p-3 text-sm text-[#aebac1]">Nenhum template aprovado encontrado.</p>}</div>
         : <div className="max-h-[65vh] space-y-2 overflow-y-auto"><button type="button" onClick={() => setSelected(null)} className="text-xs font-semibold text-[#00a884]">← Voltar</button><p className="text-sm font-bold">{selected.name} <span className="font-normal text-[#aebac1]">({selected.language})</span></p>
           <div className="rounded bg-black/20 p-2 text-xs text-[#d1d7db] whitespace-pre-wrap"><p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[#8696a0]">Prévia</p>{header?.text && <p className="mb-1 font-semibold">{previewText(header.text, 'header')}</p>}{body?.text && <p>{previewText(body.text, 'body')}</p>}{footer?.text && <p className="mt-2 text-[#aebac1]">{footer.text}</p>}{buttons.map((button, index) => <p key={`${button.type}:${index}`} className="mt-1">[{buttonType(button) || 'UNSUPPORTED'}] {button.text || button.url || 'Sem rótulo'}</p>)}</div>
           {headerKind && <label className="block text-xs text-[#aebac1]">Cabeçalho {headerKind}<input type="file" accept={headerKind === 'image' ? 'image/*' : headerKind === 'video' ? 'video/*' : '.pdf,.doc,.docx,application/pdf'} onChange={event => setHeaderFile(event.target.files?.[0] || null)} className="mt-1 block w-full text-sm" /></label>}
