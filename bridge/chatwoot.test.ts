@@ -25,6 +25,27 @@ describe('chatwootBridge media messages', () => {
     await expect(chatwootBridge.findWhatsAppInboxByIdForSession(1, 5, new Headers())).rejects.toThrow('não pertence a esta conta');
   });
 
+  it('resolve o contato com a sessão do usuário e preserva o escopo de account/inbox', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: 66, inbox_id: 5, meta: { sender: { id: 8, name: 'Bruno', phone_number: '+554484532595' } }, contact_inbox: { source_id: '554484532595' },
+    }), { status: 200 })));
+    await expect(chatwootBridge.conversationContactTargetForSession(1, 66, 5, new Headers({ uid: 'agent@example.test' }))).resolves.toMatchObject({ contactId: 8, phoneNumber: '+554484532595', name: 'Bruno' });
+    expect(vi.mocked(fetch).mock.calls[0][0]).toContain('/api/v1/accounts/1/conversations/66');
+  });
+
+  it('bloqueia conversa de outra inbox no lookup de perfil autenticado', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 66, inbox_id: 9 }), { status: 200 })));
+    await expect(chatwootBridge.conversationContactTargetForSession(1, 66, 5, new Headers())).rejects.toThrow('não pertence à inbox');
+  });
+
+  it('resolve o JID do grupo pelo contato quando o serializer da conversa omite contact_inbox', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 81, inbox_id: 5, meta: { sender: { id: 65, name: 'Equipe' } } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ payload: { id: 65, contact_inboxes: [{ source_id: 'whatsapp:group:120363@g.us', inbox: { id: 5 } }] } }), { status: 200 })));
+    await expect(chatwootBridge.conversationGroupTargetDetailsForSession(1, 81, 5, new Headers())).resolves.toMatchObject({ groupJid: '120363@g.us', contactId: 65 });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it('reutiliza a conversa da mesma inbox quando o contato foi criado manualmente', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ payload: [
       { id: 86, inbox_id: 106, status: 'open', last_activity_at: 100 },

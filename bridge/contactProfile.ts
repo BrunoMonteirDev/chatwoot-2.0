@@ -1,6 +1,15 @@
 import { normalizeBrazilianPhone } from '../phone.js';
 
 export type ContactProfileSyncPlan = { name: boolean; avatar: boolean };
+export type ContactProfileResult = { name?: string; avatarUrl?: string; unavailable?: true };
+
+export const bestEffortContactProfile = async (
+  lookup: () => Promise<{ name?: string; avatarUrl?: string }>,
+  onUnavailable?: (error: unknown) => void,
+): Promise<ContactProfileResult> => {
+  try { return await lookup(); }
+  catch (error) { onUnavailable?.(error); return { unavailable: true }; }
+};
 
 const digits = (value: string | null | undefined) => value?.replace(/\D/g, '') || '';
 const canonicalPhoneDigits = (value: string | null | undefined) => {

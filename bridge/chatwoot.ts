@@ -12,7 +12,10 @@ type Conversation = { id: number; internal_id?: number; status: string; inbox_id
 type ConversationTarget = { id: number; inbox_id: number; meta?: { sender?: { id?: number; name?: string; thumbnail?: string | null; phone_number?: string | null; additional_attributes?: Record<string, unknown> | null } }; contact_inbox?: { source_id?: string | null } };
 type AccountContact = {
   id: number;
+  name?: string;
+  thumbnail?: string | null;
   phone_number?: string;
+  additional_attributes?: Record<string, unknown>;
   // Chatwoot's account API serializes the inbox as a nested object, while
   // older responses used inbox_id. Accept both during the transition.
   contact_inboxes?: Array<{ inbox_id?: number; source_id: string; inbox?: { id?: number } }>;
@@ -408,6 +411,15 @@ export const chatwootBridge = {
     if (!/^\d{8,15}$/.test(digits)) throw new Error('A conversa não possui um número WhatsApp resolvido.');
     return { phoneNumber: `+${digits}`, contactId: conversation.meta?.sender?.id, ...(conversation.contact_inbox?.source_id ? { sourceId: conversation.contact_inbox.source_id } : {}), ...(conversation.meta?.sender?.name ? { name: conversation.meta.sender.name } : {}), ...(conversation.meta?.sender?.thumbnail ? { avatarUrl: conversation.meta.sender.thumbnail } : {}) };
   },
+  async conversationContactTargetForSession(accountId: number, conversationId: number, inboxId: number, sessionHeaders: Headers) {
+    const conversation = await requestWithSession<ConversationTarget>(`/api/v1/accounts/${accountId}/conversations/${conversationId}`, sessionHeaders);
+    if (conversation.inbox_id !== inboxId) throw new Error('A conversa não pertence à inbox informada.');
+    const attributes = conversation.meta?.sender?.additional_attributes;
+    const rawPhone = conversation.meta?.sender?.phone_number || attributes?.waha_phone || attributes?.evolution_phone || conversation.contact_inbox?.source_id?.match(/^whatsapp:(\d{8,15})$/)?.[1] || conversation.contact_inbox?.source_id;
+    const digits = typeof rawPhone === 'string' ? rawPhone.replace(/\D/g, '') : '';
+    if (!/^\d{8,15}$/.test(digits)) throw new Error('A conversa não possui um número WhatsApp resolvido.');
+    return { phoneNumber: `+${digits}`, contactId: conversation.meta?.sender?.id, ...(conversation.contact_inbox?.source_id ? { sourceId: conversation.contact_inbox.source_id } : {}), ...(conversation.meta?.sender?.name ? { name: conversation.meta.sender.name } : {}), ...(conversation.meta?.sender?.thumbnail ? { avatarUrl: conversation.meta.sender.thumbnail } : {}) };
+  },
   async conversationGroupTargetDetails(conversationId: number, inboxId: number) {
     const conversation = await request<ConversationTarget>(`/api/v1/accounts/${currentAccountId()}/conversations/${conversationId}`, {}, true);
     if (conversation.inbox_id !== inboxId) throw new Error('A conversa não pertence à inbox informada.');
@@ -434,16 +446,22 @@ export const chatwootBridge = {
   async conversationGroupTargetDetailsForSession(accountId: number, conversationId: number, inboxId: number, sessionHeaders: Headers) {
     const conversation = await requestWithSession<ConversationTarget>(`/api/v1/accounts/${accountId}/conversations/${conversationId}`, sessionHeaders);
     if (conversation.inbox_id !== inboxId) throw new Error('A conversa não pertence à inbox informada.');
-    const attributes = conversation.meta?.sender?.additional_attributes;
-    const encoded = typeof conversation.contact_inbox?.source_id === 'string' && conversation.contact_inbox.source_id.match(/^whatsapp:group:(.+)$/)?.[1];
+    const senderId = conversation.meta?.sender?.id;
+    const contact = !conversation.contact_inbox?.source_id && senderId
+      ? (await requestWithSession<{ payload: AccountContact }>(`/api/v1/accounts/${accountId}/contacts/${senderId}`, sessionHeaders)).payload
+      : undefined;
+    const contactInbox = contact?.contact_inboxes?.find(item => (item.inbox?.id || item.inbox_id) === inboxId);
+    const attributes = conversation.meta?.sender?.additional_attributes || contact?.additional_attributes;
+    const sourceId = conversation.contact_inbox?.source_id || contactInbox?.source_id;
+    const encoded = typeof sourceId === 'string' && sourceId.match(/^whatsapp:group:(.+)$/)?.[1];
     const declaredJid = attributes?.whatsapp_group_jid;
     const rawGroupJid = encoded || (typeof declaredJid === 'string' ? declaredJid : null);
     if (!rawGroupJid) throw new Error('A conversa não é um grupo WhatsApp válido.');
     const groupJid = decodeURIComponent(rawGroupJid);
     if (!groupJid.endsWith('@g.us')) throw new Error('A conversa não é um grupo WhatsApp válido.');
     return { groupJid, contactId: conversation.meta?.sender?.id, persistedMetadata: {
-      subject: conversation.meta?.sender?.name,
-      avatarUrl: typeof attributes?.whatsapp_group_avatar_url === 'string' ? attributes.whatsapp_group_avatar_url : conversation.meta?.sender?.thumbnail || undefined,
+      subject: conversation.meta?.sender?.name || contact?.name,
+      avatarUrl: typeof attributes?.whatsapp_group_avatar_url === 'string' ? attributes.whatsapp_group_avatar_url : conversation.meta?.sender?.thumbnail || contact?.thumbnail || undefined,
       description: typeof attributes?.whatsapp_group_description === 'string' ? attributes.whatsapp_group_description : undefined,
       participants: Array.isArray(attributes?.whatsapp_group_participants) ? attributes.whatsapp_group_participants : [],
     } };

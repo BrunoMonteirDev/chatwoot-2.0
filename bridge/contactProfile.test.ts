@@ -1,7 +1,18 @@
-import { describe, expect, it } from 'vitest';
-import { contactProfileSyncPlan, isPhoneDefaultName } from './contactProfile';
+import { describe, expect, it, vi } from 'vitest';
+import { bestEffortContactProfile, contactProfileSyncPlan, isPhoneDefaultName } from './contactProfile';
 
 describe('contact profile synchronization policy', () => {
+  it('retorna o profile resolvido pelo provider', async () => {
+    await expect(bestEffortContactProfile(async () => ({ name: 'Ana', avatarUrl: 'https://cdn/avatar.jpg' }))).resolves.toEqual({ name: 'Ana', avatarUrl: 'https://cdn/avatar.jpg' });
+  });
+  it('transforma indisponibilidade operacional em fallback coerente', async () => {
+    const log = vi.fn();
+    await expect(bestEffortContactProfile(async () => { throw new Error('timeout'); }, log)).resolves.toEqual({ unavailable: true });
+    expect(log).toHaveBeenCalledOnce();
+  });
+  it('mantém os dados conhecidos quando o provider não encontra profile', async () => {
+    await expect(bestEffortContactProfile(async () => ({}))).resolves.toEqual({});
+  });
   it('preenche automaticamente um nome vazio', () => expect(contactProfileSyncPlan({ name: '', phoneNumber: '+55 44 99563-9999' })).toMatchObject({ name: true }));
   it('reconhece o telefone como nome padrão em formatos diferentes', () => {
     expect(isPhoneDefaultName('554499563999', '+55 44 99563-9999')).toBe(true);
