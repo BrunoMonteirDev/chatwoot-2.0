@@ -457,8 +457,9 @@ export default function App() {
     return () => { active = false; window.clearInterval(interval); };
   }, [currentAccount?.id, inboxes, selectedConversation?.id, selectedConversation?.inboxId, selectedConversation?.isGroup]);
   useEffect(() => {
-    const inbox = inboxes.find((item) => item.id === selectedConversation?.inboxId);
-    if (!currentAccount || !selectedConversation || inbox?.channelType !== 'Channel::Whatsapp') { setWhatsappSendCapability(null); return; }
+    const inboxId = selectedConversation?.inboxId;
+    const inbox = inboxes.find((item) => item.id === inboxId);
+    if (!currentAccount || !selectedConversation || !inboxId || inbox?.channelType !== 'Channel::Whatsapp') { setWhatsappSendCapability(null); return; }
     let active = true;
     const refresh = () => whatsappSendCapabilityService.get(currentAccount.id, selectedConversation.id)
       .then((capability) => {
