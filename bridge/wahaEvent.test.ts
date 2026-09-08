@@ -20,6 +20,11 @@ describe('WAHA webhook normalization', () => {
     expect(parseIncomingWahaMessage({ event: 'message', session: 'empresa', payload: { id: 'm4', from: '120@g.us', chatId: '120@g.us', pushName: 'Ana', subject: 'Vendas', body: 'grupo' } })).toMatchObject({ chatType: 'group', name: 'Vendas', groupName: 'Vendas', participantName: 'Ana' });
   });
 
+  it('associa o LID da mensagem ao PN real fornecido pelo WAHA', () => {
+    expect(parseIncomingWahaMessage({ event: 'message', session: 'empresa', payload: { id: 'm-lid', chatId: '120@g.us', participant: '19696904601705@lid', participantAlt: '554497755329@c.us', body: 'grupo' } }))
+      .toMatchObject({ chatType: 'group', participantJid: '19696904601705@lid', participantPhone: '+554497755329' });
+  });
+
   it('identifica alvo real de reaction, edit e revoke', () => {
     expect(parseIncomingWahaReaction({ event: 'message.reaction', session: 'empresa', payload: { chatId: '55@c.us', msgId: 'target', reaction: { text: '👍' } } })).toMatchObject({ targetMessageId: 'target', emoji: '👍' });
     expect(parseIncomingWahaMutation({ event: 'message.revoked', session: 'empresa', payload: { chatId: '55@c.us', revokedMessageId: 'target' } })).toMatchObject({ targetMessageId: 'target' });

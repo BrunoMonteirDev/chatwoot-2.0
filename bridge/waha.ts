@@ -6,6 +6,7 @@ export type WahaRawSessionStatus = 'STOPPED' | 'STARTING' | 'SCAN_QR_CODE' | 'WO
 export type WahaConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error';
 export interface WahaSession {
   name: string;
+  linked?: boolean;
   status: WahaRawSessionStatus;
   connectionStatus: WahaConnectionStatus;
   engine?: string;
@@ -16,7 +17,7 @@ export interface SentWahaMessage { messageId: string; chatId: string; fromMe: bo
 export interface DownloadedWahaMedia { buffer: Buffer; contentType: string; fileName: string; }
 export interface WahaHistoryQuery { limit: number; offset: number; timestampGte?: number; timestampLte?: number; }
 export interface WahaChatProfile { id: string; name?: string; }
-export interface WhatsAppGroupMetadata { id: string; subject?: string; avatarUrl?: string; description?: string; participants: Array<{ jid: string; name?: string; phoneNumber?: string; avatarUrl?: string; admin?: string | null }>; }
+export interface WhatsAppGroupMetadata { id: string; subject?: string; avatarUrl?: string; description?: string; participants: Array<{ jid: string; lid?: string; phoneJid?: string; name?: string; phoneNumber?: string; avatarUrl?: string; admin?: string | null }>; }
 
 export class WahaApiError extends Error {
   constructor(readonly kind: 'not_configured' | 'timeout' | 'network' | 'invalid_response' | 'api', readonly status?: number, details?: string) {
@@ -101,10 +102,13 @@ const groupMetadata = (payload: unknown, fallbackId: string): WhatsAppGroupMetad
   const root = record(payload); const group = record(root?.group) || root || {};
   const rawParticipants = Array.isArray(group.participants) ? group.participants : Array.isArray(group.Participants) ? group.Participants : [];
   const participants = rawParticipants.flatMap((item): WhatsAppGroupMetadata['participants'] => {
-    const member = record(item); const jid = typeof member?.id === 'string' ? member.id : typeof member?.jid === 'string' ? member.jid : typeof member?.JID === 'string' ? member.JID : '';
+    const member = record(item); const ids = [member?.id, member?.jid, member?.JID, member?.lid, member?.LID, member?.pn, member?.PN, member?.phoneNumber, member?.PhoneNumber].filter((value): value is string => typeof value === 'string' && value.length > 0);
+    const lidJid = ids.find(value => value.endsWith('@lid'));
+    const phoneJid = ids.find(value => /@(c\.us|s\.whatsapp\.net)$/.test(value));
+    const jid = ids[0] || '';
     if (!jid) return [];
-    const phoneNumber = phoneFromJid(jid) || (typeof member.phoneNumber === 'string' ? member.phoneNumber.replace(/\D/g, '') : typeof member.PhoneNumber === 'string' ? member.PhoneNumber.replace(/\D/g, '') : undefined);
-    return [{ jid, ...(typeof member.name === 'string' ? { name: member.name } : typeof member.pushName === 'string' ? { name: member.pushName } : typeof member.DisplayName === 'string' ? { name: member.DisplayName } : {}), ...(phoneNumber ? { phoneNumber } : {}), ...(typeof member.admin === 'string' ? { admin: member.admin } : member.admin === null ? { admin: null } : member.isAdmin === true || member.IsAdmin === true || member.IsSuperAdmin === true ? { admin: 'admin' } : {}) }];
+    const phoneNumber = phoneFromJid(phoneJid) || [member.phoneNumber, member.PhoneNumber, member.pn, member.PN].find((value): value is string => typeof value === 'string')?.replace(/\D/g, '');
+    return [{ jid, ...(lidJid ? { lid: lidJid } : {}), ...(phoneJid ? { phoneJid } : {}), ...(typeof member.name === 'string' ? { name: member.name } : typeof member.pushName === 'string' ? { name: member.pushName } : typeof member.DisplayName === 'string' ? { name: member.DisplayName } : {}), ...(phoneNumber ? { phoneNumber } : {}), ...(typeof member.admin === 'string' ? { admin: member.admin } : member.admin === null ? { admin: null } : member.IsSuperAdmin === true ? { admin: 'superadmin' } : member.isAdmin === true || member.IsAdmin === true ? { admin: 'admin' } : {}) }];
   });
   return { id: typeof group.id === 'string' ? group.id : typeof group.JID === 'string' ? group.JID : fallbackId, ...(typeof group.subject === 'string' ? { subject: group.subject } : typeof group.name === 'string' ? { subject: group.name } : typeof group.Name === 'string' ? { subject: group.Name } : {}), ...(typeof group.description === 'string' ? { description: group.description } : typeof group.Topic === 'string' ? { description: group.Topic } : {}), participants };
 };

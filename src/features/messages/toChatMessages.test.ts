@@ -40,11 +40,22 @@ describe('toChatMessages reactions', () => {
     expect(first.senderIdentity).toBe('5511999999999@s.whatsapp.net');
   });
 
-  it('nunca expõe LID quando nome e número não estão disponíveis', () => {
+  it('usa nome sobre LID e nunca expõe LID bruto como fallback', () => {
     const [item] = toChatMessages([baseMessage({ contentAttributes: { whatsapp_participant_jid: '12345@lid', whatsapp_participant_name: 'Ana' } })]);
     expect(item.senderName).toBe('Ana');
     expect(item.senderIdentity).toBe('12345@lid');
     expect(toChatMessages([baseMessage({ senderName: null, contentAttributes: { whatsapp_participant_jid: '12345@lid' } })])[0].senderName).toBe('Participante');
+  });
+
+  it('nunca usa o nome do grupo e distingue dois participantes da mesma conversa', () => {
+    const group = { whatsapp_remote_jid: '120363000000000000@g.us' };
+    const messages = toChatMessages([
+      baseMessage({ id: 1, senderName: 'Equipe Marketing', contentAttributes: { ...group, whatsapp_participant_jid: '5511999999999@c.us', whatsapp_participant_name: 'Ana' } }),
+      baseMessage({ id: 2, senderName: 'Equipe Marketing', contentAttributes: { ...group, whatsapp_participant_jid: '5521999999999@c.us', whatsapp_participant_name: 'Bruno' } }),
+      baseMessage({ id: 3, senderName: 'Equipe Marketing', contentAttributes: { ...group, whatsapp_participant_jid: '5531999999999@c.us' } }),
+    ]);
+    expect(messages.map(message => message.senderName)).toEqual(['Ana', 'Bruno', '+5531999999999']);
+    expect(messages.map(message => message.senderName)).not.toContain('Equipe Marketing');
   });
 
   it('expõe o marcador normalizado de mensagem encaminhada', () => {

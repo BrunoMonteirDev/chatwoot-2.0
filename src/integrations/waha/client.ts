@@ -2,7 +2,7 @@ import { authenticatedBridgeHeaders } from '../bridge/auth';
 import { BridgeApiError } from '../chatwoot/errors';
 
 export type WahaConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error';
-export interface WahaSession { name: string; status: string; connectionStatus: WahaConnectionStatus; engine?: string; me?: { id?: string; pushName?: string }; }
+export interface WahaSession { name: string; linked?: boolean; status: string; connectionStatus: WahaConnectionStatus; engine?: string; me?: { id?: string; pushName?: string }; }
 export interface WahaQrCode { mimetype: string; data: string; }
 export type WahaHistoryRange = '7d' | '30d' | '90d' | 'all';
 export type WahaHistoryJobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';

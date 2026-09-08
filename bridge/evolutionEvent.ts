@@ -55,6 +55,8 @@ export interface IncomingEvolutionRevoke {
 
 export interface EvolutionGroupParticipant {
   jid: string;
+  lid?: string;
+  phoneJid?: string;
   phoneNumber?: string;
   name?: string;
   avatarUrl?: string;

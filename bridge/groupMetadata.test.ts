@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GroupMetadataCache } from './groupMetadata';
+import { GroupMetadataCache, persistedGroupMetadata } from './groupMetadata';
 
 describe('GroupMetadataCache', () => {
   it('reutiliza metadados durante o TTL e expira após cinco minutos', () => {
@@ -23,5 +23,10 @@ describe('GroupMetadataCache', () => {
     cache.invalidate('waha', '1@g.us');
     expect(cache.get('waha', '1@g.us')).toBeNull();
     expect(cache.get('evolution', '1@g.us')?.subject).toBe('Evolution');
+  });
+
+  it('normaliza aliases e identidade persistida para fallback quando o WAHA está indisponível', () => {
+    expect(persistedGroupMetadata('1@g.us', 'waha', { subject: 'Equipe', avatarUrl: 'group.jpg', description: 'Descrição', participants: [{ jid: '19696904601705@lid', lid: '19696904601705@lid', phone_jid: '554497755329@c.us', phone: '554497755329', name: 'Maria', avatar_url: 'maria.jpg', admin: 'admin' }] }))
+      .toMatchObject({ subject: 'Equipe', avatarUrl: 'group.jpg', description: 'Descrição', canEditDescription: false, participants: [{ jid: '19696904601705@lid', phoneJid: '554497755329@c.us', name: 'Maria', avatarUrl: 'maria.jpg' }] });
   });
 });

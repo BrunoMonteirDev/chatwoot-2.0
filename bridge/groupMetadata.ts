@@ -4,10 +4,19 @@ export interface GroupMetadata {
   id: string; avatarUrl?: string;
   subject?: string;
   description?: string;
-  participants: Array<{ jid: string; name?: string; phoneNumber?: string; avatarUrl?: string; admin?: string | null }>;
+  participants: Array<{ jid: string; lid?: string; phoneJid?: string; name?: string; phoneNumber?: string; avatarUrl?: string; admin?: string | null }>;
   transport: WhatsAppTransport;
   canEditDescription: boolean;
 }
+export const persistedGroupMetadata = (groupJid: string, transport: WhatsAppTransport, persisted: { subject?: string; avatarUrl?: string; description?: string; participants: unknown[] }): GroupMetadata | null => {
+  const participants = persisted.participants.flatMap(value => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>; const jid = typeof item.jid === 'string' ? item.jid : '';
+    return jid ? [{ jid, ...(typeof item.lid === 'string' ? { lid: item.lid } : {}), ...(typeof item.phone_jid === 'string' ? { phoneJid: item.phone_jid } : {}), ...(typeof item.phone === 'string' ? { phoneNumber: item.phone } : {}), ...(typeof item.name === 'string' ? { name: item.name } : {}), ...(typeof item.avatar_url === 'string' ? { avatarUrl: item.avatar_url } : {}), ...(typeof item.admin === 'string' || item.admin === null ? { admin: item.admin as string | null } : {}) }] : [];
+  });
+  if (!participants.length) return null;
+  return { id: groupJid, transport, canEditDescription: false, participants, ...(persisted.subject ? { subject: persisted.subject } : {}), ...(persisted.avatarUrl ? { avatarUrl: persisted.avatarUrl } : {}), ...(persisted.description ? { description: persisted.description } : {}) };
+};
 
 type Cached = { value: GroupMetadata; expiresAt: number };
 

@@ -10,9 +10,17 @@ describe('group participant identity', () => {
     expect(participantLabel(undefined, '5544999999999@s.whatsapp.net')).toBe('+5544999999999');
   });
 
+  it('never exposes a raw LID as fallback', () => {
+    expect(participantLabel(undefined, '12345@lid')).toBe('Participante');
+  });
+
   it('indexes equivalent provider identities to the same participant metadata', () => {
-    const keys = participantIdentityKeys({ jid: '123@lid', phoneJid: '5544999999999@c.us', phone: '+55 44 99999-9999' });
-    expect(keys).toEqual(expect.arrayContaining(['123@lid', '5544999999999@c.us', '5544999999999@s.whatsapp.net', '5544999999999']));
+    const participant = { jid: '19696904601705@lid', lid: '19696904601705@lid', phoneJid: '554497755329@c.us', phone: '+554497755329', name: 'Maria' };
+    const indexed = indexGroupParticipants([participant]);
+    expect(participantIdentityKeys(participant)).toEqual(expect.arrayContaining(['19696904601705@lid', '554497755329@c.us', '554497755329@s.whatsapp.net', '554497755329']));
+    expect(indexed['19696904601705@lid']?.name).toBe('Maria');
+    expect(participantLabel(indexed['19696904601705@lid']?.name, indexed['19696904601705@lid']?.jid, indexed['19696904601705@lid']?.phone)).toBe('Maria');
+    expect(participantLabel(undefined, indexed['19696904601705@lid']?.jid, indexed['19696904601705@lid']?.phone)).toBe('+554497755329');
   });
 
   it('replaces stale participant name and avatar when refreshed metadata is indexed', () => {

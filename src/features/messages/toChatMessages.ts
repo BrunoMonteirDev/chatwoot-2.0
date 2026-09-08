@@ -20,7 +20,9 @@ const toAttachment = (attachment: ConversationMessage['attachments'][number]): A
 export const toChatMessages = (items: ConversationMessage[]): Message[] => items.map((message) => {
   const jid = typeof message.contentAttributes.whatsapp_participant_jid === 'string' ? message.contentAttributes.whatsapp_participant_jid : null;
   const phone = typeof message.contentAttributes.whatsapp_participant_phone === 'string' ? message.contentAttributes.whatsapp_participant_phone : null;
-  const name = typeof message.contentAttributes.whatsapp_participant_name === 'string' ? message.contentAttributes.whatsapp_participant_name : message.senderName || undefined;
+  const name = typeof message.contentAttributes.whatsapp_participant_name === 'string' ? message.contentAttributes.whatsapp_participant_name : undefined;
+  const remoteJid = typeof message.contentAttributes.whatsapp_remote_jid === 'string' ? message.contentAttributes.whatsapp_remote_jid : null;
+  const isGroupMessage = remoteJid?.endsWith('@g.us') === true;
   const identity = participantIdentity(jid, phone);
   return ({
   id: String(message.id),
@@ -28,7 +30,7 @@ export const toChatMessages = (items: ConversationMessage[]): Message[] => items
   // Chatwoot correctly identifies the group as the conversation contact. The
   // real author of an incoming group message is carried separately by the
   // bridge so a group does not look like a direct conversation with itself.
-  senderName: message.kind === 'outgoing' ? 'Você' : jid || phone ? participantLabel(name, jid, phone) : name,
+  senderName: message.kind === 'outgoing' ? 'Você' : jid || phone ? participantLabel(name, jid, phone) : isGroupMessage ? 'Participante' : message.senderName || undefined,
   ...(jid || phone ? { senderPhone: participantPhone(jid, phone), senderIdentity: identity, senderColor: participantColor(identity) } : {}),
   senderEmail: message.senderEmail || undefined,
   senderAvatarUrl: message.senderAvatarUrl || undefined,
@@ -47,7 +49,7 @@ export const toChatMessages = (items: ConversationMessage[]): Message[] => items
   whatsappTransport: message.contentAttributes.whatsapp_transport === 'evolution' || message.contentAttributes.whatsapp_transport === 'waha' || message.contentAttributes.whatsapp_transport === 'meta_cloud'
     ? message.contentAttributes.whatsapp_transport
     : null,
-  whatsappRemoteJid: typeof message.contentAttributes.whatsapp_remote_jid === 'string' ? message.contentAttributes.whatsapp_remote_jid : null,
+  whatsappRemoteJid: remoteJid,
   whatsappFromMe: typeof message.contentAttributes.whatsapp_from_me === 'boolean'
     ? message.contentAttributes.whatsapp_from_me
     : message.kind === 'outgoing',

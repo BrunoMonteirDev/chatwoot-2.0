@@ -135,7 +135,10 @@ export const WahaSetup = ({ accountId, inbox, webhookUrl, isDarkMode, onSaved }:
   }, [isConnected]);
   const hasSession = sessions.length > 0;
   const isAssociated = selected.length > 0 && associatedSession === selected;
-  const wahaStatus = current ? (current.status === 'WORKING' ? 'connected' : 'disconnected') : transportStatuses.waha;
+  // A durable binding is not evidence that WAHA is operational. Until the
+  // provider-backed (or explicit unavailable) session arrives, show pending
+  // instead of reusing a stale persisted "connected" flag from the inbox.
+  const wahaStatus = current ? current.connectionStatus : associatedSession ? 'pending' : transportStatuses.waha;
   // The collaborators list is an overlay. The card must not clip it when the
   // picker opens near the bottom of the settings panel.
   return <div className={`mx-auto max-w-3xl overflow-visible rounded-2xl border ${card}`}>
@@ -152,7 +155,7 @@ export const WahaSetup = ({ accountId, inbox, webhookUrl, isDarkMode, onSaved }:
 
       <div className="rounded-xl border border-white/10 p-4">
         <div className="mb-3 flex items-start gap-3"><span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#00a884] text-xs font-bold text-white">1</span><div><p className="text-xs font-bold">Conexão desta caixa</p><p className="mt-1 text-[11px] leading-4 text-[#8696a0]">Cada caixa permite apenas uma conexão WAHA. Para usar outro número, exclua primeiro a conexão atual.</p></div></div>
-        <div className="grid gap-3 sm:grid-cols-[1fr_auto]"><select value={selected} disabled className={`rounded-xl border px-3 py-3 text-sm disabled:cursor-not-allowed disabled:opacity-70 ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-gray-300 bg-white'}`}><option value="">Nenhuma conexão criada</option>{sessions.map(session => <option key={session.name} value={session.name}>{session.name} · {statusLabel[session.status] || session.status}</option>)}</select><button type="button" onClick={() => void refresh()} disabled={busy} className="rounded-xl border border-[#00a884]/40 px-3 text-xs font-bold text-[#00a884]"><RefreshCw className={`inline h-4 w-4 ${busy ? 'animate-spin' : ''}`} /> Atualizar</button></div>
+        <div className="grid gap-3 sm:grid-cols-[1fr_auto]"><select value={selected} disabled className={`rounded-xl border px-3 py-3 text-sm disabled:cursor-not-allowed disabled:opacity-70 ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-gray-300 bg-white'}`}><option value="">{selected ? 'Conexão vinculada' : 'Nenhuma conexão criada'}</option>{sessions.map(session => <option key={session.name} value={session.name}>{session.name} · {statusLabel[session.status] || session.status}</option>)}</select><button type="button" onClick={() => void refresh()} disabled={busy} className="rounded-xl border border-[#00a884]/40 px-3 text-xs font-bold text-[#00a884]"><RefreshCw className={`inline h-4 w-4 ${busy ? 'animate-spin' : ''}`} /> Atualizar</button></div>
       </div>
 
       {!hasSession && <div className="rounded-xl border border-white/10 p-4">

@@ -10,7 +10,7 @@ export const participantLabel = (name?: string | null, jid?: string | null, phon
   const displayPhone = participantPhone(jid, phone);
   if (displayName) return displayName;
   if (displayPhone) return displayPhone;
-  return 'Participante';
+  return jid?.endsWith('@lid') ? 'Participante' : jid?.trim() || 'Participante';
 };
 type ParticipantIdentity = { jid: string; providerId?: string; lid?: string; phoneJid?: string; phone?: string; phoneNumber?: string };
 export const participantIdentityKeys = (participant: ParticipantIdentity) => {

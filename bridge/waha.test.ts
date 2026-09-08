@@ -72,6 +72,11 @@ describe('WAHA session transport', () => {
     await expect(wahaTransport.getGroupMetadata('empresa', '1@g.us')).resolves.toMatchObject({ id: '1@g.us', subject: 'Equipe', description: 'Descrição', participants: [{ jid: '5511999999999@c.us', name: 'Ana', phoneNumber: '5511999999999', admin: 'admin' }] });
   });
 
+  it('preserva LID e PN como aliases técnicos do mesmo participante', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ JID: '1@g.us', Participants: [{ JID: '19696904601705@lid', LID: '19696904601705@lid', PN: '554497755329@c.us', DisplayName: 'Maria' }] }))));
+    await expect(wahaTransport.getGroupMetadata('empresa', '1@g.us')).resolves.toMatchObject({ participants: [{ jid: '19696904601705@lid', lid: '19696904601705@lid', phoneJid: '554497755329@c.us', phoneNumber: '554497755329', name: 'Maria' }] });
+  });
+
   it('uses the WAHA GOWS reaction endpoint and payload', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('{}'));
     vi.stubGlobal('fetch', fetchMock);

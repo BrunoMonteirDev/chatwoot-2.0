@@ -23,13 +23,14 @@ import { bridgeMetrics } from './metrics.js';
 import { enforceRateLimit } from './rateLimit.js';
 import { wahaTransport, WahaApiError } from './waha.js';
 import { WahaSessionOwnershipError, WahaSessionStore } from './wahaSessionStore.js';
+import { unavailableOwnedWahaSession } from './wahaSessionFallback.js';
 import { deleteWahaInbox } from './wahaInboxDeletion.js';
 import { retryPendingWahaCleanup } from './wahaPendingCleanup.js';
 import { normalizeWahaMessageId, parseIncomingWahaGroupLifecycle, parseIncomingWahaMessage, parseIncomingWahaMutation, parseIncomingWahaReaction, parseWahaHistoryMessage, parseWahaWebhook, wahaGroupSourceId, type IncomingWahaMessage } from './wahaEvent.js';
 import { createTrackId } from './track.js';
 import { WahaHistoryStore, type WahaHistoryJob, type WahaHistoryRange } from './wahaHistoryStore.js';
 import { connectionStatusPatch, evolutionConnectionStatus, metaConnectionStatus, type ConnectionStatus } from './connectionStatus.js';
-import { groupMetadataCache, type GroupMetadata } from './groupMetadata.js';
+import { groupMetadataCache, persistedGroupMetadata, type GroupMetadata } from './groupMetadata.js';
 import { contactProfileSyncPlan } from './contactProfile.js';
 import { resolveGroupParticipantIdentity } from './groupParticipantIdentity.js';
 
@@ -154,29 +155,39 @@ app.get('/groups/metadata', async (request, response) => {
   const inboxId = Number(request.query.inboxId); const conversationId = Number(request.query.conversationId);
   const accountId = Number(request.query.accountId);
   if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !Number.isInteger(conversationId)) return response.status(400).json({ error: 'Conta, inbox e conversa são obrigatórias.' });
+  const sessionHeaders = chatwootSessionHeaders(request);
+  if (!sessionHeaders) return response.status(401).json({ error: 'Unauthorized' });
   try {
-    const { inbox, target } = await chatwootBridge.withAccount(accountId, async () => ({
-      inbox: await chatwootBridge.findWhatsAppInboxById(inboxId),
-      target: await chatwootBridge.conversationGroupTargetDetails(conversationId, inboxId),
-    }));
+    const [inbox, target] = await Promise.all([
+      chatwootBridge.findWhatsAppInboxByIdForSession(accountId, inboxId, sessionHeaders),
+      chatwootBridge.conversationGroupTargetDetailsForSession(accountId, conversationId, inboxId, sessionHeaders),
+    ]);
     const groupJid = target.groupJid;
     const transport = groupTransport(inbox.configuration, request.query.transport);
     if (!transport) return response.status(409).json({ error: 'Não foi possível determinar o transporte deste grupo.', category: 'transport_unavailable' });
     if (transport === 'meta_cloud') return response.status(422).json({ error: 'Metadados de grupos não estão disponíveis na Meta Cloud.', category: 'unsupported_operation' });
     const cached = groupMetadataCache.get(transport, groupJid);
-    const metadata = cached || groupMetadataCache.set(await loadGroupMetadata(transport, inbox.configuration, groupJid));
+    let metadata: GroupMetadata;
+    let providerUnavailable = false;
+    try { metadata = cached || groupMetadataCache.set(await loadGroupMetadata(transport, inbox.configuration, groupJid)); }
+    catch (error) {
+      const persisted = target.persistedMetadata && persistedGroupMetadata(groupJid, transport, target.persistedMetadata);
+      if (!persisted) throw error;
+      providerUnavailable = true;
+      metadata = persisted;
+    }
     // Persist even when metadata came from the five-minute cache. This fixes
     // groups opened before the subject-sync existed without another provider
     // request, while a persistence failure must never hide valid metadata.
     const participants = metadata.participants.map((participant) => {
-      const identity = resolveGroupParticipantIdentity({ participant: participant.jid, participantAlt: participant.phoneNumber && /^\d{8,15}@(c\.us|s\.whatsapp\.net)$/.test(participant.phoneNumber) ? participant.phoneNumber : undefined, phone: participant.phoneNumber, name: participant.name, avatarUrl: participant.avatarUrl });
+      const identity = resolveGroupParticipantIdentity({ participant: participant.jid, participantAlt: participant.phoneJid || participant.lid, phone: participant.phoneNumber, name: participant.name, avatarUrl: participant.avatarUrl });
       return { ...participant, ...identity, jid: participant.jid, name: identity.displayName || participant.name };
     });
     if (target.contactId) {
       try { await chatwootBridge.saveEvolutionGroup(target.contactId, groupJid, metadata.subject || groupJid, { avatarUrl: metadata.avatarUrl, description: metadata.description, participants }); }
       catch (error) { console.warn('[groups] could not persist provider subject', { conversationId, groupJid, error: error instanceof Error ? error.message : 'unknown' }); }
     }
-    return response.json({ group: { ...metadata, participants, memberCount: participants.length }, cached: Boolean(cached) });
+    return response.json({ group: { ...metadata, participants, memberCount: participants.length }, cached: Boolean(cached), providerUnavailable });
   } catch (error) { return response.status(502).json({ error: error instanceof Error ? error.message : 'Não foi possível carregar o grupo.' }); }
 });
 
@@ -474,10 +485,10 @@ const wahaContext = async (request: express.Request, response: express.Response,
   // itself—profile auth and an account-scoped inbox lookup still follow.
   const number = (value: unknown) => typeof value === 'number' ? value : typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : NaN;
   const accountId = number(source.accountId); const inboxId = number(source.inboxId);
-  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId)) { response.status(403).json({ error: 'WAHA session is not available for this inbox.' }); return null; }
+  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId)) { response.status(400).json({ error: 'Invalid inbox context.' }); return null; }
   const sessionHeaders = chatwootSessionHeaders(request);
   if (!sessionHeaders) { response.status(401).json({ error: 'Unauthorized' }); return null; }
-  try { await chatwootBridge.findApiInboxByIdForSession(accountId as number, inboxId as number, sessionHeaders); return { accountId: accountId as number, inboxId: inboxId as number }; }
+  try { const inbox = await chatwootBridge.findApiInboxByIdForSession(accountId as number, inboxId as number, sessionHeaders); return { accountId: accountId as number, inboxId: inboxId as number, inbox, sessionHeaders }; }
   catch { response.status(403).json({ error: 'WAHA session is not available for this inbox.' }); return null; }
 };
 const wahaOwnershipResponse = (response: express.Response, error: unknown) => {
@@ -512,8 +523,10 @@ app.get('/providers/whatsapp/inboxes/:inboxId/connection', async (request, respo
   if (!Number.isInteger(accountId) || !Number.isInteger(inboxId)) return response.status(400).json({ error: 'Invalid inbox context.' });
   const headers = chatwootSessionHeaders(request);
   if (!headers) return response.status(401).json({ error: 'Unauthorized' });
+  let inbox: Awaited<ReturnType<typeof chatwootBridge.findApiInboxByIdForSession>>;
+  try { inbox = await chatwootBridge.findApiInboxByIdForSession(accountId, inboxId, headers); }
+  catch { return response.status(403).json({ error: 'WhatsApp inbox is not available for this account.' }); }
   try {
-    const inbox = await chatwootBridge.findApiInboxByIdForSession(accountId, inboxId, headers);
     const configuration = transportConfigurationForInbox(inbox.additionalAttributes);
     if (!configuration) return response.json({ applicable: false, sendAllowed: true });
     const transport = resolveOutgoingTransport({ configuration, chatType });
@@ -537,23 +550,37 @@ app.get('/providers/whatsapp/inboxes/:inboxId/connection', async (request, respo
     } else {
       status = metaConnectionStatus(inbox.additionalAttributes.meta_connection_status, Boolean(await metaConfigs.get(inboxId)));
     }
-    await saveConnectionStatus(accountId, inboxId, transport, status);
+    await saveConnectionStatus(accountId, inboxId, transport, status).catch(error => console.warn('[connection] could not persist provider status', { accountId, inboxId, transport, error: error instanceof Error ? error.message : 'unknown' }));
     return response.json({ applicable: true, transport, status, sendAllowed: status === 'connected' });
   } catch (error) {
-    return response.status(403).json({ error: 'WhatsApp inbox is not available for this account.' });
+    console.warn('[connection] provider status unavailable', { accountId, inboxId, error: error instanceof Error ? error.message : 'unknown' });
+    return response.json({ applicable: true, status: 'error', sendAllowed: false });
   }
 });
 // Controlled one-time adoption for inboxes configured before ownership storage
 // existed. The bridge verifies the account-scoped Chatwoot inbox itself; it
 // never adopts an arbitrary browser-provided session name.
-const adoptLegacyWahaOwnership = async (accountId: number, inboxId: number) => {
-  const inbox = await chatwootBridge.withAccount(accountId, () => chatwootBridge.findApiInboxById(inboxId));
-  const sessionName = inbox.additionalAttributes.waha_session_name;
-  const transports = transportConfigurationForInbox(inbox.additionalAttributes)?.transports || [];
+const adoptLegacyWahaOwnership = async (accountId: number, inboxId: number, validatedAttributes?: Record<string, unknown>) => {
+  const owned = await wahaSessions.list(accountId, inboxId);
+  if (owned.length) return owned[0];
+  const attributes = validatedAttributes || (await chatwootBridge.withAccount(accountId, () => chatwootBridge.findApiInboxById(inboxId))).additionalAttributes;
+  const sessionName = attributes.waha_session_name;
+  const transports = transportConfigurationForInbox(attributes)?.transports || [];
   if (typeof sessionName !== 'string' || !validWahaSessionName(sessionName) || !transports.includes('waha')) return null;
   const existing = await wahaSessions.get(sessionName);
   if (existing) return existing;
   return wahaSessions.reserve({ accountId, inboxId, sessionName });
+};
+const assertOrAdoptOwnedWahaSession = async (context: Awaited<ReturnType<typeof wahaContext>> & {}, sessionName: string) => {
+  try { return await wahaSessions.assertOwned(context.accountId, context.inboxId, sessionName); }
+  catch (error) {
+    if (!(error instanceof WahaSessionOwnershipError) || error.code !== 'not_found') throw error;
+    const declared = context.inbox.additionalAttributes.waha_session_name;
+    const transports = transportConfigurationForInbox(context.inbox.additionalAttributes)?.transports || [];
+    if (declared !== sessionName || !transports.includes('waha')) throw error;
+    await wahaSessions.reserve({ accountId: context.accountId, inboxId: context.inboxId, sessionName });
+    return wahaSessions.assertOwned(context.accountId, context.inboxId, sessionName);
+  }
 };
 const wahaErrorResponse = (response: express.Response, error: unknown) => {
   // WAHA responses are normalized before reaching the browser. Keep enough
@@ -824,13 +851,13 @@ app.get('/providers/waha/sessions', async (request, response) => {
   if (!(await requireBridgeAdministrator(request, response))) return;
   const context = await wahaContext(request, response, request.query as Record<string, unknown>); if (!context) return;
   try {
-    await adoptLegacyWahaOwnership(context.accountId, context.inboxId);
+    await adoptLegacyWahaOwnership(context.accountId, context.inboxId, context.inbox.additionalAttributes);
     const owned = await wahaSessions.list(context.accountId, context.inboxId);
     const sessions = await Promise.all(owned.map(async ownership => {
-      try { const session = await wahaTransport.getSession(ownership.sessionName); await wahaSessions.update(ownership.sessionName, { status: session.status, engine: session.engine, phone: session.me?.id }); return session; }
-      catch (error) { if (error instanceof WahaApiError && error.status === 404) return null; throw error; }
+      try { const session = await wahaTransport.getSession(ownership.sessionName); await wahaSessions.update(ownership.sessionName, { status: session.status, engine: session.engine, phone: session.me?.id }); return { ...session, linked: true }; }
+      catch { return unavailableOwnedWahaSession(ownership); }
     }));
-    return response.json({ sessions: sessions.filter((item): item is NonNullable<typeof item> => Boolean(item)) });
+    return response.json({ sessions });
   }
   catch (error) { return wahaErrorResponse(response, error); }
 });
@@ -843,7 +870,7 @@ app.post('/providers/waha/sessions', async (request, response) => {
   const generatedName = typeof sessionName === 'string' && validWahaSessionName(sessionName) ? sessionName : `waha_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
   if ((sessionName !== undefined && !validWahaSessionName(sessionName)) || (engine !== undefined && (typeof engine !== 'string' || !/^[A-Z0-9_-]{2,40}$/.test(engine)))) return response.status(400).json({ error: 'Invalid WAHA session request.' });
   try {
-    await adoptLegacyWahaOwnership(context.accountId, context.inboxId);
+    await adoptLegacyWahaOwnership(context.accountId, context.inboxId, context.inbox.additionalAttributes);
     // Ownership is durable, while WAHA sessions can be removed manually during
     // recovery. Reconcile stale ownership records before deciding that an inbox
     // still has a connection.
@@ -870,28 +897,28 @@ app.post('/providers/waha/sessions', async (request, response) => {
 app.get('/providers/waha/sessions/:sessionName', async (request, response) => {
   if (!(await requireBridgeAdministrator(request, response))) return;
   if (!validWahaSessionName(request.params.sessionName)) return response.status(400).json({ error: 'Invalid WAHA session name.' }); const context = await wahaContext(request, response, request.query as Record<string, unknown>); if (!context) return;
-  try { await wahaSessions.assertOwned(context.accountId, context.inboxId, request.params.sessionName); const session = await wahaTransport.getSession(request.params.sessionName); await saveConnectionStatus(context.accountId, context.inboxId, 'waha', session.connectionStatus); return response.json({ session }); }
+  try { await assertOrAdoptOwnedWahaSession(context, request.params.sessionName); const session = await wahaTransport.getSession(request.params.sessionName); await saveConnectionStatus(context.accountId, context.inboxId, 'waha', session.connectionStatus).catch(() => undefined); return response.json({ session: { ...session, linked: true } }); }
   catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
 });
 
 app.post('/providers/waha/sessions/:sessionName/start', async (request, response) => {
   if (!(await requireBridgeAdministrator(request, response))) return;
   if (!validWahaSessionName(request.params.sessionName)) return response.status(400).json({ error: 'Invalid WAHA session name.' }); const context = await wahaContext(request, response, request.body as Record<string, unknown>); if (!context) return;
-  try { await wahaSessions.assertOwned(context.accountId, context.inboxId, request.params.sessionName); const session = await wahaTransport.startSession(request.params.sessionName); await wahaSessions.update(session.name, { status: session.status, engine: session.engine, phone: session.me?.id }); await saveConnectionStatus(context.accountId, context.inboxId, 'waha', session.connectionStatus); return response.json({ session }); }
+  try { await assertOrAdoptOwnedWahaSession(context, request.params.sessionName); const session = await wahaTransport.startSession(request.params.sessionName); await wahaSessions.update(session.name, { status: session.status, engine: session.engine, phone: session.me?.id }); await saveConnectionStatus(context.accountId, context.inboxId, 'waha', session.connectionStatus).catch(() => undefined); return response.json({ session: { ...session, linked: true } }); }
   catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
 });
 
 app.post('/providers/waha/sessions/:sessionName/restart', async (request, response) => {
   if (!(await requireBridgeAdministrator(request, response))) return;
   if (!validWahaSessionName(request.params.sessionName)) return response.status(400).json({ error: 'Invalid WAHA session name.' }); const context = await wahaContext(request, response, request.body as Record<string, unknown>); if (!context) return;
-  try { await wahaSessions.assertOwned(context.accountId, context.inboxId, request.params.sessionName); const session = await wahaTransport.restartSession(request.params.sessionName); await wahaSessions.update(session.name, { status: session.status, engine: session.engine, phone: session.me?.id }); await saveConnectionStatus(context.accountId, context.inboxId, 'waha', session.connectionStatus); return response.json({ session }); }
+  try { await assertOrAdoptOwnedWahaSession(context, request.params.sessionName); const session = await wahaTransport.restartSession(request.params.sessionName); await wahaSessions.update(session.name, { status: session.status, engine: session.engine, phone: session.me?.id }); await saveConnectionStatus(context.accountId, context.inboxId, 'waha', session.connectionStatus).catch(() => undefined); return response.json({ session: { ...session, linked: true } }); }
   catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
 });
 
 app.post('/providers/waha/sessions/:sessionName/logout', async (request, response) => {
   if (!(await requireBridgeAdministrator(request, response))) return;
   if (!validWahaSessionName(request.params.sessionName)) return response.status(400).json({ error: 'Invalid WAHA session name.' }); const context = await wahaContext(request, response, request.body as Record<string, unknown>); if (!context) return;
-  try { await wahaSessions.assertOwned(context.accountId, context.inboxId, request.params.sessionName); await wahaTransport.logoutSession(request.params.sessionName); await wahaSessions.update(request.params.sessionName, { status: 'STOPPED' }); await saveConnectionStatus(context.accountId, context.inboxId, 'waha', 'disconnected'); return response.status(204).end(); }
+  try { await assertOrAdoptOwnedWahaSession(context, request.params.sessionName); await wahaTransport.logoutSession(request.params.sessionName); await wahaSessions.update(request.params.sessionName, { status: 'STOPPED' }); await saveConnectionStatus(context.accountId, context.inboxId, 'waha', 'disconnected').catch(() => undefined); return response.status(204).end(); }
   catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
 });
 
@@ -900,7 +927,7 @@ app.delete('/providers/waha/sessions/:sessionName', async (request, response) =>
   if (!validWahaSessionName(request.params.sessionName)) return response.status(400).json({ error: 'Invalid WAHA session name.' });
   const context = await wahaContext(request, response, request.body as Record<string, unknown>); if (!context) return;
   try {
-    await wahaSessions.assertOwned(context.accountId, context.inboxId, request.params.sessionName);
+    await assertOrAdoptOwnedWahaSession(context, request.params.sessionName);
     await wahaTransport.deleteSession(request.params.sessionName);
     await wahaSessions.remove(context.accountId, context.inboxId, request.params.sessionName);
     await clearWahaInbox(context.accountId, context.inboxId);
@@ -918,8 +945,8 @@ app.delete('/providers/waha/inboxes/:inboxId', async (request, response) => {
   try {
     await deleteWahaInbox(context.accountId, inboxId, {
       chatwoot: {
-        findInbox: () => chatwootBridge.withAccount(context.accountId, () => chatwootBridge.findApiInboxById(inboxId)),
-        deleteInbox: () => chatwootBridge.withAccount(context.accountId, () => chatwootBridge.deleteInbox(inboxId)),
+        findInbox: async () => ({ additionalAttributes: context.inbox.additionalAttributes }),
+        deleteInbox: () => chatwootBridge.deleteInboxForSession(context.accountId, inboxId, context.sessionHeaders),
       },
       sessions: wahaSessions,
       waha: wahaTransport,
@@ -933,7 +960,7 @@ app.get('/providers/waha/sessions/:sessionName/qr', async (request, response) =>
   if (!(await requireBridgeAdministrator(request, response))) return;
   if (!validWahaSessionName(request.params.sessionName)) return response.status(400).json({ error: 'Invalid WAHA session name.' }); const context = await wahaContext(request, response, request.query as Record<string, unknown>); if (!context) return;
   try {
-    await wahaSessions.assertOwned(context.accountId, context.inboxId, request.params.sessionName);
+    await assertOrAdoptOwnedWahaSession(context, request.params.sessionName);
     // GOWS invalidates an unscanned QR after its short pairing window and
     // reports FAILED. "Mostrar QR Code" is an explicit reconnect action, so
     // renew that session before asking the QR endpoint (which only accepts
@@ -960,7 +987,7 @@ app.post('/providers/waha/sessions/:sessionName/associate', async (request, resp
   if (!validWahaSessionName(request.params.sessionName)) return response.status(400).json({ error: 'Invalid WAHA session name.' });
   const context = await wahaContext(request, response, request.body as Record<string, unknown>); if (!context) return;
   try {
-    const ownership = await wahaSessions.assertOwned(context.accountId, context.inboxId, request.params.sessionName);
+    const ownership = await assertOrAdoptOwnedWahaSession(context, request.params.sessionName);
     await configureWahaInbox(context.accountId, context.inboxId, ownership.sessionName, ownership.status);
     return response.status(200).json({ ok: true });
   } catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }

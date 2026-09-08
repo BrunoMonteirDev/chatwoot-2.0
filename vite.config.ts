@@ -7,6 +7,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const chatwootTarget = env.VITE_CHATWOOT_PROXY_TARGET || 'http://localhost:3000';
   const chatwootViteTarget = env.VITE_CHATWOOT_VITE_TARGET || 'http://localhost:3036';
+  const bridgeTarget = env.VITE_BRIDGE_PROXY_TARGET || 'http://localhost:3100';
   const superAdminProxy = {
     target: chatwootTarget,
     changeOrigin: true,
@@ -31,6 +32,7 @@ export default defineConfig(({ mode }) => {
         '/auth': { target: chatwootTarget, changeOrigin: true },
         '/api': { target: chatwootTarget, changeOrigin: true },
         '/cable': { target: chatwootTarget, changeOrigin: true, ws: true },
+        '/bridge': { target: bridgeTarget, changeOrigin: true, rewrite: path => path.replace(/^\/bridge/, '') },
         '/super_admin': superAdminProxy,
         '/vite-dev': { target: chatwootViteTarget, changeOrigin: true },
       },

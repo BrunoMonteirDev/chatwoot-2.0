@@ -135,8 +135,8 @@ const request = async <T>(path: string, init: RequestInit = {}, apiToken = false
 // session for the account/inbox ownership check instead of relying on the
 // bridge service token. This keeps the check tenant-scoped and makes the
 // local development bridge work before the service-account endpoint exists.
-const requestWithSession = async <T>(path: string, sessionHeaders: Headers): Promise<T> => {
-  const response = await fetch(`${config.chatwootBaseUrl}${path}`, { headers: sessionHeaders });
+const requestWithSession = async <T>(path: string, sessionHeaders: Headers, init: RequestInit = {}): Promise<T> => {
+  const response = await fetch(`${config.chatwootBaseUrl}${path}`, { ...init, headers: sessionHeaders });
   const raw = await response.text();
   let body: unknown;
   try { body = raw ? JSON.parse(raw) : undefined; } catch { body = undefined; }
@@ -245,6 +245,15 @@ export const chatwootBridge = {
     if (!inbox?.inbox_identifier) throw new Error(`A inbox ${inboxId} não pertence a esta conta ou não é uma API inbox.`);
     return { id: inbox.id, identifier: inbox.inbox_identifier, additionalAttributes: inbox.additional_attributes || {} };
   },
+  async deleteInboxForSession(accountId: number, inboxId: number, sessionHeaders: Headers) {
+    await requestWithSession(`/api/v1/accounts/${accountId}/inboxes/${inboxId}`, sessionHeaders, { method: 'DELETE' });
+  },
+  async findWhatsAppInboxByIdForSession(accountId: number, inboxId: number, sessionHeaders: Headers) {
+    const inbox = await this.findApiInboxByIdForSession(accountId, inboxId, sessionHeaders);
+    const configuration = transportConfigurationForInbox(inbox.additionalAttributes);
+    if (!configuration) throw new Error(`A inbox ${inboxId} não é uma inbox WhatsApp configurada.`);
+    return { id: inbox.id, configuration };
+  },
   async isApiInbox(inboxId: number) {
     return (await this.listApiInboxes()).some(inbox => inbox.id === inboxId);
   },
@@ -344,7 +353,7 @@ export const chatwootBridge = {
       whatsapp_chat_type: 'group', whatsapp_group_jid: groupJid,
       ...(details.avatarUrl ? { whatsapp_group_avatar_url: details.avatarUrl } : {}),
       ...(details.description !== undefined ? { whatsapp_group_description: details.description } : {}),
-      ...(details.participants ? { whatsapp_group_participants: details.participants.map(item => ({ jid: item.jid, ...(item.phoneNumber ? { phone: item.phoneNumber } : {}), ...(item.name ? { name: item.name } : {}), ...(item.avatarUrl ? { avatar_url: item.avatarUrl } : {}), ...(item.admin !== undefined ? { admin: item.admin } : {}) })) } : {}),
+      ...(details.participants ? { whatsapp_group_participants: details.participants.map(item => ({ jid: item.jid, ...('lid' in item && item.lid ? { lid: item.lid } : {}), ...('phoneJid' in item && item.phoneJid ? { phone_jid: item.phoneJid } : {}), ...(item.phoneNumber ? { phone: item.phoneNumber } : {}), ...(item.name ? { name: item.name } : {}), ...(item.avatarUrl ? { avatar_url: item.avatarUrl } : {}), ...(item.admin !== undefined ? { admin: item.admin } : {}) })) } : {}),
       ...(details.participantAction ? { whatsapp_group_last_participant_action: details.participantAction } : {}),
     } }),
   }, true),
@@ -393,6 +402,7 @@ export const chatwootBridge = {
     const conversation = await request<ConversationTarget>(`/api/v1/accounts/${currentAccountId()}/conversations/${conversationId}`, {}, true);
     if (conversation.inbox_id !== inboxId) throw new Error('A conversa não pertence à inbox informada.');
     const sourceId = conversation.contact_inbox?.source_id;
+    const attributes = conversation.meta?.sender?.additional_attributes;
     // The account conversation serializer omits contact_inbox on some
     // Chatwoot versions. Groups still carry their canonical JID on the
     // sender's additional attributes, so use it as the authoritative fallback.
@@ -403,8 +413,30 @@ export const chatwootBridge = {
     try {
       const groupJid = decodeURIComponent(rawGroupJid);
       if (!groupJid.endsWith('@g.us')) throw new Error('invalid group');
-      return { groupJid, contactId: conversation.meta?.sender?.id };
+      return { groupJid, contactId: conversation.meta?.sender?.id, persistedMetadata: {
+        subject: conversation.meta?.sender?.name,
+        avatarUrl: typeof attributes?.whatsapp_group_avatar_url === 'string' ? attributes.whatsapp_group_avatar_url : conversation.meta?.sender?.thumbnail || undefined,
+        description: typeof attributes?.whatsapp_group_description === 'string' ? attributes.whatsapp_group_description : undefined,
+        participants: Array.isArray(attributes?.whatsapp_group_participants) ? attributes.whatsapp_group_participants : [],
+      } };
     } catch { throw new Error('A conversa não é um grupo WhatsApp válido.'); }
+  },
+  async conversationGroupTargetDetailsForSession(accountId: number, conversationId: number, inboxId: number, sessionHeaders: Headers) {
+    const conversation = await requestWithSession<ConversationTarget>(`/api/v1/accounts/${accountId}/conversations/${conversationId}`, sessionHeaders);
+    if (conversation.inbox_id !== inboxId) throw new Error('A conversa não pertence à inbox informada.');
+    const attributes = conversation.meta?.sender?.additional_attributes;
+    const encoded = typeof conversation.contact_inbox?.source_id === 'string' && conversation.contact_inbox.source_id.match(/^whatsapp:group:(.+)$/)?.[1];
+    const declaredJid = attributes?.whatsapp_group_jid;
+    const rawGroupJid = encoded || (typeof declaredJid === 'string' ? declaredJid : null);
+    if (!rawGroupJid) throw new Error('A conversa não é um grupo WhatsApp válido.');
+    const groupJid = decodeURIComponent(rawGroupJid);
+    if (!groupJid.endsWith('@g.us')) throw new Error('A conversa não é um grupo WhatsApp válido.');
+    return { groupJid, contactId: conversation.meta?.sender?.id, persistedMetadata: {
+      subject: conversation.meta?.sender?.name,
+      avatarUrl: typeof attributes?.whatsapp_group_avatar_url === 'string' ? attributes.whatsapp_group_avatar_url : conversation.meta?.sender?.thumbnail || undefined,
+      description: typeof attributes?.whatsapp_group_description === 'string' ? attributes.whatsapp_group_description : undefined,
+      participants: Array.isArray(attributes?.whatsapp_group_participants) ? attributes.whatsapp_group_participants : [],
+    } };
   },
   async conversationGroupTarget(conversationId: number, inboxId: number) {
     return (await this.conversationGroupTargetDetails(conversationId, inboxId)).groupJid;

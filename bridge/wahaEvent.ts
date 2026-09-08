@@ -49,7 +49,8 @@ export const parseIncomingWahaMessage = (payload: unknown): IncomingWahaMessage 
   const quoted = record(data.replyTo || data.quotedMsg || data.quotedMessage);
   const unresolved = Object.keys(quoted).length ? { participant: string(quoted.participant), body: string(quoted.body), has_media: quoted.hasMedia === true, ...(mediaFor(quoted) ? { media: mediaFor(quoted) } : {}) } : undefined;
   const participantJid = !fromMe && chatType === 'group' ? (string(data.participant) || string(data.participantAlt) || string(data.sender) || string(data.senderAlt)) : undefined;
-  const participantPhone = participantJid ? phoneFor(participantJid) : undefined;
+  const participantAliases = [string(data.participant), string(data.participantAlt), string(data.sender), string(data.senderAlt)].filter((value): value is string => Boolean(value));
+  const participantPhone = participantAliases.map(phoneFor).find((value): value is string => Boolean(value));
   const participantName = string(data.participantName) || string(data.notifyName) || string(data.pushName) || contactName;
   return { ...base, externalId, providerMessageKey: rawExternalId, session, chatId, remoteJid: chatId, fromMe,
     sourceId: chatType === 'group' ? wahaGroupSourceId(chatId) : `whatsapp:${phone || `lid:${lid || identity}`}`,
