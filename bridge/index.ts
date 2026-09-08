@@ -188,7 +188,7 @@ app.get('/groups/metadata', async (request, response) => {
       return { ...participant, ...identity, jid: participant.jid, name: identity.displayName || participant.name };
     });
     if (target.contactId) {
-      try { await chatwootBridge.saveEvolutionGroup(target.contactId, groupJid, metadata.subject || groupJid, { avatarUrl: metadata.avatarUrl, description: metadata.description, participants }); }
+      try { await chatwootBridge.withAccount(accountId, () => chatwootBridge.saveEvolutionGroup(target.contactId!, groupJid, metadata.subject || groupJid, { avatarUrl: metadata.avatarUrl, description: metadata.description, participants })); }
       catch (error) { console.warn('[groups] could not persist provider subject', { conversationId, groupJid, error: error instanceof Error ? error.message : 'unknown' }); }
     }
     return response.json({ group: { ...metadata, participants, memberCount: participants.length }, cached: Boolean(cached), providerUnavailable });
