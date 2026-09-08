@@ -166,6 +166,10 @@ app.get('/groups/metadata', async (request, response) => {
     const transport = groupTransport(inbox.configuration, request.query.transport);
     if (!transport) return response.status(409).json({ error: 'Não foi possível determinar o transporte deste grupo.', category: 'transport_unavailable' });
     if (transport === 'meta_cloud') return response.status(422).json({ error: 'Metadados de grupos não estão disponíveis na Meta Cloud.', category: 'unsupported_operation' });
+    if (transport === 'waha') {
+      if (!inbox.configuration.wahaSessionName) return response.status(409).json({ error: 'A sessão WAHA desta inbox não está configurada.', category: 'transport_unavailable' });
+      await wahaSessions.assertOwned(accountId, inboxId, inbox.configuration.wahaSessionName);
+    }
     const cached = groupMetadataCache.get(transport, groupJid);
     let metadata: GroupMetadata;
     let providerUnavailable = false;
@@ -188,7 +192,10 @@ app.get('/groups/metadata', async (request, response) => {
       catch (error) { console.warn('[groups] could not persist provider subject', { conversationId, groupJid, error: error instanceof Error ? error.message : 'unknown' }); }
     }
     return response.json({ group: { ...metadata, participants, memberCount: participants.length }, cached: Boolean(cached), providerUnavailable });
-  } catch (error) { return response.status(502).json({ error: error instanceof Error ? error.message : 'Não foi possível carregar o grupo.' }); }
+  } catch (error) {
+    if (error instanceof WahaSessionOwnershipError) return response.status(error.code === 'not_found' ? 409 : 403).json({ error: 'A sessão WAHA não pertence a esta inbox.', category: 'transport_unavailable' });
+    return response.status(502).json({ error: error instanceof Error ? error.message : 'Não foi possível carregar o grupo.' });
+  }
 });
 
 app.get('/contacts/profile', async (request, response) => {

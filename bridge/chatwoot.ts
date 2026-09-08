@@ -249,10 +249,20 @@ export const chatwootBridge = {
     await requestWithSession(`/api/v1/accounts/${accountId}/inboxes/${inboxId}`, sessionHeaders, { method: 'DELETE' });
   },
   async findWhatsAppInboxByIdForSession(accountId: number, inboxId: number, sessionHeaders: Headers) {
-    const inbox = await this.findApiInboxByIdForSession(accountId, inboxId, sessionHeaders);
-    const configuration = transportConfigurationForInbox(inbox.additionalAttributes);
-    if (!configuration) throw new Error(`A inbox ${inboxId} não é uma inbox WhatsApp configurada.`);
-    return { id: inbox.id, configuration };
+    const response = await requestWithSession<{ payload: ApiInbox[] }>(`/api/v1/accounts/${accountId}/inboxes`, sessionHeaders);
+    const inbox = response.payload.find(item => item.id === inboxId);
+    if (!inbox) throw new Error(`A inbox ${inboxId} não pertence a esta conta.`);
+    if (inbox.channel_type === 'Channel::Api') {
+      const configuration = transportConfigurationForInbox(inbox.additional_attributes || {});
+      if (!inbox.inbox_identifier || !configuration) throw new Error(`A inbox ${inboxId} não é uma inbox WhatsApp configurada.`);
+      return { id: inbox.id, configuration };
+    }
+    const attributes = inbox.additional_attributes || {};
+    const sessionName = attributes.hybrid_waha_session;
+    if (inbox.channel_type !== 'Channel::Whatsapp' || attributes.hybrid_enabled !== true || typeof sessionName !== 'string' || !sessionName.trim()) {
+      throw new Error(`A inbox ${inboxId} não possui WAHA híbrido configurado.`);
+    }
+    return { id: inbox.id, configuration: { mode: 'hybrid' as const, transports: ['meta_cloud', 'waha'] as WhatsAppTransport[], evolutionInstanceName: null, wahaSessionName: sessionName } };
   },
   async isApiInbox(inboxId: number) {
     return (await this.listApiInboxes()).some(inbox => inbox.id === inboxId);

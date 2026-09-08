@@ -4,6 +4,27 @@ import { chatwootBridge } from './chatwoot';
 afterEach(() => vi.unstubAllGlobals());
 
 describe('chatwootBridge media messages', () => {
+  it('aceita uma API inbox WAHA no lookup account-scoped de grupos', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ payload: [{ id: 5, channel_type: 'Channel::Api', inbox_identifier: 'api-5', additional_attributes: { whatsapp_transports: ['waha'], waha_session_name: 'web-5' } }] }), { status: 200 })));
+    await expect(chatwootBridge.findWhatsAppInboxByIdForSession(1, 5, new Headers())).resolves.toMatchObject({ id: 5, configuration: { transports: ['waha'], wahaSessionName: 'web-5' } });
+  });
+
+  it('aceita uma inbox Meta nativa somente com configuração híbrida WAHA server-side', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ payload: [{ id: 5, channel_type: 'Channel::Whatsapp', additional_attributes: { hybrid_enabled: true, hybrid_waha_session: 'hybrid-a1-i5' } }] }), { status: 200 })));
+    await expect(chatwootBridge.findWhatsAppInboxByIdForSession(1, 5, new Headers())).resolves.toMatchObject({ id: 5, configuration: { mode: 'hybrid', transports: ['meta_cloud', 'waha'], wahaSessionName: 'hybrid-a1-i5' } });
+  });
+
+  it('rejeita Meta nativa sem binding híbrido e nunca consulta provider', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ payload: [{ id: 5, channel_type: 'Channel::Whatsapp', additional_attributes: { hybrid_enabled: false } }] }), { status: 200 })));
+    await expect(chatwootBridge.findWhatsAppInboxByIdForSession(1, 5, new Headers())).rejects.toThrow('não possui WAHA híbrido');
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('não encontra inbox pertencente a outra account no payload account-scoped', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ payload: [{ id: 9, channel_type: 'Channel::Whatsapp', additional_attributes: { hybrid_enabled: true, hybrid_waha_session: 'other' } }] }), { status: 200 })));
+    await expect(chatwootBridge.findWhatsAppInboxByIdForSession(1, 5, new Headers())).rejects.toThrow('não pertence a esta conta');
+  });
+
   it('reutiliza a conversa da mesma inbox quando o contato foi criado manualmente', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ payload: [
       { id: 86, inbox_id: 106, status: 'open', last_activity_at: 100 },
