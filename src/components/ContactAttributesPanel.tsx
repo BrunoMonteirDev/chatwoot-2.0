@@ -133,7 +133,13 @@ export const ContactAttributesPanel: React.FC<Props> = ({
   const [leavingGroup, setLeavingGroup] = useState(false);
 
   useEffect(() => {
-    if (!accountId || !conversationId || !inboxId) return;
+    setGroupMetadata(null);
+    setGroupMembers([]);
+    setGroupError(null);
+    setDescriptionDraft('');
+    // A transport identifies the provider, not whether this is a group.
+    // Private Meta/WAHA conversations must never query group metadata.
+    if (!chat.isGroup || !accountId || !conversationId || !inboxId) return;
     let active = true;
     void groupMetadataClient.get(accountId, inboxId, conversationId, groupTransport).then(({ group }) => {
       if (!active) return;
@@ -145,7 +151,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
       }));
     }).catch(error => { if (active) setGroupError(error instanceof Error ? error.message : 'Não foi possível carregar o grupo.'); });
     return () => { active = false; };
-  }, [accountId, conversationId, inboxId, groupTransport]);
+  }, [chat.isGroup, accountId, conversationId, inboxId, groupTransport]);
 
   const saveDescription = async () => {
     if (!conversationId || !inboxId || !groupMetadata?.transport) return;
@@ -231,6 +237,9 @@ export const ContactAttributesPanel: React.FC<Props> = ({
 
   // Compute common groups from allChats
   const commonGroups = allChats.filter((c) => c.isGroup && c.id !== chat.id);
+
+  // Private contact details are rendered by ContactDetailsPanel.
+  if (!chat.isGroup) return null;
 
   return (
     <div
