@@ -1,4 +1,4 @@
-import { Check, Clock, Download, FileText, History, Image as ImageIcon, Link, Loader2, Mail, Phone, RefreshCw, Save, Tag, User, X } from 'lucide-react';
+import { Check, Clock, Download, FileText, History, Image as ImageIcon, Link, Loader2, Mail, MessageSquare, Phone, RefreshCw, Save, Tag, User, X } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import type { AccountLabel, AssignableAgent, ContactNote, ContactProfile, ConversationAttachmentSummary, ConversationPriority, ConversationSummary, ConversationTeam } from '../domain/currentUser';
 import type { ContactUpdate } from '../integrations/chatwoot/contacts';
@@ -45,6 +45,7 @@ interface Props {
   contactConversationsError?: string | null;
   inboxes?: Inbox[];
   onOpenConversation?: (conversationId: number) => void;
+  onStartConversation?: () => void;
   attachments?: ConversationAttachmentSummary[]; attachmentStatus?: 'idle' | 'loading' | 'ready' | 'error'; attachmentError?: string | null; hasMoreAttachments?: boolean; onLoadMoreAttachments?: () => void; onRetryAttachments?: () => void; messages?: Message[]; onOpenImage?: (url: string, title?: string) => void;
 }
 
@@ -58,7 +59,7 @@ const priorityOptions: { value: ConversationPriority; label: string }[] = [
   { value: 'urgent', label: 'Urgente' },
 ];
 
-export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, isCreatingNote, isDarkMode, panelTitle = 'Dados do contato', profileName, profileAvatarUrl, canSyncWithWhatsApp = false, isSyncingWithWhatsApp = false, onSyncWithWhatsApp, initialTab = 'contact', onTabChange, conversation = null, conversationLabels = [], conversationAgents = [], conversationTeams = [], conversationParticipants = [], managementPendingAction = null, onSetConversationPriority, onAssignConversationAgent, onAssignConversationTeam, onSetConversationLabels, onSetConversationParticipants, onClose, onRetry, onUpdate, onCreateNote, contactConversations = [], contactConversationsStatus = 'idle', contactConversationsError = null, inboxes = [], onOpenConversation, attachments = [], attachmentStatus = 'idle', attachmentError = null, hasMoreAttachments = false, onLoadMoreAttachments, onRetryAttachments, messages = [], onOpenImage }: Props) => {
+export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, isCreatingNote, isDarkMode, panelTitle = 'Dados do contato', profileName, profileAvatarUrl, canSyncWithWhatsApp = false, isSyncingWithWhatsApp = false, onSyncWithWhatsApp, initialTab = 'contact', onTabChange, conversation = null, conversationLabels = [], conversationAgents = [], conversationTeams = [], conversationParticipants = [], managementPendingAction = null, onSetConversationPriority, onAssignConversationAgent, onAssignConversationTeam, onSetConversationLabels, onSetConversationParticipants, onClose, onRetry, onUpdate, onCreateNote, contactConversations = [], contactConversationsStatus = 'idle', contactConversationsError = null, inboxes = [], onOpenConversation, onStartConversation, attachments = [], attachmentStatus = 'idle', attachmentError = null, hasMoreAttachments = false, onLoadMoreAttachments, onRetryAttachments, messages = [], onOpenImage }: Props) => {
   const [tab, setTab] = useState<'contact' | 'attributes' | 'content'>(initialTab);
   const [draft, setDraft] = useState({ name: '', email: '', phoneNumber: '', identifier: '', companyName: '' });
   const [additionalText, setAdditionalText] = useState('{}');
@@ -167,6 +168,7 @@ export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, i
             {contact.companyName && <p className="mt-1 text-xs text-[#8696a0]">{contact.companyName}</p>}
             {contact.phoneNumber && <p className="mt-1 text-xs text-[#53bdeb]">{contact.phoneNumber}</p>}
           </section>
+          {onStartConversation && contact.phoneNumber && <button type="button" onClick={onStartConversation} className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#00a884] px-3 py-2 text-xs font-semibold text-white hover:bg-[#008f72]"><MessageSquare className="h-4 w-4" />Iniciar conversa</button>}
           {canSyncWithWhatsApp && <button type="button" disabled={isSyncingWithWhatsApp} onClick={() => setIsSyncConfirmationOpen(true)} className="flex w-full items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-[#00a884] hover:bg-[#00a884]/10 disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${isSyncingWithWhatsApp ? 'animate-spin' : ''}`} />{isSyncingWithWhatsApp ? 'Sincronizando…' : 'Sincronizar com WhatsApp'}</button>}
           <section className={`rounded-xl border p-3 ${isDarkMode ? 'border-[#222d34] bg-[#182229]/60' : 'border-gray-200 bg-gray-50'}`}>
             <label className="text-[11px] font-bold uppercase tracking-wide text-[#00a884]">Nome<input value={draft.name} onChange={event => setDraft({ ...draft, name: event.target.value })} className={`${input} mt-1.5`} /></label>

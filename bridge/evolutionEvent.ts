@@ -61,6 +61,8 @@ export interface EvolutionGroupParticipant {
   name?: string;
   avatarUrl?: string;
   admin?: string | null;
+  contactId?: number;
+  displayName?: string;
 }
 
 export interface IncomingEvolutionGroupLifecycle {

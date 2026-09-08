@@ -46,6 +46,27 @@ describe('chatwootBridge media messages', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  it('reutiliza Contact da mesma account pelo telefone e preserva o nome editado', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => url.includes('/bridge/access_token')
+      ? Promise.resolve(new Response(JSON.stringify({ api_access_token: 'service-token' }), { status: 200 }))
+      : Promise.resolve(new Response(JSON.stringify({ payload: [{ id: 44, name: 'João editado', phone_number: '+5544999999999', thumbnail: 'manual.jpg' }] }), { status: 200 })));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(chatwootBridge.withAccount(1, () => chatwootBridge.findOrCreateGroupParticipantContact(5, { phoneNumber: '+5544999999999', name: 'Nome WAHA', avatarUrl: 'waha.jpg' })))
+      .resolves.toMatchObject({ id: 44, name: 'João editado', avatarUrl: 'manual.jpg', existing: true });
+    expect(fetchMock.mock.calls.some(call => String(call[0]).endsWith('/contacts'))).toBe(false);
+  });
+
+  it('cria Contact account-scoped somente quando o telefone ainda não existe', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => url.includes('/contacts/search')
+      ? Promise.resolve(new Response(JSON.stringify({ payload: [] }), { status: 200 }))
+      : Promise.resolve(new Response(JSON.stringify({ payload: { contact: { id: 45, name: 'Maria', phone_number: '+5544888888888' }, existing: false } }), { status: 200 })));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(chatwootBridge.withAccount(2, () => chatwootBridge.findOrCreateGroupParticipantContact(7, { phoneNumber: '+5544888888888', name: 'Maria' })))
+      .resolves.toMatchObject({ id: 45, name: 'Maria', existing: false });
+    expect(fetchMock.mock.calls.every(call => String(call[0]).includes('/accounts/2/'))).toBe(true);
+    expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toMatchObject({ inbox_id: 7, phone_number: '+5544888888888' });
+  });
+
   it('reutiliza a conversa da mesma inbox quando o contato foi criado manualmente', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ payload: [
       { id: 86, inbox_id: 106, status: 'open', last_activity_at: 100 },

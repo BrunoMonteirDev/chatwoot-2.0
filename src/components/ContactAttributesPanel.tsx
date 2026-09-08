@@ -45,6 +45,8 @@ import { groupMetadataClient, type GroupMetadata } from '../features/groups/meta
 import { participantColor, participantPhone } from '../features/groups/participant';
 import type { WhatsAppTransport } from '../integrations/whatsapp/provider';
 import { triggerAttachmentDownload } from '../features/attachments/fileUtils';
+import { useContactDetails } from '../features/contacts/useContactDetails';
+import { ContactDetailsPanel } from './ContactDetailsPanel';
 
 interface GroupMember {
   id: string;
@@ -55,6 +57,7 @@ interface GroupMember {
   status?: string;
   isAdmin?: boolean;
   isMe?: boolean;
+  contactId?: number;
   website?: string;
 }
 
@@ -75,6 +78,8 @@ interface Props {
   onOpenImage?: (url: string, title?: string) => void;
   onGroupSubjectResolved?: (subject: string) => void;
   onGroupMetadataResolved?: (metadata: GroupMetadata) => void;
+  initialGroupMetadata?: GroupMetadata | null;
+  onStartParticipantConversation?: (contactId: number) => void;
 }
 
 export const ContactAttributesPanel: React.FC<Props> = ({
@@ -94,6 +99,8 @@ export const ContactAttributesPanel: React.FC<Props> = ({
   onOpenImage,
   onGroupSubjectResolved,
   onGroupMetadataResolved,
+  initialGroupMetadata = null,
+  onStartParticipantConversation,
 }) => {
   // Atributos e Conteúdo têm uma única implementação: ContactDetailsPanel.
   // Este painel permanece apenas como a aba Dados específica de grupos.
@@ -125,8 +132,12 @@ export const ContactAttributesPanel: React.FC<Props> = ({
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberPhone, setNewMemberPhone] = useState('');
 
-  const [groupMembers, setGroupMembers] = useState<GroupMember[]>([]);
-  const [groupMetadata, setGroupMetadata] = useState<GroupMetadata | null>(null);
+  const membersFor = (group: GroupMetadata) => group.participants.map(member => {
+    const phone = participantPhone(member.phoneJid || member.jid, member.phoneNumber || member.phone);
+    return { id: member.jid, name: member.displayName || member.name || phone || 'Participante', phone, avatar: member.avatarUrl, contactId: member.contactId, isAdmin: Boolean(member.admin), status: member.admin === 'superadmin' ? 'Superadministrador' : member.admin ? 'Administrador' : undefined, avatarBg: participantColor(member.jid) };
+  });
+  const [groupMembers, setGroupMembers] = useState<GroupMember[]>(() => initialGroupMetadata ? membersFor(initialGroupMetadata) : []);
+  const [groupMetadata, setGroupMetadata] = useState<GroupMetadata | null>(initialGroupMetadata);
   const [groupError, setGroupError] = useState<string | null>(null);
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState('');
@@ -135,8 +146,8 @@ export const ContactAttributesPanel: React.FC<Props> = ({
   const [leavingGroup, setLeavingGroup] = useState(false);
 
   useEffect(() => {
-    setGroupMetadata(null);
-    setGroupMembers([]);
+    setGroupMetadata(initialGroupMetadata);
+    setGroupMembers(initialGroupMetadata ? membersFor(initialGroupMetadata) : []);
     setGroupError(null);
     setDescriptionDraft('');
     // A transport identifies the provider, not whether this is a group.
@@ -148,10 +159,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
       setGroupMetadata(group); setDescriptionDraft(group.description || '');
       if (group.subject?.trim()) onGroupSubjectResolved?.(group.subject.trim());
       onGroupMetadataResolved?.(group);
-      setGroupMembers(group.participants.map(member => {
-        const phone = participantPhone(member.jid, member.phoneNumber);
-        return { id: member.jid, name: member.displayName || member.name || phone || member.jid, phone: phone || member.jid, avatar: member.avatarUrl, isAdmin: Boolean(member.admin), status: member.admin === 'superadmin' ? 'Superadministrador' : member.admin ? 'Administrador' : undefined, avatarBg: participantColor(member.jid) };
-      }));
+      setGroupMembers(membersFor(group));
     }).catch(error => { if (active) setGroupError(error instanceof Error ? error.message : 'Não foi possível carregar o grupo.'); });
     return () => { active = false; };
   }, [chat.isGroup, accountId, conversationId, inboxId, groupTransport]);
@@ -200,10 +208,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
     setGroupMetadata(group); setDescriptionDraft(group.description || '');
     if (group.subject?.trim()) onGroupSubjectResolved?.(group.subject.trim());
     onGroupMetadataResolved?.(group);
-    setGroupMembers(group.participants.map(member => {
-      const phone = participantPhone(member.jid, member.phoneNumber);
-      return { id: member.jid, name: member.displayName || member.name || phone || member.jid, phone: phone || member.jid, avatar: member.avatarUrl, isAdmin: Boolean(member.admin), status: member.admin === 'superadmin' ? 'Superadministrador' : member.admin ? 'Administrador' : undefined, avatarBg: participantColor(member.jid) };
-    }));
+    setGroupMembers(membersFor(group));
   };
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -241,9 +246,19 @@ export const ContactAttributesPanel: React.FC<Props> = ({
 
   // Compute common groups from allChats
   const commonGroups = allChats.filter((c) => c.isGroup && c.id !== chat.id);
+  const memberContact = useContactDetails(accountId || null, selectedMemberContact?.contactId || null);
+  const updateMemberContact = async (update: Parameters<typeof memberContact.update>[0]) => {
+    const updated = await memberContact.update(update);
+    if (updated && selectedMemberContact) {
+      setGroupMembers(current => current.map(member => member.contactId === updated.id ? { ...member, name: updated.name, phone: updated.phoneNumber || member.phone, avatar: updated.avatarUrl || member.avatar } : member));
+      setSelectedMemberContact(current => current?.contactId === updated.id ? { ...current, name: updated.name, phone: updated.phoneNumber || current.phone, avatar: updated.avatarUrl || current.avatar } : current);
+    }
+    return updated;
+  };
 
   // Private contact details are rendered by ContactDetailsPanel.
   if (!chat.isGroup) return null;
+  if (selectedMemberContact?.contactId) return <ContactDetailsPanel contact={memberContact.contact} notes={memberContact.notes} status={memberContact.status} error={memberContact.error} isSaving={memberContact.isSaving} isCreatingNote={memberContact.isCreatingNote} isDarkMode={isDarkMode} panelTitle="Dados do contato" onClose={() => setSelectedMemberContact(null)} onRetry={memberContact.retry} onUpdate={updateMemberContact} onCreateNote={memberContact.createNote} onStartConversation={onStartParticipantConversation ? () => onStartParticipantConversation(selectedMemberContact.contactId!) : undefined} />;
 
   return (
     <div

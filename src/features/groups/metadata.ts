@@ -18,7 +18,19 @@ export interface GroupParticipant {
   avatarUrl?: string;
   admin?: string | null;
 }
-export interface GroupMetadata { id: string; subject?: string; avatarUrl?: string; description?: string; participants: GroupParticipant[]; memberCount?: number; transport: WhatsAppTransport; canEditDescription: boolean; }
+export interface GroupMetadata { id: string; subject?: string; avatarUrl?: string; description?: string; participants: GroupParticipant[]; historicalParticipants?: GroupParticipant[]; memberCount?: number; transport: WhatsAppTransport; canEditDescription: boolean; }
+const storedParticipants = (value: unknown): GroupParticipant[] => Array.isArray(value) ? value.flatMap(raw => {
+  if (!raw || typeof raw !== 'object') return [];
+  const item = raw as Record<string, unknown>;
+  if (typeof item.jid !== 'string') return [];
+  return [{ jid: item.jid, ...(typeof item.lid === 'string' ? { lid: item.lid } : {}), ...(typeof item.phone_jid === 'string' ? { phoneJid: item.phone_jid } : {}), ...(typeof item.phone === 'string' ? { phoneNumber: item.phone, phone: item.phone } : {}), ...(typeof item.name === 'string' ? { name: item.name } : {}), ...(typeof item.display_name === 'string' ? { displayName: item.display_name } : {}), ...(typeof item.avatar_url === 'string' ? { avatarUrl: item.avatar_url } : {}), ...(typeof item.contact_id === 'number' ? { contactId: item.contact_id } : {}), ...(typeof item.admin === 'string' || item.admin === null ? { admin: item.admin as string | null } : {}) }];
+}) : [];
+export const persistedGroupMetadata = (attributes: Record<string, unknown>, transport?: WhatsAppTransport | null, subject?: string): GroupMetadata | null => {
+  const participants = storedParticipants(attributes.whatsapp_group_participants);
+  const id = typeof attributes.whatsapp_group_jid === 'string' ? attributes.whatsapp_group_jid : '';
+  if (!id || !participants.length || !transport) return null;
+  return { id, transport, participants, historicalParticipants: storedParticipants(attributes.whatsapp_group_participant_history), memberCount: participants.length, canEditDescription: transport !== 'meta_cloud', ...(subject ? { subject } : {}), ...(typeof attributes.whatsapp_group_avatar_url === 'string' ? { avatarUrl: attributes.whatsapp_group_avatar_url } : {}), ...(typeof attributes.whatsapp_group_description === 'string' ? { description: attributes.whatsapp_group_description } : {}) };
+};
 const bridgeUrl = (import.meta.env.VITE_BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
 const metadataRequests = new Map<string, Promise<{ group: GroupMetadata }>>();
 const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {

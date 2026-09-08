@@ -1350,6 +1350,7 @@ export default function App() {
                   sendMessageShortcut={sendMessageShortcut}
                   onCopyConversationLink={() => void handleCopyConversationLink()}
                   onOpenDirectConversation={openConversationDirectly}
+                  onStartGroupParticipantConversation={(contactId, inboxId) => { void startContactConversation({ contactId, inboxId, private: false }); }}
                   onGroupSubjectResolved={(subject) => {
                     if (selectedConversationId) applyConversationUpdate(selectedConversationId, { contactName: subject });
                   }}

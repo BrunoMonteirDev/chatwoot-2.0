@@ -30,9 +30,9 @@ import { normalizeWahaMessageId, parseIncomingWahaGroupLifecycle, parseIncomingW
 import { createTrackId } from './track.js';
 import { WahaHistoryStore, type WahaHistoryJob, type WahaHistoryRange } from './wahaHistoryStore.js';
 import { connectionStatusPatch, evolutionConnectionStatus, metaConnectionStatus, type ConnectionStatus } from './connectionStatus.js';
-import { groupMetadataCache, persistedGroupMetadata, type GroupMetadata } from './groupMetadata.js';
+import { groupMetadataCache, mergeParticipantHistory, persistedGroupMetadata, type GroupMetadata } from './groupMetadata.js';
 import { bestEffortContactProfile, contactProfileSyncPlan } from './contactProfile.js';
-import { resolveGroupParticipantIdentity } from './groupParticipantIdentity.js';
+import { linkGroupParticipantContacts, resolveGroupParticipantIdentity } from './groupParticipantIdentity.js';
 
 const app = express();
 const templateHeaderUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: config.maxMediaBytes, files: 1 } });
@@ -45,23 +45,36 @@ const wahaSessions = new WahaSessionStore(config.wahaSessionOwnershipFile);
 const wahaHistory = new WahaHistoryStore(config.wahaHistoryFile);
 const historyImports = new Map<number, Promise<void>>();
 const wahaHistoryImports = new Map<number, Promise<void>>();
+const staleGroups = new Set<string>();
+const groupScopeKey = (accountId: number, inboxId: number, groupJid: string) => `${accountId}:${inboxId}:${groupJid}`;
 
 const syncGroupParticipantContact = async (
-  inbox: { identifier: string },
+  inbox: { id: number },
   input: Record<string, unknown>,
   transport: 'waha' | 'evolution',
 ) => {
   const identity = resolveGroupParticipantIdentity(input);
   if (!identity.phone) return null;
-  const contact = await chatwootBridge.createOrFindContact(inbox.identifier, {
-    sourceId: `whatsapp:${identity.phone.replace(/^\+/, '')}`,
-    name: identity.displayName || identity.phone,
-    phoneNumber: identity.phone,
-    ...(identity.avatarUrl ? { avatarUrl: identity.avatarUrl } : {}),
-  });
+  const contact = await chatwootBridge.findOrCreateGroupParticipantContact(inbox.id, { phoneNumber: identity.phone, name: identity.displayName, avatarUrl: identity.avatarUrl });
   if (transport === 'waha') await chatwootBridge.saveWahaIdentity(contact.id, identity.phone, identity.lid);
   else await chatwootBridge.saveEvolutionIdentity(contact.id, identity.phone, identity.lid);
-  return contact;
+  return { ...identity, contactId: contact.id, displayName: contact.name || identity.displayName, avatarUrl: contact.avatarUrl || identity.avatarUrl };
+};
+const syncGroupParticipants = (inbox: { id: number }, participants: GroupMetadata['participants'], transport: 'waha' | 'evolution') => linkGroupParticipantContacts(participants, input => syncGroupParticipantContact(inbox, input, transport).catch(error => {
+    console.warn('[groups] participant contact sync failed', { inboxId: inbox.id, jid: input.participant, error: error instanceof Error ? error.message : 'unknown' });
+    return null;
+  }));
+const hydrateGroupParticipantContacts = async (accountId: number, participants: GroupMetadata['participants']) => {
+  const ids = [...new Set(participants.map(participant => participant.contactId).filter((id): id is number => typeof id === 'number'))];
+  const entries = await chatwootBridge.withAccount(accountId, () => Promise.all(ids.map(async id => {
+    const contact = await chatwootBridge.groupParticipantContact(id).catch(() => null);
+    return contact ? [id, contact] as const : null;
+  })));
+  const contacts = new Map(entries.filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)));
+  return participants.map(participant => {
+    const contact = participant.contactId ? contacts.get(participant.contactId) : undefined;
+    return contact ? { ...participant, displayName: contact.name || participant.displayName, phoneNumber: contact.phoneNumber || participant.phoneNumber, avatarUrl: contact.avatarUrl || participant.avatarUrl } : participant;
+  });
 };
 // WAHA can emit its own `fromMe` webhook before the send endpoint returns the
 // provider message id. During that small window, Chatwoot still owns the
@@ -163,6 +176,8 @@ app.get('/groups/metadata', async (request, response) => {
       chatwootBridge.conversationGroupTargetDetailsForSession(accountId, conversationId, inboxId, sessionHeaders),
     ]);
     const groupJid = target.groupJid;
+    const scopeKey = groupScopeKey(accountId, inboxId, groupJid);
+    if (target.contactId) await identities.save([`group-contact:${scopeKey}`], String(target.contactId));
     const transport = groupTransport(inbox.configuration, request.query.transport);
     if (!transport) return response.status(409).json({ error: 'Não foi possível determinar o transporte deste grupo.', category: 'transport_unavailable' });
     if (transport === 'meta_cloud') return response.status(422).json({ error: 'Metadados de grupos não estão disponíveis na Meta Cloud.', category: 'unsupported_operation' });
@@ -171,11 +186,36 @@ app.get('/groups/metadata', async (request, response) => {
       await wahaSessions.assertOwned(accountId, inboxId, inbox.configuration.wahaSessionName);
     }
     const cached = groupMetadataCache.get(transport, groupJid);
+    const persisted = target.persistedMetadata && persistedGroupMetadata(groupJid, transport, target.persistedMetadata);
+    const persistedFresh = persisted && !staleGroups.has(scopeKey) && target.persistedMetadata?.syncedAt
+      ? Date.now() - Date.parse(target.persistedMetadata.syncedAt) < 10 * 60_000
+      : false;
     let metadata: GroupMetadata;
     let providerUnavailable = false;
-    try { metadata = cached || groupMetadataCache.set(await loadGroupMetadata(transport, inbox.configuration, groupJid)); }
+    try {
+      if (cached) metadata = cached;
+      else if (persistedFresh && request.query.force !== 'true') metadata = groupMetadataCache.set({ ...persisted, canEditDescription: true });
+      else {
+        const loaded = await groupMetadataCache.getOrLoad(transport, groupJid, async () => {
+          const providerMetadata = await loadGroupMetadata(transport, inbox.configuration, groupJid);
+          const normalized = providerMetadata.participants.map((participant) => {
+            const identity = resolveGroupParticipantIdentity({ participant: participant.jid, participantAlt: participant.phoneJid || participant.lid, phone: participant.phoneNumber, name: participant.displayName || participant.name, avatarUrl: participant.avatarUrl });
+            return { ...participant, ...identity, jid: participant.jid, name: identity.displayName || participant.name };
+          });
+          const participants = await chatwootBridge.withAccount(accountId, () => syncGroupParticipants(inbox, normalized, transport as 'waha' | 'evolution'));
+          const historicalParticipants = mergeParticipantHistory(persisted?.historicalParticipants || persisted?.participants || [], participants);
+          const enriched = { ...providerMetadata, participants, historicalParticipants };
+          if (target.contactId) {
+            try { await chatwootBridge.withAccount(accountId, () => chatwootBridge.saveEvolutionGroup(target.contactId!, groupJid, enriched.subject || groupJid, { avatarUrl: enriched.avatarUrl, description: enriched.description, participants, historicalParticipants })); }
+            catch (error) { console.warn('[groups] could not persist provider metadata', { conversationId, groupJid, error: error instanceof Error ? error.message : 'unknown' }); }
+          }
+          staleGroups.delete(scopeKey);
+          return enriched;
+        });
+        metadata = loaded.value;
+      }
+    }
     catch (error) {
-      const persisted = target.persistedMetadata && persistedGroupMetadata(groupJid, transport, target.persistedMetadata);
       if (!persisted) throw error;
       providerUnavailable = true;
       metadata = persisted;
@@ -183,14 +223,14 @@ app.get('/groups/metadata', async (request, response) => {
     // Persist even when metadata came from the five-minute cache. This fixes
     // groups opened before the subject-sync existed without another provider
     // request, while a persistence failure must never hide valid metadata.
-    const participants = metadata.participants.map((participant) => {
-      const identity = resolveGroupParticipantIdentity({ participant: participant.jid, participantAlt: participant.phoneJid || participant.lid, phone: participant.phoneNumber, name: participant.name, avatarUrl: participant.avatarUrl });
+    const hydratedParticipants = await hydrateGroupParticipantContacts(accountId, [...(metadata.historicalParticipants || []), ...metadata.participants]);
+    const historicalCount = metadata.historicalParticipants?.length || 0;
+    const historicalParticipants = hydratedParticipants.slice(0, historicalCount);
+    const participants = hydratedParticipants.slice(historicalCount).map((participant) => {
+      const identity = resolveGroupParticipantIdentity({ participant: participant.jid, participantAlt: participant.phoneJid || participant.lid, phone: participant.phoneNumber, name: participant.displayName || participant.name, avatarUrl: participant.avatarUrl });
       return { ...participant, ...identity, jid: participant.jid, name: identity.displayName || participant.name };
     });
-    if (target.contactId) {
-      try { await chatwootBridge.withAccount(accountId, () => chatwootBridge.saveEvolutionGroup(target.contactId!, groupJid, metadata.subject || groupJid, { avatarUrl: metadata.avatarUrl, description: metadata.description, participants })); }
-      catch (error) { console.warn('[groups] could not persist provider subject', { conversationId, groupJid, error: error instanceof Error ? error.message : 'unknown' }); }
-    }
+    metadata = { ...metadata, participants, historicalParticipants };
     return response.json({ group: { ...metadata, participants, memberCount: participants.length }, cached: Boolean(cached), providerUnavailable });
   } catch (error) {
     if (error instanceof WahaSessionOwnershipError) return response.status(error.code === 'not_found' ? 409 : 403).json({ error: 'A sessão WAHA não pertence a esta inbox.', category: 'transport_unavailable' });
@@ -747,7 +787,7 @@ const importWahaHistoricalMessage = async (job: WahaHistoryJob, raw: unknown, co
   const { contact, conversation } = await conversationForWahaIdentity(inbox, message, profiles.syncedContacts);
   const historyConversationId = conversation.internal_id || conversation.id;
   conversations.add(historyConversationId);
-  if (message.chatType === 'group') await chatwootBridge.saveEvolutionGroup(contact.id, message.remoteJid, message.name, { participants: message.participantJid ? [{ jid: message.participantJid, name: message.participantName }] : undefined });
+  if (message.chatType === 'group') await chatwootBridge.saveEvolutionGroup(contact.id, message.remoteJid, message.name);
   let existingMessage: Awaited<ReturnType<typeof chatwootBridge.messageTargetBySourceId>> | undefined;
   try { existingMessage = await chatwootBridge.messageTargetBySourceId(key); } catch { /* The historical message does not exist yet. */ }
   // The first import may have inserted the text shell while WAHA was still
@@ -1112,7 +1152,7 @@ const conversationForEvolutionIdentity = async (event: EvolutionIdentityEvent) =
   if (event.chatType === 'group') {
     if (!event.remoteJid?.endsWith('@g.us')) throw new Error('Evento de grupo sem identificador válido.');
     const contact = await chatwootBridge.createOrFindContact(inbox.identifier, { sourceId: event.sourceId, name: event.name });
-    await chatwootBridge.saveEvolutionGroup(contact.id, event.remoteJid, event.name, { participants: event.participantJid ? [{ jid: event.participantJid, name: event.participantName }] : undefined });
+    await chatwootBridge.saveEvolutionGroup(contact.id, event.remoteJid, event.name);
     const conversation = await chatwootBridge.findOrCreateConversation(inbox.identifier, contact.source_id, contact.id, inbox.id);
     return { inbox, contact, conversation };
   }
@@ -1632,6 +1672,26 @@ app.post('/webhooks/waha', (request, response) => {
       const key = `waha-group:${groupLifecycle.session}:${groupLifecycle.event}:${groupLifecycle.externalId || groupLifecycle.timestamp}`;
       if (await dedup.hasOrLock(key)) return;
       try {
+        const ownership = await wahaSessions.get(groupLifecycle.session);
+        if (ownership) {
+          const scopeKey = groupScopeKey(ownership.accountId, ownership.inboxId, groupLifecycle.groupId);
+          staleGroups.add(scopeKey); groupMetadataCache.invalidate('waha', groupLifecycle.groupId);
+          const contactId = Number(await identities.find([`group-contact:${scopeKey}`]));
+          if (Number.isInteger(contactId) && contactId > 0) {
+            await chatwootBridge.withAccount(ownership.accountId, async () => {
+              const metadata = await loadGroupMetadata('waha', { evolutionInstanceName: null, wahaSessionName: groupLifecycle.session }, groupLifecycle.groupId);
+              const participants = await syncGroupParticipants({ id: ownership.inboxId }, metadata.participants, 'waha');
+              const attributes = await chatwootBridge.groupContactAttributes(contactId);
+              const previous = persistedGroupMetadata(groupLifecycle.groupId, 'waha', { participants: Array.isArray(attributes.whatsapp_group_participants) ? attributes.whatsapp_group_participants : [], historicalParticipants: Array.isArray(attributes.whatsapp_group_participant_history) ? attributes.whatsapp_group_participant_history : [] });
+              const historicalParticipants = mergeParticipantHistory(previous?.historicalParticipants || previous?.participants || [], participants);
+              const refreshed = groupMetadataCache.set({ ...metadata, participants, historicalParticipants });
+              await chatwootBridge.saveEvolutionGroup(contactId, groupLifecycle.groupId, refreshed.subject || groupLifecycle.groupId, { avatarUrl: refreshed.avatarUrl, description: refreshed.description, participants, historicalParticipants, participantAction: groupLifecycle.participantAction });
+              staleGroups.delete(scopeKey);
+            });
+            await dedup.commit(key);
+            return;
+          }
+        }
         const inbox = await wahaInboxForWebhook(groupLifecycle.session);
         await chatwootBridge.withAccount(inbox.accountId, async () => {
           const identityKeys = [`${inbox.id}:group:${groupLifecycle.groupId}`];
@@ -1692,7 +1752,7 @@ app.post('/webhooks/waha', (request, response) => {
           const { contact, conversation } = await conversationForWahaIdentity(inbox, message);
           conversationId = conversation.id;
           if (message.chatType === 'group') {
-            await chatwootBridge.saveEvolutionGroup(contact.id, message.remoteJid, message.name, { participants: message.participantJid ? [{ jid: message.participantJid, name: message.participantName }] : undefined });
+            await chatwootBridge.saveEvolutionGroup(contact.id, message.remoteJid, message.name);
             await syncGroupParticipantContact(inbox, { participant: message.participantJid, pushName: message.participantName, avatarUrl: message.avatarUrl }, 'waha');
           }
           // The public API message endpoint does not infer a Chatwoot internal

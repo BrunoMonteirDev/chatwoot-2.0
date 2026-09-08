@@ -6,6 +6,7 @@ import { ContactAttributesPanel } from './ContactAttributesPanel';
 import { groupMetadataClient } from '../features/groups/metadata';
 import type { Chat } from '../types';
 import type { WhatsAppTransport } from '../integrations/whatsapp/provider';
+import { contactService } from '../integrations/chatwoot/contacts';
 
 const get = vi.spyOn(groupMetadataClient, 'get');
 let container: HTMLDivElement;
@@ -49,5 +50,22 @@ describe('group metadata requests', () => {
     expect(container.textContent).toContain('Maria');
     expect(container.textContent).toContain('Superadministrador');
     expect(container.querySelector<HTMLImageElement>('img[alt="Nome atualizado"]')?.src).toBe('https://example.test/group.jpg');
+  });
+  it('mostra participantes persistidos imediatamente e reutiliza o contato nas ações', async () => {
+    get.mockReturnValue(new Promise(() => {}));
+    vi.spyOn(contactService, 'get').mockResolvedValue({ id: 44, name: 'João editado', avatarUrl: null, phoneNumber: '+5544999999999', email: null, identifier: null, companyName: null, city: null, country: null, blocked: false, lastActivityAt: null, createdAt: null, additionalAttributes: {}, customAttributes: {} });
+    vi.spyOn(contactService, 'listNotes').mockResolvedValue([]);
+    const start = vi.fn();
+    const chat: Chat = { id: '81', name: 'Equipe', avatar: '', lastMessage: '', time: '', messages: [], isGroup: true };
+    const initialGroupMetadata = { id: '120@g.us', subject: 'Equipe', transport: 'waha' as const, canEditDescription: true, memberCount: 1, participants: [{ jid: '123@lid', phoneNumber: '+5544999999999', displayName: 'João editado', contactId: 44, admin: 'admin' }] };
+    await act(async () => { root.render(<ContactAttributesPanel chat={chat} accountId={1} inboxId={5} conversationId={81} groupTransport="waha" initialGroupMetadata={initialGroupMetadata} onStartParticipantConversation={start} isDarkMode onClose={() => {}} />); });
+    expect(container.textContent).toContain('João editado');
+    expect(container.textContent).toContain('Administrador');
+    await act(async () => { Array.from(container.querySelectorAll('div')).find(element => element.textContent?.includes('João editado') && element.className.includes('cursor-pointer'))?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {});
+    const button = Array.from(container.querySelectorAll('button')).find(element => element.textContent?.includes('Iniciar conversa'));
+    expect(button).toBeTruthy();
+    await act(async () => { button?.click(); });
+    expect(start).toHaveBeenCalledWith(44);
   });
 });

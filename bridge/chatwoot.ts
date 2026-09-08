@@ -7,7 +7,7 @@ import type { StagedMetaHistoryMessage } from './metaHistoryStore.js';
 import type { EvolutionGroupParticipant } from './evolutionEvent.js';
 
 export type ApiInbox = { id: number; channel_type: string; inbox_identifier?: string; additional_attributes?: Record<string, unknown>; secret?: string };
-type Contact = { id: number; source_id: string };
+type Contact = { id: number; source_id: string; name?: string; phone_number?: string; thumbnail?: string | null };
 type Conversation = { id: number; internal_id?: number; status: string; inbox_id?: number; last_activity_at?: number };
 type ConversationTarget = { id: number; inbox_id: number; meta?: { sender?: { id?: number; name?: string; thumbnail?: string | null; phone_number?: string | null; additional_attributes?: Record<string, unknown> | null } }; contact_inbox?: { source_id?: string | null } };
 type AccountContact = {
@@ -328,6 +328,22 @@ export const chatwootBridge = {
     const contact = response.payload.find(item => item.phone_number && normalizeBrazilianPhone(item.phone_number).replace(/\D/g, '') === digits);
     return contact?.contact_inboxes?.find(item => item.inbox_id === inboxId || item.inbox?.id === inboxId)?.source_id;
   },
+  async findOrCreateGroupParticipantContact(inboxId: number, input: { phoneNumber: string; name?: string; avatarUrl?: string }) {
+    const normalizedPhoneNumber = normalizeBrazilianPhone(input.phoneNumber);
+    const digits = normalizedPhoneNumber.replace(/\D/g, '');
+    const search = /^55([1-9]\d)\d{8}$/.exec(digits) ? `+55${digits.slice(2, 4)}` : normalizedPhoneNumber;
+    const response = await request<{ payload: AccountContact[] }>(`/api/v1/accounts/${currentAccountId()}/contacts/search?q=${encodeURIComponent(search)}`, {}, true);
+    const existing = response.payload.find(item => item.phone_number && normalizeBrazilianPhone(item.phone_number).replace(/\D/g, '') === digits);
+    if (existing) {
+      if (!existing.thumbnail && input.avatarUrl) await this.saveContactProfile(existing.id, { avatarUrl: input.avatarUrl });
+      return { id: existing.id, name: existing.name, phoneNumber: existing.phone_number || normalizedPhoneNumber, avatarUrl: existing.thumbnail || input.avatarUrl, existing: true };
+    }
+    const created = await request<{ payload: { contact: AccountContact; existing?: boolean } }>(`/api/v1/accounts/${currentAccountId()}/contacts`, {
+      method: 'POST', body: JSON.stringify({ name: input.name?.trim() || normalizedPhoneNumber, phone_number: normalizedPhoneNumber, inbox_id: inboxId, ...(input.avatarUrl ? { avatar_url: input.avatarUrl } : {}) }),
+    }, true);
+    const contact = created.payload.contact;
+    return { id: contact.id, name: contact.name, phoneNumber: contact.phone_number || normalizedPhoneNumber, avatarUrl: contact.thumbnail || input.avatarUrl, existing: Boolean(created.payload.existing) };
+  },
   createOrFindContact: (identifier: string, input: { sourceId: string; name: string; phoneNumber?: string; avatarUrl?: string }) => request<Contact>(`/public/api/v1/inboxes/${encodeURIComponent(identifier)}/contacts`, { method: 'POST', body: JSON.stringify({ source_id: input.sourceId, name: input.name, ...(input.phoneNumber ? { phone_number: normalizeBrazilianPhone(input.phoneNumber) } : {}), ...(input.avatarUrl ? { avatar_url: input.avatarUrl } : {}) }) }),
   updatePublicContact: (identifier: string, sourceId: string, input: { name?: string; avatarUrl?: string }) => {
     if (!input.name && !input.avatarUrl) return Promise.resolve(undefined);
@@ -361,15 +377,19 @@ export const chatwootBridge = {
       },
     }),
   }, true),
-  saveEvolutionGroup: (contactId: number, groupJid: string, name: string, details: { avatarUrl?: string; description?: string; participants?: EvolutionGroupParticipant[]; participantAction?: string } = {}) => request(`/api/v1/accounts/${currentAccountId()}/contacts/${contactId}`, {
+  saveEvolutionGroup: (contactId: number, groupJid: string, name: string, details: { avatarUrl?: string; description?: string; participants?: EvolutionGroupParticipant[]; historicalParticipants?: EvolutionGroupParticipant[]; participantAction?: string } = {}) => request(`/api/v1/accounts/${currentAccountId()}/contacts/${contactId}`, {
     method: 'PATCH', body: JSON.stringify({ name, additional_attributes: {
       whatsapp_chat_type: 'group', whatsapp_group_jid: groupJid,
       ...(details.avatarUrl ? { whatsapp_group_avatar_url: details.avatarUrl } : {}),
       ...(details.description !== undefined ? { whatsapp_group_description: details.description } : {}),
-      ...(details.participants ? { whatsapp_group_participants: details.participants.map(item => ({ jid: item.jid, ...('lid' in item && item.lid ? { lid: item.lid } : {}), ...('phoneJid' in item && item.phoneJid ? { phone_jid: item.phoneJid } : {}), ...(item.phoneNumber ? { phone: item.phoneNumber } : {}), ...(item.name ? { name: item.name } : {}), ...(item.avatarUrl ? { avatar_url: item.avatarUrl } : {}), ...(item.admin !== undefined ? { admin: item.admin } : {}) })) } : {}),
+      ...(details.participants ? { whatsapp_group_participants: details.participants.map(item => ({ jid: item.jid, ...('lid' in item && item.lid ? { lid: item.lid } : {}), ...('phoneJid' in item && item.phoneJid ? { phone_jid: item.phoneJid } : {}), ...(item.phoneNumber ? { phone: item.phoneNumber } : {}), ...(item.name ? { name: item.name } : {}), ...(item.displayName ? { display_name: item.displayName } : {}), ...(item.avatarUrl ? { avatar_url: item.avatarUrl } : {}), ...(item.contactId ? { contact_id: item.contactId } : {}), ...(item.admin !== undefined ? { admin: item.admin } : {}) })) } : {}),
+      ...(details.historicalParticipants ? { whatsapp_group_participant_history: details.historicalParticipants.map(item => ({ jid: item.jid, ...('lid' in item && item.lid ? { lid: item.lid } : {}), ...('phoneJid' in item && item.phoneJid ? { phone_jid: item.phoneJid } : {}), ...(item.phoneNumber ? { phone: item.phoneNumber } : {}), ...(item.name ? { name: item.name } : {}), ...(item.displayName ? { display_name: item.displayName } : {}), ...(item.avatarUrl ? { avatar_url: item.avatarUrl } : {}), ...(item.contactId ? { contact_id: item.contactId } : {}) })) } : {}),
+      ...(details.participants ? { whatsapp_group_metadata_synced_at: new Date().toISOString() } : {}),
       ...(details.participantAction ? { whatsapp_group_last_participant_action: details.participantAction } : {}),
     } }),
   }, true),
+  groupContactAttributes: (contactId: number) => request<{ payload: AccountContact }>(`/api/v1/accounts/${currentAccountId()}/contacts/${contactId}`, {}, true).then(response => response.payload.additional_attributes || {}),
+  groupParticipantContact: (contactId: number) => request<{ payload: AccountContact }>(`/api/v1/accounts/${currentAccountId()}/contacts/${contactId}`, {}, true).then(response => ({ id: response.payload.id, name: response.payload.name, phoneNumber: response.payload.phone_number, avatarUrl: response.payload.thumbnail || undefined })),
   async findOrCreateConversation(identifier: string, sourceId: string, contactId: number, inboxId: number): Promise<Conversation> {
     // A contact may already have been created manually in Chatwoot. Its
     // ContactInbox source id is then a UUID rather than `whatsapp:<phone>`.
@@ -440,6 +460,8 @@ export const chatwootBridge = {
         avatarUrl: typeof attributes?.whatsapp_group_avatar_url === 'string' ? attributes.whatsapp_group_avatar_url : conversation.meta?.sender?.thumbnail || undefined,
         description: typeof attributes?.whatsapp_group_description === 'string' ? attributes.whatsapp_group_description : undefined,
         participants: Array.isArray(attributes?.whatsapp_group_participants) ? attributes.whatsapp_group_participants : [],
+        historicalParticipants: Array.isArray(attributes?.whatsapp_group_participant_history) ? attributes.whatsapp_group_participant_history : [],
+        syncedAt: typeof attributes?.whatsapp_group_metadata_synced_at === 'string' ? attributes.whatsapp_group_metadata_synced_at : undefined,
       } };
     } catch { throw new Error('A conversa não é um grupo WhatsApp válido.'); }
   },
@@ -451,7 +473,7 @@ export const chatwootBridge = {
       ? (await requestWithSession<{ payload: AccountContact }>(`/api/v1/accounts/${accountId}/contacts/${senderId}`, sessionHeaders)).payload
       : undefined;
     const contactInbox = contact?.contact_inboxes?.find(item => (item.inbox?.id || item.inbox_id) === inboxId);
-    const attributes = conversation.meta?.sender?.additional_attributes || contact?.additional_attributes;
+    const attributes = { ...(contact?.additional_attributes || {}), ...(conversation.meta?.sender?.additional_attributes || {}) };
     const sourceId = conversation.contact_inbox?.source_id || contactInbox?.source_id;
     const encoded = typeof sourceId === 'string' && sourceId.match(/^whatsapp:group:(.+)$/)?.[1];
     const declaredJid = attributes?.whatsapp_group_jid;
@@ -464,6 +486,8 @@ export const chatwootBridge = {
       avatarUrl: typeof attributes?.whatsapp_group_avatar_url === 'string' ? attributes.whatsapp_group_avatar_url : conversation.meta?.sender?.thumbnail || contact?.thumbnail || undefined,
       description: typeof attributes?.whatsapp_group_description === 'string' ? attributes.whatsapp_group_description : undefined,
       participants: Array.isArray(attributes?.whatsapp_group_participants) ? attributes.whatsapp_group_participants : [],
+      historicalParticipants: Array.isArray(attributes?.whatsapp_group_participant_history) ? attributes.whatsapp_group_participant_history : [],
+      syncedAt: typeof attributes?.whatsapp_group_metadata_synced_at === 'string' ? attributes.whatsapp_group_metadata_synced_at : undefined,
     } };
   },
   async conversationGroupTarget(conversationId: number, inboxId: number) {
