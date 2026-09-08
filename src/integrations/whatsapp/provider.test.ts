@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { externalMessageId, isNativeWhatsAppInbox, metaCloudMetadataForInbox, parseExternalMessageId, transportStatusesForInbox, whatsappConfigurationForInbox, whatsappProviderForInbox } from './provider';
+import { externalMessageId, hasWahaTransport, isNativeWhatsAppInbox, metaCloudMetadataForInbox, parseExternalMessageId, transportStatusesForInbox, whatsappConfigurationForInbox, whatsappProviderForInbox } from './provider';
 
 const inbox = { id: 1, name: 'WhatsApp', avatarUrl: null, channelType: 'Channel::Api', channelId: 1, webhookUrl: null, inboxIdentifier: 'token', additionalAttributes: {} };
 
@@ -28,6 +28,13 @@ describe('WhatsApp providers', () => {
     expect(isNativeWhatsAppInbox(native)).toBe(true);
     expect(whatsappConfigurationForInbox(native)).toBeNull();
     expect(metaCloudMetadataForInbox(native)).toBeNull();
+  });
+
+  it('não declara WAHA para Meta ou metadata residual sem transport WAHA', () => {
+    const residual = { ...inbox, additionalAttributes: { whatsapp_transports: ['meta_cloud'], waha_session_name: 'residual' } };
+    expect(hasWahaTransport(residual)).toBe(false);
+    expect(hasWahaTransport({ ...inbox, channelType: 'Channel::Whatsapp', additionalAttributes: {} })).toBe(false);
+    expect(hasWahaTransport({ ...inbox, additionalAttributes: { whatsapp_transports: ['meta_cloud', 'waha'], waha_session_name: 'session-a' } })).toBe(true);
   });
 
   it('namespaceia e interpreta IDs externos sem misturar provedores', () => {

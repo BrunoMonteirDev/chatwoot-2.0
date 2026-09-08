@@ -22,6 +22,7 @@ import { bridgeMetrics } from './metrics.js';
 import { enforceRateLimit } from './rateLimit.js';
 import { wahaTransport, WahaApiError } from './waha.js';
 import { WahaSessionOwnershipError, WahaSessionStore } from './wahaSessionStore.js';
+import { deleteWahaInbox } from './wahaInboxDeletion.js';
 import { normalizeWahaMessageId, parseIncomingWahaGroupLifecycle, parseIncomingWahaMessage, parseIncomingWahaMutation, parseIncomingWahaReaction, parseWahaHistoryMessage, parseWahaWebhook, wahaGroupSourceId, type IncomingWahaMessage } from './wahaEvent.js';
 import { createTrackId } from './track.js';
 import { WahaHistoryStore, type WahaHistoryJob, type WahaHistoryRange } from './wahaHistoryStore.js';
@@ -912,17 +913,15 @@ app.delete('/providers/waha/inboxes/:inboxId', async (request, response) => {
   const inboxId = Number(request.params.inboxId);
   const context = await wahaContext(request, response, request.body as Record<string, unknown>); if (!context || context.inboxId !== inboxId) return;
   try {
-    const inbox = await chatwootBridge.withAccount(context.accountId, () => chatwootBridge.findApiInboxById(inboxId));
-    const sessionName = inbox.additionalAttributes.waha_session_name;
-    if (validWahaSessionName(sessionName)) {
-      const ownership = await wahaSessions.get(sessionName);
-      if (ownership && ownership.accountId === context.accountId && ownership.inboxId === context.inboxId) {
-        try { await wahaTransport.deleteSession(sessionName); }
-        catch (error) { if (!(error instanceof WahaApiError && error.status === 404)) throw error; }
-        await wahaSessions.remove(context.accountId, context.inboxId, sessionName);
-      }
-    }
-    await chatwootBridge.withAccount(context.accountId, () => chatwootBridge.deleteInbox(inboxId));
+    await deleteWahaInbox(context.accountId, inboxId, {
+      chatwoot: {
+        findInbox: () => chatwootBridge.withAccount(context.accountId, () => chatwootBridge.findApiInboxById(inboxId)),
+        deleteInbox: () => chatwootBridge.withAccount(context.accountId, () => chatwootBridge.deleteInbox(inboxId)),
+      },
+      sessions: wahaSessions,
+      waha: wahaTransport,
+      log: console,
+    });
     return response.status(204).end();
   } catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
 });

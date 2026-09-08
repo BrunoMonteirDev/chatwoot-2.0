@@ -8,7 +8,7 @@ import { inboxService } from '../integrations/chatwoot/inboxes';
 import { wahaClient } from '../integrations/waha/client';
 import { MetaCloudSetup } from './MetaCloudSetup';
 import { WahaSetup } from './WahaSetup';
-import { isNativeWhatsAppInbox, metaCloudMetadataForInbox, transportStatusesForInbox, whatsappConfigurationForInbox } from '../integrations/whatsapp/provider';
+import { hasWahaTransport, isNativeWhatsAppInbox, metaCloudMetadataForInbox, transportStatusesForInbox, whatsappConfigurationForInbox } from '../integrations/whatsapp/provider';
 
 interface Props {
   accountId: number | null;
@@ -147,8 +147,7 @@ export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inb
     if (!accountId || !inboxPendingDeletion || deletingInbox) return;
     setDeletingInbox(true); setError(null);
     try {
-      const wahaSession = inboxPendingDeletion.additionalAttributes.waha_session_name;
-      if (typeof wahaSession === 'string' && wahaSession) await wahaClient.deleteInboxAndSession({ accountId, inboxId: inboxPendingDeletion.id });
+      if (hasWahaTransport(inboxPendingDeletion)) await wahaClient.deleteInboxAndSession({ accountId, inboxId: inboxPendingDeletion.id });
       else await inboxService.delete(accountId, inboxPendingDeletion.id);
       if (selectedInbox?.id === inboxPendingDeletion.id) { setSelectedInbox(null); setScreen('list'); }
       setInboxPendingDeletion(null);

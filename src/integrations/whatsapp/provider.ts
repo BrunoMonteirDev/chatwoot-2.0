@@ -59,6 +59,8 @@ export const whatsappProviderForInbox = (inbox: Inbox): WhatsAppProvider | null 
   return config?.transports.length === 1 ? config.transports[0] : null;
 };
 
+export const hasWahaTransport = (inbox: Inbox) => whatsappConfigurationForInbox(inbox)?.transports.includes('waha') === true;
+
 export const transportStatusesForInbox = (inbox: Inbox): Partial<Record<WhatsAppTransport, WhatsAppTransportStatus>> => {
   const configuration = whatsappConfigurationForInbox(inbox);
   if (!configuration) return {};
