@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { inboxService } from '../integrations/chatwoot/inboxes';
 import { InboxCollaboratorsPanel } from './InboxCollaboratorsPanel';
-import { MetaCloudSetup } from './MetaCloudSetup';
+import { MetaCloudSetup, nativeMetaConnectionState } from './MetaCloudSetup';
 
 const listAgents = vi.spyOn(inboxService, 'listAgents');
 const listMembers = vi.spyOn(inboxService, 'listMembers');
@@ -59,5 +59,26 @@ describe('InboxCollaboratorsPanel', () => {
     await act(async () => { [...container.querySelectorAll('button')].find((button) => button.textContent === 'Colaboradores')?.click(); });
     await flush();
     expect(container.textContent).toContain('Agentes com acesso a esta caixa');
+  });
+});
+
+describe('nativeMetaConnectionState', () => {
+  const nativeInbox = (additionalAttributes: Record<string, unknown> = {}, reauthorizationRequired = false) => ({
+    id: 5, name: 'Meta', avatarUrl: null, channelType: 'Channel::Whatsapp', channelId: 7,
+    webhookUrl: null, inboxIdentifier: null, additionalAttributes, reauthorizationRequired,
+  });
+
+  it('mostra Meta conectada sem consultar estados WAHA/Evolution', () => {
+    expect(nativeMetaConnectionState(nativeInbox({ meta_connection_status: 'connected', waha_connection_status: 'disconnected', evolution_connection_status: 'error' }))).toBe('connected');
+  });
+
+  it('prioriza reautorização e reconhece desconexão real da Meta', () => {
+    expect(nativeMetaConnectionState(nativeInbox({ meta_connection_status: 'connected' }, true))).toBe('reauthorization_required');
+    expect(nativeMetaConnectionState(nativeInbox({ meta_connection_status: 'disconnected' }))).toBe('disconnected');
+    expect(nativeMetaConnectionState(nativeInbox({ meta_connection_status: 'error' }))).toBe('error');
+  });
+
+  it('não confunde a janela de 24 horas com conexão Meta', () => {
+    expect(nativeMetaConnectionState(nativeInbox({ meta_connection_status: 'connected', message_window_open: false }))).toBe('connected');
   });
 });

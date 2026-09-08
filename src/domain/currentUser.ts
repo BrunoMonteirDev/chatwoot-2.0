@@ -32,6 +32,11 @@ export interface Inbox {
   webhookUrl: string | null;
   inboxIdentifier: string | null;
   additionalAttributes: Record<string, unknown>;
+  provider?: string | null;
+  phoneNumber?: string | null;
+  reauthorizationRequired?: boolean;
+  metaBusinessAccountId?: string | null;
+  metaPhoneNumberId?: string | null;
 }
 
 export interface ConversationSummary {

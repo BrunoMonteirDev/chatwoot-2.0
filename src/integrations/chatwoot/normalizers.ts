@@ -35,6 +35,11 @@ export const normalizeInbox = (inbox: ChatwootInboxDto): Inbox => ({
   webhookUrl: inbox.webhook_url ?? null,
   inboxIdentifier: inbox.inbox_identifier ?? null,
   additionalAttributes: inbox.additional_attributes ?? {},
+  ...(typeof inbox.provider === 'string' ? { provider: inbox.provider } : {}),
+  ...(typeof inbox.phone_number === 'string' ? { phoneNumber: inbox.phone_number } : {}),
+  ...(typeof inbox.reauthorization_required === 'boolean' ? { reauthorizationRequired: inbox.reauthorization_required } : {}),
+  ...(typeof inbox.provider_config?.business_account_id === 'string' ? { metaBusinessAccountId: inbox.provider_config.business_account_id } : {}),
+  ...(typeof inbox.provider_config?.phone_number_id === 'string' ? { metaPhoneNumberId: inbox.provider_config.phone_number_id } : {}),
 });
 
 const phoneFallback = (phoneNumber?: string | null, attributes?: Record<string, unknown> | null) => {

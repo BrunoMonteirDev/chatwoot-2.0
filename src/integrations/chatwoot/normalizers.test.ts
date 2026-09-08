@@ -40,6 +40,11 @@ describe('normalizeInbox', () => {
     expect(normalizeInbox({ id: 10, name: 'Suporte', avatar_url: null, channel_type: 'Channel::Api', additional_attributes: { evolution_provider: 'evolution', evolution_instance_name: 'cw-suporte', evolution_instance_id: 'instance-10' } }))
       .toMatchObject({ additionalAttributes: { evolution_provider: 'evolution', evolution_instance_name: 'cw-suporte', evolution_instance_id: 'instance-10' } });
   });
+
+  it('preserva somente o estado operacional seguro da inbox Meta nativa', () => {
+    expect(normalizeInbox({ id: 11, name: 'Meta', avatar_url: null, channel_type: 'Channel::Whatsapp', provider: 'whatsapp_cloud', phone_number: '+5511999999999', reauthorization_required: false, provider_config: { business_account_id: 'waba-1234', phone_number_id: 'phone-5678', api_key: 'must-not-be-normalized' }, additional_attributes: { meta_connection_status: 'connected' } }))
+      .toMatchObject({ provider: 'whatsapp_cloud', phoneNumber: '+5511999999999', reauthorizationRequired: false, metaBusinessAccountId: 'waba-1234', metaPhoneNumberId: 'phone-5678', additionalAttributes: { meta_connection_status: 'connected' } });
+  });
 });
 
 describe('normalizeMessage', () => {

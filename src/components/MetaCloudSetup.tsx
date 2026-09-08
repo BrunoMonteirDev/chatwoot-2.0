@@ -16,9 +16,30 @@ interface Props {
 }
 
 type EmbeddedStage = 'idle' | 'opening' | 'waiting' | 'authorizing' | 'creating' | 'connected' | 'error';
+type NativeMetaConnectionState = 'connected' | 'connecting' | 'reauthorization_required' | 'disconnected' | 'error';
 const stageLabel: Record<Exclude<EmbeddedStage, 'idle' | 'error' | 'connected'>, string> = {
   opening: 'Carregando o cadastro da Meta…', waiting: 'Conclua o cadastro na Meta…', authorizing: 'Autorização recebida…', creating: 'Criando a inbox oficial no Chatwoot…',
 };
+
+export const nativeMetaConnectionState = (inbox: Inbox): NativeMetaConnectionState => {
+  if (inbox.reauthorizationRequired) return 'reauthorization_required';
+  const status = inbox.additionalAttributes.meta_connection_status;
+  if (status === 'connecting') return 'connecting';
+  if (status === 'disconnected' || status === 'error') return status;
+  // Channel::Whatsapp persists `connected` by default. Missing operational
+  // metadata must never be interpreted as a WAHA/Evolution disconnection.
+  return 'connected';
+};
+
+const nativeMetaStatus = (state: NativeMetaConnectionState) => ({
+  connected: { label: 'Conectado', detail: 'A Meta Cloud API está operacional.', className: 'border-[#00a884]/35 bg-[#00a884]/10 text-[#00a884]' },
+  connecting: { label: 'Conectando', detail: 'A Meta está verificando a conexão.', className: 'border-amber-500/30 bg-amber-500/10 text-amber-600' },
+  reauthorization_required: { label: 'Reautorização necessária', detail: 'A autorização da Meta precisa ser renovada.', className: 'border-amber-500/30 bg-amber-500/10 text-amber-600' },
+  disconnected: { label: 'Desconectado', detail: 'A Meta reportou que a conexão não está disponível.', className: 'border-red-500/30 bg-red-500/10 text-red-500' },
+  error: { label: 'Erro de conexão', detail: 'A Meta reportou um erro de conexão.', className: 'border-red-500/30 bg-red-500/10 text-red-500' },
+})[state];
+
+const maskedIdentifier = (value: string) => value.length <= 4 ? value : `••••${value.slice(-4)}`;
 
 export const MetaCloudSetup = ({ accountId, isDarkMode, inbox: existingInbox, onSaved }: Props) => {
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +51,9 @@ export const MetaCloudSetup = ({ accountId, isDarkMode, inbox: existingInbox, on
   const completingRef = useRef(false);
   const completeRef = useRef<() => Promise<void>>(async () => {});
   const nativeInbox = existingInbox?.channelType === 'Channel::Whatsapp';
+  const connectionState = nativeInbox ? nativeMetaConnectionState(existingInbox) : null;
+  const connection = connectionState ? nativeMetaStatus(connectionState) : null;
+  const canReauthorize = connectionState === 'reauthorization_required' || connectionState === 'disconnected' || connectionState === 'error';
   const card = isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-gray-300 bg-white';
 
   const reset = () => { codeRef.current = null; resultRef.current = null; completingRef.current = false; };
@@ -79,10 +103,11 @@ export const MetaCloudSetup = ({ accountId, isDarkMode, inbox: existingInbox, on
     {existingInbox && !nativeInbox && <p className="flex gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600"><AlertCircle className="h-4 w-4 shrink-0" />Esta inbox não é WhatsApp nativa. Para evitar híbrido nesta fase, crie uma nova inbox oficial.</p>}
     {nativeInbox && <div className="flex gap-1 overflow-x-auto border-b border-white/10 px-1"><button type="button" onClick={() => setSection('connection')} className={`rounded-t-lg px-3 py-2 text-xs font-semibold ${section === 'connection' ? 'bg-[#00a884] text-white' : 'text-[#8696a0] hover:bg-white/5'}`}>WhatsApp oficial</button><button type="button" onClick={() => setSection('collaborators')} className={`rounded-t-lg px-3 py-2 text-xs font-semibold ${section === 'collaborators' ? 'bg-[#00a884] text-white' : 'text-[#8696a0] hover:bg-white/5'}`}>Colaboradores</button></div>}
     {nativeInbox && section === 'collaborators' ? <InboxCollaboratorsPanel accountId={accountId} inboxId={existingInbox.id} isDarkMode={isDarkMode} onSaved={async () => { await onSaved(existingInbox); }} /> : <div className={`space-y-3 rounded-xl border p-4 ${card}`}>
+      {nativeInbox && connection && <><div className={`rounded-xl border p-3 text-xs ${connection.className}`}><p className="font-bold">Meta Cloud API · {connection.label}</p><p className="mt-1 opacity-80">{connection.detail}</p></div><dl className="grid gap-2 rounded-xl border border-white/10 bg-black/10 p-3 text-xs"><div className="flex justify-between gap-4"><dt className="text-[#8696a0]">Inbox</dt><dd className="text-right font-medium">{existingInbox.name}</dd></div><div className="flex justify-between gap-4"><dt className="text-[#8696a0]">Provider</dt><dd className="text-right font-medium">Meta Cloud API</dd></div>{existingInbox.phoneNumber && <div className="flex justify-between gap-4"><dt className="text-[#8696a0]">Número WhatsApp</dt><dd className="text-right font-medium">{existingInbox.phoneNumber}</dd></div>}{existingInbox.metaBusinessAccountId && <div className="flex justify-between gap-4"><dt className="text-[#8696a0]">WABA</dt><dd className="text-right font-medium">{maskedIdentifier(existingInbox.metaBusinessAccountId)}</dd></div>}{existingInbox.metaPhoneNumberId && <div className="flex justify-between gap-4"><dt className="text-[#8696a0]">Phone Number ID</dt><dd className="text-right font-medium">{maskedIdentifier(existingInbox.metaPhoneNumberId)}</dd></div>}</dl></>}
       <p className="text-xs text-[#8696a0]">O fluxo nativo da Meta oferece número novo/API ou WhatsApp Business App com coexistência. A confirmação vem do evento oficial; esta interface não grava metadados ou tokens paralelos.</p>
       {embeddedStage === 'connected' && <p className="flex items-center gap-2 text-xs text-[#00a884]"><CheckCircle2 className="h-4 w-4" />Inbox oficial conectada pelo Chatwoot.</p>}
       {saving && embeddedStage !== 'idle' && embeddedStage !== 'error' ? <p className="flex items-center gap-2 text-xs text-[#8696a0]"><Loader2 className="h-4 w-4 animate-spin" />{stageLabel[embeddedStage as Exclude<EmbeddedStage, 'idle' | 'error' | 'connected'>]}</p> : null}
-      <button type="button" disabled={saving || Boolean(existingInbox && !nativeInbox)} onClick={() => void startEmbedded()} className="w-full rounded-xl bg-[#00a884] py-3 text-xs font-bold text-white disabled:opacity-40">{nativeInbox ? 'Conectar/reautorizar WhatsApp Business' : 'Conectar WhatsApp Business'}</button>
+      {(!nativeInbox || canReauthorize) && <button type="button" disabled={saving || Boolean(existingInbox && !nativeInbox)} onClick={() => void startEmbedded()} className="w-full rounded-xl bg-[#00a884] py-3 text-xs font-bold text-white disabled:opacity-40">{nativeInbox ? 'Reautorizar WhatsApp Business' : 'Conectar WhatsApp Business'}</button>}
     </div>}
     {error && <p className="flex gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-500"><AlertCircle className="h-4 w-4 shrink-0" />{error}</p>}
   </div>;

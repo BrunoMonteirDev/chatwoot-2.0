@@ -67,6 +67,10 @@ export interface ChatwootInboxDto {
   webhook_url?: string | null;
   inbox_identifier?: string | null;
   additional_attributes?: Record<string, unknown> | null;
+  provider?: string | null;
+  phone_number?: string | null;
+  reauthorization_required?: boolean | null;
+  provider_config?: Record<string, unknown> | null;
 }
 
 export interface ChatwootInboxesResponse {
