@@ -15,12 +15,23 @@ describe('app routes', () => {
   it('maps routes for settings and primary application pages', () => {
     expect(route('/app/accounts/42/settings/caixas')).toEqual({ accountId: '42', tab: 'settings', settingsTab: 'caixas' });
     expect(route('/app/accounts/35/settings/inboxes/193')).toEqual({ accountId: '35', tab: 'settings', settingsTab: 'caixas', settingsInboxId: '193' });
-    expect(urlForAppRoute({ accountId: '35', tab: 'settings', settingsTab: 'caixas', settingsInboxId: '193' })).toBe('/app/accounts/35/settings/inboxes/193');
+    expect(route('/app/accounts/35/settings/caixas/193')).toEqual({ accountId: '35', tab: 'settings', settingsTab: 'caixas', settingsInboxId: '193' });
+    expect(urlForAppRoute({ accountId: '35', tab: 'settings', settingsTab: 'caixas', settingsInboxId: '193' })).toBe('/app/accounts/35/settings/caixas/193');
     expect(route('/app/accounts/42/contacts')).toEqual({ accountId: '42', tab: 'communities' });
     expect(route('/app/accounts/42/calls')).toEqual({ accountId: '42', tab: 'calls' });
     expect(route('/app/accounts/42/apps/99')).toEqual({ accountId: '42', tab: 'media', appId: '99' });
     expect(urlForAppRoute({ accountId: '42', tab: 'media', appId: '99' })).toBe('/app/accounts/42/apps/99');
     expect(route('/unknown')).toEqual({ tab: 'chats' });
+  });
+
+  it('keeps a selected settings inbox in route state across direct loads and history entries', () => {
+    const selected = route('/app/accounts/42/settings/caixas/123');
+    const list = route('/app/accounts/42/settings/caixas');
+
+    expect(selected).toEqual({ accountId: '42', tab: 'settings', settingsTab: 'caixas', settingsInboxId: '123' });
+    expect(route(urlForAppRoute(selected))).toEqual(selected);
+    expect(list).toEqual({ accountId: '42', tab: 'settings', settingsTab: 'caixas' });
+    expect(route('/app/accounts/42/settings/caixas/not-an-inbox')).toEqual({ tab: 'chats' });
   });
 
   it('generates a stable canonical conversation link without inboxId', () => {

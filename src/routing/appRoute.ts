@@ -61,7 +61,7 @@ export const urlForAppRoute = (route: AppRoute) => {
     pathname = route.inbox && route.inbox !== 'todas' && !route.conversationId
       ? `${base}/inbox/${encodeURIComponent(route.inbox)}`
       : `${base}${inbox}/conversations${route.conversationId ? `/${encodeURIComponent(route.conversationId)}` : ''}`;
-  } else if (route.tab === 'settings') pathname = route.settingsInboxId ? `${base}/settings/inboxes/${encodeURIComponent(route.settingsInboxId)}` : `${base}/settings${route.settingsTab ? `/${encodeURIComponent(route.settingsTab)}` : ''}`;
+  } else if (route.tab === 'settings') pathname = route.settingsInboxId ? `${base}/settings/caixas/${encodeURIComponent(route.settingsInboxId)}` : `${base}/settings${route.settingsTab ? `/${encodeURIComponent(route.settingsTab)}` : ''}`;
   else if (route.tab === 'status') pathname = `${base}/status`;
   else if (route.tab === 'calls') pathname = `${base}/calls`;
   else if (route.tab === 'communities') pathname = `${base}/contacts`;

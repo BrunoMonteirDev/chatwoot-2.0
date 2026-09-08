@@ -1149,6 +1149,7 @@ export default function App() {
             onTabChange={navigateToSettings}
             selectedInboxId={selectedSettingsInboxId ? Number(selectedSettingsInboxId) : null}
             onOpenInbox={navigateToSettingsInbox}
+            onCloseInbox={() => navigateToSettings('caixas')}
             accountId={currentAccount?.id ?? null}
             canManageDashboardApps={currentAccount?.permissions.includes('administrator') || currentAccount?.permissions.includes('integrations_manage')}
             inboxes={inboxes}
