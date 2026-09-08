@@ -76,6 +76,7 @@ import { groupMetadataClient, type GroupMetadata, type GroupParticipant } from '
 import { indexGroupParticipants, participantColor, participantLabel, participantPhone } from '../features/groups/participant';
 import { mentionReplacements, mentionTargetFor, participantMentionLabel, pruneMentionSelections, type MentionSelection } from '../features/groups/mentions';
 import { isPhoneDefaultContactName, providerProfileClient } from '../features/contacts/providerProfile';
+import { messageBubbleWidthClassName, messageTimelineClassName, messageVisualMediaClassName } from '../features/messages/messageLayout';
 
 
 // Helper to format WhatsApp Markdown, URLs, Mentions, Bold (*), Italic (_), Strikethrough (~), Code (`)
@@ -1876,7 +1877,7 @@ export const ChatArea: React.FC<Props> = ({
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-4 md:px-12 relative space-y-3 z-10"
+        className={messageTimelineClassName}
       >
         {historyStatus === 'loading' && (
           <div className={`py-8 text-center text-sm ${isDarkMode ? 'text-[#8696a0]' : 'text-[#667781]'}`}>Carregando mensagens…</div>
@@ -1895,6 +1896,7 @@ export const ChatArea: React.FC<Props> = ({
           const isMe = msg.sender === 'me';
           const prevMsg = chat.messages[index - 1];
           const isGroupMessage = Boolean(chat.isGroup || conversation?.isGroup || msg.whatsappRemoteJid?.endsWith('@g.us'));
+          const hasWideMedia = Boolean(msg.attachments?.some(attachment => attachment.type === 'image' || attachment.type === 'video'));
           const groupParticipant = msg.senderIdentity ? groupParticipants[msg.senderIdentity] : undefined;
           const participantAvatar = groupParticipant?.avatarUrl;
           const senderName = groupParticipant
@@ -1938,7 +1940,7 @@ export const ChatArea: React.FC<Props> = ({
                 </div>}
                 <div
                   onContextMenu={(e) => handleMessageContextMenu(e, msg)}
-                  className={`max-w-[85%] sm:max-w-[75%] lg:max-w-[65%] w-fit rounded-lg px-3 py-1.5 shadow-xs relative group border select-none ${
+                  className={`${messageBubbleWidthClassName(hasWideMedia)} rounded-lg px-3 py-1.5 shadow-xs relative group border select-none ${
                     (msg.audioAuthor || msg.attachments?.some((a) => a.type === 'audio'))
                       ? 'min-w-[270px] sm:min-w-[310px]'
                       : ''
@@ -2021,7 +2023,7 @@ export const ChatArea: React.FC<Props> = ({
                               <img
                                 src={att.url}
                                 alt={att.title || 'Attachment'}
-                                className="w-full max-h-64 object-cover object-top transition-transform group-hover/img:scale-102 duration-200"
+                                className={`${messageVisualMediaClassName} transition-transform group-hover/img:scale-102 duration-200`}
                                 referrerPolicy="no-referrer"
                               />
                               {/* Overlay button */}
@@ -2060,7 +2062,7 @@ export const ChatArea: React.FC<Props> = ({
                           );
                         }
                         if (att.type === 'video') {
-                          return <video key={att.id} controls preload="metadata" className="w-full max-h-64 rounded-xl bg-black" src={att.url}>Seu navegador não suporta vídeo.</video>;
+                          return <video key={att.id} controls preload="metadata" className={`${messageVisualMediaClassName} rounded-xl bg-black`} src={att.url}>Seu navegador não suporta vídeo.</video>;
                         }
                         return null;
                       })}
