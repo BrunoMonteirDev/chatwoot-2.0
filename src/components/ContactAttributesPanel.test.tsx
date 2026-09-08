@@ -41,11 +41,11 @@ describe('group metadata requests', () => {
     expect(get).toHaveBeenCalledTimes(1);
   });
   it('renders group identity, description and the canonical participant count from one metadata response', async () => {
-    get.mockResolvedValue({ group: { id: '123@g.us', subject: 'Nome atualizado', avatarUrl: 'https://example.test/group.jpg', description: 'Descrição atualizada', memberCount: 6, transport: 'waha', canEditDescription: true, participants: [{ jid: '1@lid', displayName: 'Maria', avatarUrl: 'https://example.test/maria.jpg', admin: 'superadmin' }] } });
+    get.mockResolvedValue({ group: { id: '123@g.us', subject: 'Nome atualizado', avatarUrl: 'https://example.test/group.jpg', description: 'Descrição atualizada', memberCount: 5, transport: 'waha', canEditDescription: true, participants: [{ jid: '1@lid', displayName: 'Maria', avatarUrl: 'https://example.test/maria.jpg', admin: 'superadmin' }] } });
     await render(true);
     expect(container.textContent).toContain('Nome atualizado');
     expect(container.textContent).toContain('Descrição atualizada');
-    expect(container.textContent).toContain('6 membros');
+    expect(container.textContent).toContain('5 membros');
     expect(container.textContent).toContain('Maria');
     expect(container.textContent).toContain('Superadministrador');
     expect(container.querySelector<HTMLImageElement>('img[alt="Nome atualizado"]')?.src).toBe('https://example.test/group.jpg');

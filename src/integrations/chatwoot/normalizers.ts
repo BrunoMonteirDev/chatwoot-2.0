@@ -65,6 +65,8 @@ const displayContactName = (name: string | null | undefined, phoneNumber?: strin
 export const normalizeConversation = (conversation: ChatwootConversationDto): ConversationSummary => {
   const preview = conversation.messages[0];
   const message = preview?.content?.trim() || (preview?.attachments?.length ? 'Anexo' : 'Sem mensagens');
+  const isGroupMessage = conversation.messages.some(item => item.content_attributes?.whatsapp_chat_type === 'group'
+    || (typeof item.content_attributes?.whatsapp_remote_jid === 'string' && item.content_attributes.whatsapp_remote_jid.endsWith('@g.us')));
   return {
     id: conversation.id,
     inboxId: conversation.inbox_id,
@@ -85,7 +87,7 @@ export const normalizeConversation = (conversation: ChatwootConversationDto): Co
     teamId: conversation.meta?.team?.id ?? null,
     teamName: conversation.meta?.team?.name || null,
     labels: conversation.labels || [],
-    isGroup: conversation.meta?.sender?.additional_attributes?.whatsapp_chat_type === 'group',
+    isGroup: conversation.meta?.sender?.additional_attributes?.whatsapp_chat_type === 'group' || isGroupMessage,
   };
 };
 

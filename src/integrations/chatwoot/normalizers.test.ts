@@ -24,6 +24,10 @@ describe('normalizeConversation', () => {
     expect(normalizeConversation({ id: 5, inbox_id: 1, status: 'open', priority: null, unread_count: 0, last_activity_at: 123, labels: [], messages: [], meta: { sender: { name: 'Equipe', additional_attributes: { whatsapp_chat_type: 'group' } } } }).isGroup).toBe(true);
   });
 
+  it('identifica um grupo pela metadata da mensagem quando o contato ainda não foi sincronizado', () => {
+    expect(normalizeConversation({ id: 5, inbox_id: 1, status: 'open', priority: null, unread_count: 0, last_activity_at: 123, labels: [], messages: [{ content: 'Olá', message_type: 0, content_attributes: { whatsapp_chat_type: 'group', whatsapp_remote_jid: '123@g.us' } }], meta: { sender: { name: '123@g.us', additional_attributes: {} } } }).isGroup).toBe(true);
+  });
+
   it('prefere o número real ao LID usado como nome temporário', () => {
     expect(normalizeConversation({ id: 6, inbox_id: 1, status: 'open', priority: null, unread_count: 0, last_activity_at: 123, labels: [], messages: [], meta: { sender: { name: '+111703660466323', phone_number: '+554499563999', additional_attributes: { waha_lid: '111703660466323' } } } }).contactName)
       .toBe('+554499563999');

@@ -788,6 +788,9 @@ export const ChatArea: React.FC<Props> = ({
   }, []);
   const [replyTo, setReplyTo] = useState<ReplyTo | null>(null);
   const conversationInbox = conversation ? inboxes.find((inbox) => inbox.id === conversation.inboxId) : undefined;
+  const groupMetadataTransport = chat.messages.slice().reverse().find(message => message.whatsappTransport && message.whatsappTransport !== 'meta_cloud')?.whatsappTransport;
+  const isGroupConversation = Boolean(chat.isGroup || conversation?.isGroup || contact?.additionalAttributes.whatsapp_chat_type === 'group'
+    || chat.messages.some(message => message.whatsappRemoteJid?.endsWith('@g.us')));
   const [groupParticipants, setGroupParticipants] = useState<Record<string, GroupParticipant>>({});
   const applyGroupMetadata = (group: GroupMetadata) => {
     setGroupParticipants(indexGroupParticipants(group.participants));
@@ -797,17 +800,15 @@ export const ChatArea: React.FC<Props> = ({
   const [isSyncingContactProfile, setIsSyncingContactProfile] = useState(false);
   const automaticallySyncedContactProfiles = useRef(new Set<string>());
   useEffect(() => {
-    const isGroup = chat.isGroup || conversation?.isGroup || chat.messages.some(message => message.whatsappRemoteJid?.endsWith('@g.us'));
-    const transport = chat.messages.slice().reverse().find(message => message.whatsappTransport && message.whatsappTransport !== 'meta_cloud')?.whatsappTransport;
-    if (!isGroup || !conversation || !transport) { setGroupParticipants({}); return; }
+    if (!isGroupConversation || !conversation || !groupMetadataTransport) { setGroupParticipants({}); return; }
     let active = true;
     if (!accountId) return;
-    void groupMetadataClient.get(accountId, conversation.inboxId, conversation.id, transport).then(({ group }) => {
+    void groupMetadataClient.get(accountId, conversation.inboxId, conversation.id, groupMetadataTransport).then(({ group }) => {
       if (!active) return;
       applyGroupMetadata(group);
     }).catch(() => { if (active) setGroupParticipants({}); });
     return () => { active = false; };
-  }, [chat.id, chat.isGroup, conversation?.id, conversation?.inboxId]);
+  }, [accountId, chat.id, conversation?.id, conversation?.inboxId, groupMetadataTransport, isGroupConversation]);
   useEffect(() => {
     const isGroup = chat.isGroup || conversation?.isGroup || chat.messages.some(message => message.whatsappRemoteJid?.endsWith('@g.us'));
     const transport = chat.messages.slice().reverse().find(message => message.whatsappTransport && message.whatsappTransport !== 'meta_cloud')?.whatsappTransport;
@@ -2779,7 +2780,7 @@ export const ChatArea: React.FC<Props> = ({
         />
       ) : isContactPanelOpen && (
         <ContactAttributesPanel
-          chat={chat}
+          chat={isGroupConversation && !chat.isGroup ? { ...chat, isGroup: true } : chat}
           allChats={allChats}
           onSelectChat={onSelectChat}
           isDarkMode={isDarkMode}
@@ -2789,7 +2790,7 @@ export const ChatArea: React.FC<Props> = ({
           conversationId={conversation?.id}
           accountId={accountId ?? undefined}
           inboxId={conversation?.inboxId}
-          groupTransport={chat.messages.slice().reverse().find(message => message.whatsappTransport && message.whatsappTransport !== 'meta_cloud')?.whatsappTransport || null}
+          groupTransport={groupMetadataTransport || null}
           onOpenConversationSearch={() => { setIsSearchOpen(true); onSearchInChat?.(); setIsContactPanelOpen(false); }}
           onOpenContent={() => setContactPanelTab('content')}
           onOpenImage={(url, title) => onImageClick(url, title)}
