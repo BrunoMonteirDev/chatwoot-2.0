@@ -1365,6 +1365,15 @@ const wahaInboxForWebhook = async (sessionName: string) => {
   return { ...inbox, accountId: ownership.accountId };
 };
 
+const wahaAccountForWebhook = async (sessionName: string) => {
+  const ownership = await wahaSessions.get(sessionName);
+  if (ownership) {
+    if (ownership.status === 'cleanup_pending') throw new WahaSessionOwnershipError('conflict');
+    return ownership.accountId;
+  }
+  return (await wahaInboxForWebhook(sessionName)).accountId;
+};
+
 const deliverOfficialHybridWahaInbound = async (message: IncomingWahaMessage) => {
   if (!config.hybridWahaBridgeSecret) return { handled: false };
   const ownership = await wahaSessions.get(message.session);
@@ -1689,8 +1698,8 @@ app.post('/webhooks/waha', (request, response) => {
         // associated with its provider ID. That is an expected race, not a
         // fatal webhook error. A later ACK/retry will update it normally.
         try {
-          const routedInbox = await wahaInboxForWebhook(event.session);
-          await chatwootBridge.withAccount(routedInbox.accountId, () => chatwootBridge.updateWhatsAppMessageStatus(externalMessageId('waha', id), status));
+          const accountId = await wahaAccountForWebhook(event.session);
+          await chatwootBridge.withAccount(accountId, () => chatwootBridge.updateWhatsAppMessageStatus(externalMessageId('waha', id), status));
           console.info('[waha] ACK applied', { messageId: id.slice(-12), ack, status });
         }
         catch (error) {
@@ -1698,7 +1707,7 @@ app.post('/webhooks/waha', (request, response) => {
           // IDs were introduced (they used the full true_/false_ value).
           if (rawId !== id) {
             try {
-              await chatwootBridge.withAccount((await wahaInboxForWebhook(event.session)).accountId, () => chatwootBridge.updateWhatsAppMessageStatus(externalMessageId('waha', rawId), status));
+              await chatwootBridge.withAccount(await wahaAccountForWebhook(event.session), () => chatwootBridge.updateWhatsAppMessageStatus(externalMessageId('waha', rawId), status));
               console.info('[waha] ACK applied to legacy ID', { messageId: id.slice(-12), ack, status });
               return;
             }
