@@ -4,6 +4,7 @@ import { inboxService } from '../integrations/chatwoot/inboxes';
 import { listenForEmbeddedSignupEvents, openEmbeddedSignup, type MetaEmbeddedSignupEventResult } from '../integrations/meta/embeddedSignup';
 import type { Inbox } from '../domain/currentUser';
 import { errorMessageForUser } from '../integrations/chatwoot/errors';
+import { InboxCollaboratorsPanel } from './InboxCollaboratorsPanel';
 
 interface Props {
   accountId: number;
@@ -22,6 +23,7 @@ const stageLabel: Record<Exclude<EmbeddedStage, 'idle' | 'error' | 'connected'>,
 export const MetaCloudSetup = ({ accountId, isDarkMode, inbox: existingInbox, onSaved }: Props) => {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [section, setSection] = useState<'connection' | 'collaborators'>('connection');
   const [embeddedStage, setEmbeddedStage] = useState<EmbeddedStage>('idle');
   const codeRef = useRef<string | null>(null);
   const resultRef = useRef<MetaEmbeddedSignupEventResult | null>(null);
@@ -75,12 +77,13 @@ export const MetaCloudSetup = ({ accountId, isDarkMode, inbox: existingInbox, on
   return <div className="max-w-lg space-y-4">
     <div><h4 className="font-bold">API oficial do WhatsApp</h4><p className="mt-1 text-xs text-[#8696a0]">O Chatwoot criará e administrará uma inbox nativa <code>Channel::Whatsapp</code>. Tokens e webhook permanecem no backend do Chatwoot.</p></div>
     {existingInbox && !nativeInbox && <p className="flex gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600"><AlertCircle className="h-4 w-4 shrink-0" />Esta inbox não é WhatsApp nativa. Para evitar híbrido nesta fase, crie uma nova inbox oficial.</p>}
-    <div className={`space-y-3 rounded-xl border p-4 ${card}`}>
+    {nativeInbox && <div className="flex gap-1 overflow-x-auto border-b border-white/10 px-1"><button type="button" onClick={() => setSection('connection')} className={`rounded-t-lg px-3 py-2 text-xs font-semibold ${section === 'connection' ? 'bg-[#00a884] text-white' : 'text-[#8696a0] hover:bg-white/5'}`}>WhatsApp oficial</button><button type="button" onClick={() => setSection('collaborators')} className={`rounded-t-lg px-3 py-2 text-xs font-semibold ${section === 'collaborators' ? 'bg-[#00a884] text-white' : 'text-[#8696a0] hover:bg-white/5'}`}>Colaboradores</button></div>}
+    {nativeInbox && section === 'collaborators' ? <InboxCollaboratorsPanel accountId={accountId} inboxId={existingInbox.id} isDarkMode={isDarkMode} onSaved={async () => { await onSaved(existingInbox); }} /> : <div className={`space-y-3 rounded-xl border p-4 ${card}`}>
       <p className="text-xs text-[#8696a0]">O fluxo nativo da Meta oferece número novo/API ou WhatsApp Business App com coexistência. A confirmação vem do evento oficial; esta interface não grava metadados ou tokens paralelos.</p>
       {embeddedStage === 'connected' && <p className="flex items-center gap-2 text-xs text-[#00a884]"><CheckCircle2 className="h-4 w-4" />Inbox oficial conectada pelo Chatwoot.</p>}
       {saving && embeddedStage !== 'idle' && embeddedStage !== 'error' ? <p className="flex items-center gap-2 text-xs text-[#8696a0]"><Loader2 className="h-4 w-4 animate-spin" />{stageLabel[embeddedStage as Exclude<EmbeddedStage, 'idle' | 'error' | 'connected'>]}</p> : null}
       <button type="button" disabled={saving || Boolean(existingInbox && !nativeInbox)} onClick={() => void startEmbedded()} className="w-full rounded-xl bg-[#00a884] py-3 text-xs font-bold text-white disabled:opacity-40">{nativeInbox ? 'Conectar/reautorizar WhatsApp Business' : 'Conectar WhatsApp Business'}</button>
-    </div>
+    </div>}
     {error && <p className="flex gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-500"><AlertCircle className="h-4 w-4 shrink-0" />{error}</p>}
   </div>;
 };

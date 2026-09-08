@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, CheckCircle2, ChevronDown, Loader2, LogOut, QrCode, RefreshCw, RotateCcw, Save, Trash2, Users, X } from 'lucide-react';
-import type { AssignableAgent, Inbox } from '../domain/currentUser';
+import { AlertCircle, CheckCircle2, Loader2, LogOut, QrCode, RefreshCw, RotateCcw, Save, Trash2 } from 'lucide-react';
+import type { Inbox } from '../domain/currentUser';
 import { errorMessageForUser } from '../integrations/chatwoot/errors';
 import { inboxService } from '../integrations/chatwoot/inboxes';
 import { wahaClient, type WahaHistoryJob, type WahaHistoryRange, type WahaQrCode, type WahaSession } from '../integrations/waha/client';
 import { MetaCloudSetup } from './MetaCloudSetup';
+import { InboxCollaboratorsPanel } from './InboxCollaboratorsPanel';
 
 type Props = { accountId: number; inbox: Inbox; webhookUrl: string; isDarkMode: boolean; onSaved: () => Promise<void> | void };
 const statusLabel: Record<string, string> = { STOPPED: 'Parada', STARTING: 'Iniciando', SCAN_QR_CODE: 'Aguardando QR Code', WORKING: 'Conectada', FAILED: 'Erro' };
@@ -21,13 +22,7 @@ export const WahaSetup = ({ accountId, inbox, webhookUrl, isDarkMode, onSaved }:
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'general' | 'collaborators' | 'unofficial' | 'official'>('general');
   const [inboxName, setInboxName] = useState(inbox.name);
-  const [agents, setAgents] = useState<AssignableAgent[]>([]);
-  const [members, setMembers] = useState<number[]>([]);
-  const [membersLoading, setMembersLoading] = useState(false);
   const [savingName, setSavingName] = useState(false);
-  const [savingMembers, setSavingMembers] = useState(false);
-  const [isCollaboratorPickerOpen, setIsCollaboratorPickerOpen] = useState(false);
-  const [collaboratorQuery, setCollaboratorQuery] = useState('');
   const [historyRange, setHistoryRange] = useState<WahaHistoryRange>('30d');
   const [historyJob, setHistoryJob] = useState<WahaHistoryJob | null>(null);
   const [confirmAllHistory, setConfirmAllHistory] = useState(false);
@@ -46,19 +41,6 @@ export const WahaSetup = ({ accountId, inbox, webhookUrl, isDarkMode, onSaved }:
   useEffect(() => { void refresh(); }, []);
   useEffect(() => { setInboxName(inbox.name); }, [inbox.name]);
   useEffect(() => { setAssociatedSession(inbox.additionalAttributes.waha_session_name as string || ''); }, [inbox.additionalAttributes.waha_session_name]);
-  useEffect(() => {
-    let active = true;
-    setMembersLoading(true);
-    Promise.all([inboxService.listAgents(accountId), inboxService.listMembers(accountId, inbox.id)])
-      .then(([availableAgents, inboxMembers]) => {
-        if (!active) return;
-        setAgents(availableAgents);
-        setMembers(inboxMembers.map((agent) => agent.id));
-      })
-      .catch((cause) => { if (active) setError(errorMessageForUser(cause)); })
-      .finally(() => { if (active) setMembersLoading(false); });
-    return () => { active = false; };
-  }, [accountId, inbox.id]);
   useEffect(() => {
     let active = true;
     void wahaClient.getCurrentHistoryImport(context)
@@ -132,14 +114,6 @@ export const WahaSetup = ({ accountId, inbox, webhookUrl, isDarkMode, onSaved }:
     catch (cause) { setError(errorMessageForUser(cause)); }
     finally { setSavingName(false); }
   };
-  const toggleMember = (agentId: number) => setMembers((currentMembers) => currentMembers.includes(agentId) ? currentMembers.filter((id) => id !== agentId) : [...currentMembers, agentId]);
-  const saveMembers = async () => {
-    if (savingMembers) return;
-    setSavingMembers(true); setError(null);
-    try { const updated = await inboxService.setMembers(accountId, inbox.id, members); setMembers(updated.map((agent) => agent.id)); await onSaved(); }
-    catch (cause) { setError(errorMessageForUser(cause)); }
-    finally { setSavingMembers(false); }
-  };
   const qrSrc = qr ? (qr.data.startsWith('data:') ? qr.data : `data:${qr.mimetype};base64,${qr.data}`) : null;
   const isConnected = current?.status === 'WORKING';
   // A QR is only valid while the session is waiting for a scan. Keeping it on
@@ -149,8 +123,6 @@ export const WahaSetup = ({ accountId, inbox, webhookUrl, isDarkMode, onSaved }:
   }, [isConnected]);
   const hasSession = sessions.length > 0;
   const isAssociated = selected.length > 0 && associatedSession === selected;
-  const selectedAgents = agents.filter((agent) => members.includes(agent.id));
-  const availableAgents = agents.filter((agent) => !members.includes(agent.id) && agent.name.toLocaleLowerCase().includes(collaboratorQuery.trim().toLocaleLowerCase()));
   // The collaborators list is an overlay. The card must not clip it when the
   // picker opens near the bottom of the settings panel.
   return <div className={`mx-auto max-w-3xl overflow-visible rounded-2xl border ${card}`}>
@@ -161,19 +133,7 @@ export const WahaSetup = ({ accountId, inbox, webhookUrl, isDarkMode, onSaved }:
     <div className="space-y-4 p-5">
     {error && <div className="flex gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400"><AlertCircle className="h-4 w-4 shrink-0" />{error}</div>}
     {tab === 'general' && <section className="space-y-3"><div><h5 className="text-sm font-bold">Nome da caixa de entrada</h5><p className="mt-1 text-xs text-[#8696a0]">Este nome é exibido para a equipe na lista de canais.</p></div><div className="flex gap-2"><input value={inboxName} onChange={(event) => setInboxName(event.target.value)} maxLength={160} className={`min-w-0 flex-1 rounded-xl border px-3 py-3 text-sm ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-gray-300 bg-white'}`} /><button type="button" onClick={() => void saveInboxName()} disabled={!inboxName.trim() || inboxName.trim() === inbox.name || savingName} className="rounded-xl bg-[#00a884] px-4 text-xs font-bold text-white disabled:opacity-40">{savingName ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}<span className="sr-only">Salvar nome</span></button></div></section>}
-    {tab === 'collaborators' && <section className="relative z-50"><div className="flex items-start justify-between gap-4"><div><h5 className="flex items-center gap-2 text-sm font-bold"><Users className="h-4 w-4 text-[#00a884]" />Colaboradores</h5><p className="mt-1 text-xs text-[#8696a0]">Escolha quem pode visualizar e atender as conversas desta caixa.</p></div><button type="button" onClick={() => void saveMembers()} disabled={membersLoading || savingMembers} className="shrink-0 rounded-lg bg-[#00a884] px-4 py-2 text-xs font-bold text-white shadow-sm transition-colors hover:bg-[#008069] disabled:opacity-40">{savingMembers ? 'Salvando…' : 'Salvar alterações'}</button></div>
-      <div className="mt-5 rounded-xl border border-white/10 bg-black/10 p-3">
-        <label className="mb-2 block text-[11px] font-medium text-[#8696a0]">Agentes com acesso a esta caixa</label>
-        {membersLoading ? <p className="p-3 text-xs text-[#8696a0]"><Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" />Carregando agentes…</p> : <div className="relative">
-          <div role="combobox" aria-expanded={isCollaboratorPickerOpen} tabIndex={0} onClick={() => setIsCollaboratorPickerOpen((open) => !open)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setIsCollaboratorPickerOpen((open) => !open); } }} className={`flex min-h-12 w-full cursor-pointer flex-wrap items-center gap-1.5 rounded-lg border px-2.5 py-2 text-left transition-colors ${isCollaboratorPickerOpen ? 'border-[#00a884] ring-1 ring-[#00a884]/30' : 'border-white/10 hover:border-[#8696a0]/50'} ${isDarkMode ? 'bg-[#202c33]' : 'bg-white'}`}>
-            {selectedAgents.length ? selectedAgents.map((agent) => <span key={agent.id} className="flex max-w-full items-center gap-1 rounded-md bg-[#2a3942] px-2 py-1 text-[11px] font-medium text-[#e9edef]" onClick={(event) => event.stopPropagation()}><span className="grid h-4 w-4 place-items-center overflow-hidden rounded-full bg-[#00a884]/20 text-[8px] text-[#00a884]">{agent.avatarUrl ? <img src={agent.avatarUrl} alt="" className="h-full w-full object-cover" /> : agent.name.slice(0, 2).toUpperCase()}</span><span className="max-w-32 truncate">{agent.name}</span><button type="button" onClick={() => toggleMember(agent.id)} aria-label={`Remover ${agent.name}`} className="rounded p-0.5 text-[#aebac1] hover:bg-white/10 hover:text-white"><X className="h-3 w-3" /></button></span>) : <span className="px-1 text-xs text-[#8696a0]">Selecione os agentes que terão acesso</span>}
-            <ChevronDown className={`ml-auto h-4 w-4 shrink-0 text-[#8696a0] transition-transform ${isCollaboratorPickerOpen ? 'rotate-180' : ''}`} />
-          </div>
-          {isCollaboratorPickerOpen && <><button type="button" aria-label="Fechar seleção de colaboradores" onClick={() => setIsCollaboratorPickerOpen(false)} className="fixed inset-0 z-30 cursor-default" /><div className={`absolute z-40 mt-2 w-full overflow-hidden rounded-xl border shadow-2xl ${isDarkMode ? 'border-[#374248] bg-[#202c33]' : 'border-gray-200 bg-white'}`}><div className="border-b border-white/10 p-2"><input autoFocus value={collaboratorQuery} onChange={(event) => setCollaboratorQuery(event.target.value)} placeholder="Buscar agente…" className={`w-full rounded-lg border px-2.5 py-2 text-xs outline-none ${isDarkMode ? 'border-white/10 bg-[#111b21] text-white' : 'border-gray-200 bg-gray-50 text-[#111b21]'}`} /></div><div className="max-h-52 overflow-y-auto p-1.5">{availableAgents.length ? availableAgents.map((agent) => <button key={agent.id} type="button" onClick={() => { toggleMember(agent.id); setCollaboratorQuery(''); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs hover:bg-white/10"><span className="grid h-6 w-6 place-items-center overflow-hidden rounded-full bg-[#00a884]/20 text-[9px] font-bold text-[#00a884]">{agent.avatarUrl ? <img src={agent.avatarUrl} alt="" className="h-full w-full object-cover" /> : agent.name.slice(0, 2).toUpperCase()}</span>{agent.name}</button>) : <p className="p-3 text-center text-xs text-[#8696a0]">Nenhum outro agente encontrado.</p>}</div></div></>}
-        </div>}
-        <p className="mt-2 text-[11px] leading-4 text-[#8696a0]">Os agentes selecionados terão acesso às conversas desta inbox. Remova um agente para retirar o acesso.</p>
-      </div>
-    </section>}
+    {tab === 'collaborators' && <InboxCollaboratorsPanel accountId={accountId} inboxId={inbox.id} isDarkMode={isDarkMode} onSaved={onSaved} />}
     {tab === 'unofficial' && <section className="space-y-5">
       <div><h5 className="font-bold">Conexão WhatsApp não oficial</h5><p className="mt-1 text-xs text-[#8696a0]">Conecte uma sessão WAHA por QR Code. A conexão é privada desta inbox.</p></div>
 
