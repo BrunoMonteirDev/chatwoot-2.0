@@ -23,6 +23,7 @@ import { enforceRateLimit } from './rateLimit.js';
 import { wahaTransport, WahaApiError } from './waha.js';
 import { WahaSessionOwnershipError, WahaSessionStore } from './wahaSessionStore.js';
 import { deleteWahaInbox } from './wahaInboxDeletion.js';
+import { retryPendingWahaCleanup } from './wahaPendingCleanup.js';
 import { normalizeWahaMessageId, parseIncomingWahaGroupLifecycle, parseIncomingWahaMessage, parseIncomingWahaMutation, parseIncomingWahaReaction, parseWahaHistoryMessage, parseWahaWebhook, wahaGroupSourceId, type IncomingWahaMessage } from './wahaEvent.js';
 import { createTrackId } from './track.js';
 import { WahaHistoryStore, type WahaHistoryJob, type WahaHistoryRange } from './wahaHistoryStore.js';
@@ -1885,4 +1886,7 @@ app.post('/webhooks/chatwoot', async (request, response) => {
     return response.status(502).json({ error: 'Could not validate Chatwoot webhook' });
   }
 });
+const retryPendingWahaCleanups = () => retryPendingWahaCleanup({ sessions: wahaSessions, waha: wahaTransport, log: console }).catch(error => console.warn('[KOPLA_WAHA_CLEANUP] worker_failed', { kind: error instanceof Error ? error.name : 'unknown' }));
+void retryPendingWahaCleanups();
+setInterval(retryPendingWahaCleanups, 60_000).unref();
 app.listen(config.port, () => console.info(`[evolution-bridge] listening on :${config.port}`));

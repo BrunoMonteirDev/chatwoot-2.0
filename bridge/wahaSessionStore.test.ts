@@ -28,6 +28,18 @@ describe('WahaSessionStore', () => {
     await expect(store.reserve({ accountId: 42, inboxId: 101, sessionName: 'session-a' })).rejects.toMatchObject({ code: 'conflict' });
   });
 
+  it('keeps cleanup_pending ownership reserved for later cleanup', async () => {
+    const { store } = await storeAt();
+    await store.reserve({ accountId: 42, inboxId: 100, sessionName: 'session-pending' });
+    await store.update('session-pending', { status: 'cleanup_pending' });
+    await store.reserve({ accountId: 42, inboxId: 100, sessionName: 'session-normal' });
+
+    await expect(store.reserve({ accountId: 42, inboxId: 100, sessionName: 'session-pending' })).rejects.toMatchObject({ code: 'conflict' });
+    await expect(store.reserve({ accountId: 43, inboxId: 200, sessionName: 'session-pending' })).rejects.toMatchObject({ code: 'conflict' });
+    expect(await store.listCleanupPending()).toMatchObject([{ accountId: 42, inboxId: 100, sessionName: 'session-pending', status: 'cleanup_pending' }]);
+    expect((await store.listCleanupPending()).map(item => item.sessionName)).not.toContain('session-normal');
+  });
+
   it('serializes concurrent claims so only one inbox owns a session', async () => {
     const { store } = await storeAt();
     const result = await Promise.allSettled([

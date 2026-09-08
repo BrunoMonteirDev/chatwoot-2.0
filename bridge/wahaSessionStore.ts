@@ -47,6 +47,7 @@ export class WahaSessionStore {
   }
   async get(sessionName: string) { return (await this.read())[sessionName] || null; }
   async list(accountId: number, inboxId: number) { return Object.values(await this.read()).filter(item => item.accountId === accountId && item.inboxId === inboxId); }
+  async listCleanupPending() { return Object.values(await this.read()).filter(item => item.status === 'cleanup_pending'); }
   async assertOwned(accountId: number, inboxId: number, sessionName: string) {
     const ownership = await this.get(sessionName);
     if (!ownership) throw new WahaSessionOwnershipError('not_found');
@@ -56,6 +57,7 @@ export class WahaSessionStore {
   async reserve(input: Omit<WahaSessionOwnership, 'provider' | 'createdAt' | 'updatedAt'>) {
     return this.locked(async () => {
       const values = await this.read(); const existing = values[input.sessionName];
+      if (existing?.status === 'cleanup_pending') throw new WahaSessionOwnershipError('conflict');
       if (existing && (existing.accountId !== input.accountId || existing.inboxId !== input.inboxId)) throw new WahaSessionOwnershipError('conflict');
       const now = new Date().toISOString(); const record: WahaSessionOwnership = { ...existing, ...input, provider: 'waha', createdAt: existing?.createdAt || now, updatedAt: now };
       values[input.sessionName] = record; await this.write(values); return record;
