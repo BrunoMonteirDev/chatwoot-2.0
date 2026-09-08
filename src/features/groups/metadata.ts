@@ -18,8 +18,9 @@ export interface GroupParticipant {
   avatarUrl?: string;
   admin?: string | null;
 }
-export interface GroupMetadata { id: string; subject?: string; description?: string; participants: GroupParticipant[]; transport: WhatsAppTransport; canEditDescription: boolean; }
+export interface GroupMetadata { id: string; subject?: string; avatarUrl?: string; description?: string; participants: GroupParticipant[]; memberCount?: number; transport: WhatsAppTransport; canEditDescription: boolean; }
 const bridgeUrl = (import.meta.env.VITE_BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
+const metadataRequests = new Map<string, Promise<{ group: GroupMetadata }>>();
 const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
   if (!bridgeUrl) throw new BridgeApiError(503, null, 'O endereço seguro do bridge não está configurado.');
   const response = await fetch(`${bridgeUrl}${path}`, { ...init, headers: { ...authenticatedBridgeHeaders(), ...init.headers } });
@@ -28,7 +29,15 @@ const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
   return body as T;
 };
 export const groupMetadataClient = {
-  get: (accountId: number, inboxId: number, conversationId: number, transport?: WhatsAppTransport | null) => request<{ group: GroupMetadata }>(`/groups/metadata?${new URLSearchParams({ accountId: String(accountId), inboxId: String(inboxId), conversationId: String(conversationId), ...(transport ? { transport } : {}) })}`),
+  get: (accountId: number, inboxId: number, conversationId: number, transport?: WhatsAppTransport | null) => {
+    const key = `${accountId}:${inboxId}:${conversationId}:${transport || ''}`;
+    const current = metadataRequests.get(key);
+    if (current) return current;
+    const promise = request<{ group: GroupMetadata }>(`/groups/metadata?${new URLSearchParams({ accountId: String(accountId), inboxId: String(inboxId), conversationId: String(conversationId), ...(transport ? { transport } : {}) })}`)
+      .finally(() => { metadataRequests.delete(key); });
+    metadataRequests.set(key, promise);
+    return promise;
+  },
   updateDescription: (inboxId: number, conversationId: number, transport: WhatsAppTransport, description: string) => request<{ group: GroupMetadata }>('/groups/description', { method: 'PATCH', body: JSON.stringify({ inboxId, conversationId, transport, description }) }),
   addParticipant: (inboxId: number, conversationId: number, transport: WhatsAppTransport, participant: string) => request<{ group: GroupMetadata }>('/groups/participants', { method: 'POST', body: JSON.stringify({ inboxId, conversationId, transport, participant }) }),
   leave: (inboxId: number, conversationId: number, transport: WhatsAppTransport) => request<void>('/groups/leave', { method: 'POST', body: JSON.stringify({ inboxId, conversationId, transport }) }),

@@ -32,10 +32,10 @@ describe('toChatMessages reactions', () => {
     expect(toChatMessages([item])[0]).toMatchObject({ isEdited: true, whatsappPreviousContent: 'Texto original' });
   });
 
-  it('identifica participante de grupo por JID, mantém cor estável e mostra nome e número', () => {
+  it('identifica participante de grupo por JID, mantém cor estável e mostra somente o nome conhecido', () => {
     const item = baseMessage({ contentAttributes: { whatsapp_participant_jid: '5511999999999@s.whatsapp.net', whatsapp_participant_name: 'Ana' } });
     const [first] = toChatMessages([item]); const [second] = toChatMessages([item]);
-    expect(first.senderName).toBe('Ana · +55 11 99999-9999');
+    expect(first.senderName).toBe('Ana');
     expect(first.senderColor).toBe(second.senderColor);
     expect(first.senderIdentity).toBe('5511999999999@s.whatsapp.net');
   });

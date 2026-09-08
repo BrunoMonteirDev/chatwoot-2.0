@@ -15,4 +15,13 @@ describe('GroupMetadataCache', () => {
     cache.set({ id: '1@g.us', transport: 'evolution', canEditDescription: true, participants: [] });
     expect(cache.get('waha', '1@g.us')).toBeNull();
   });
+
+  it('invalida metadata após evento do provider sem afetar outro transport', () => {
+    const cache = new GroupMetadataCache();
+    cache.set({ id: '1@g.us', transport: 'waha', subject: 'Antigo', canEditDescription: true, participants: [] });
+    cache.set({ id: '1@g.us', transport: 'evolution', subject: 'Evolution', canEditDescription: true, participants: [] });
+    cache.invalidate('waha', '1@g.us');
+    expect(cache.get('waha', '1@g.us')).toBeNull();
+    expect(cache.get('evolution', '1@g.us')?.subject).toBe('Evolution');
+  });
 });

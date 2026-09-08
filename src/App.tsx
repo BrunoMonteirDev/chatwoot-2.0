@@ -1353,6 +1353,10 @@ export default function App() {
                   onGroupSubjectResolved={(subject) => {
                     if (selectedConversationId) applyConversationUpdate(selectedConversationId, { contactName: subject });
                   }}
+                  onGroupMetadataResolved={(metadata) => {
+                    if (!selectedConversationId) return;
+                    applyConversationUpdate(selectedConversationId, { ...(metadata.subject ? { contactName: metadata.subject } : {}), ...(metadata.avatarUrl ? { contactAvatarUrl: metadata.avatarUrl } : {}) });
+                  }}
                   onContactProfileResolved={(profile) => {
                     if (!selectedConversationId) return;
                     applyConversationUpdate(selectedConversationId, { ...(profile.name ? { contactName: profile.name } : {}), ...(profile.avatarUrl ? { contactAvatarUrl: profile.avatarUrl } : {}) });

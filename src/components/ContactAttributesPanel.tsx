@@ -74,6 +74,7 @@ interface Props {
   onOpenContent?: () => void;
   onOpenImage?: (url: string, title?: string) => void;
   onGroupSubjectResolved?: (subject: string) => void;
+  onGroupMetadataResolved?: (metadata: GroupMetadata) => void;
 }
 
 export const ContactAttributesPanel: React.FC<Props> = ({
@@ -92,6 +93,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
   onOpenContent,
   onOpenImage,
   onGroupSubjectResolved,
+  onGroupMetadataResolved,
 }) => {
   // Atributos e Conteúdo têm uma única implementação: ContactDetailsPanel.
   // Este painel permanece apenas como a aba Dados específica de grupos.
@@ -145,9 +147,10 @@ export const ContactAttributesPanel: React.FC<Props> = ({
       if (!active) return;
       setGroupMetadata(group); setDescriptionDraft(group.description || '');
       if (group.subject?.trim()) onGroupSubjectResolved?.(group.subject.trim());
+      onGroupMetadataResolved?.(group);
       setGroupMembers(group.participants.map(member => {
         const phone = participantPhone(member.jid, member.phoneNumber);
-        return { id: member.jid, name: member.name || phone || member.jid, phone: phone || member.jid, avatar: member.avatarUrl, isAdmin: Boolean(member.admin), status: member.admin ? 'Administrador' : undefined, avatarBg: participantColor(member.jid) };
+        return { id: member.jid, name: member.displayName || member.name || phone || member.jid, phone: phone || member.jid, avatar: member.avatarUrl, isAdmin: Boolean(member.admin), status: member.admin === 'superadmin' ? 'Superadministrador' : member.admin ? 'Administrador' : undefined, avatarBg: participantColor(member.jid) };
       }));
     }).catch(error => { if (active) setGroupError(error instanceof Error ? error.message : 'Não foi possível carregar o grupo.'); });
     return () => { active = false; };
@@ -196,9 +199,10 @@ export const ContactAttributesPanel: React.FC<Props> = ({
   const applyGroup = (group: GroupMetadata) => {
     setGroupMetadata(group); setDescriptionDraft(group.description || '');
     if (group.subject?.trim()) onGroupSubjectResolved?.(group.subject.trim());
+    onGroupMetadataResolved?.(group);
     setGroupMembers(group.participants.map(member => {
       const phone = participantPhone(member.jid, member.phoneNumber);
-      return { id: member.jid, name: member.name || phone || member.jid, phone: phone || member.jid, avatar: member.avatarUrl, isAdmin: Boolean(member.admin), status: member.admin ? 'Administrador' : undefined, avatarBg: participantColor(member.jid) };
+      return { id: member.jid, name: member.displayName || member.name || phone || member.jid, phone: phone || member.jid, avatar: member.avatarUrl, isAdmin: Boolean(member.admin), status: member.admin === 'superadmin' ? 'Superadministrador' : member.admin ? 'Administrador' : undefined, avatarBg: participantColor(member.jid) };
     }));
   };
   const handleAddMember = async (e: React.FormEvent) => {
@@ -594,9 +598,9 @@ export const ContactAttributesPanel: React.FC<Props> = ({
             <div className="flex flex-col items-center text-center p-5 border-b border-black/5 dark:border-white/5 space-y-2">
               <div className="relative group cursor-pointer">
                 <div className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center bg-[#0284c7] border-2 border-[#00a884] shadow-lg text-white font-bold text-2xl">
-                  {chat.avatarType === 'image' && chat.avatar ? (
+                  {groupMetadata?.avatarUrl || (chat.avatarType === 'image' && chat.avatar) ? (
                     <img
-                      src={chat.avatar}
+                      src={groupMetadata?.avatarUrl || chat.avatar}
                       alt={groupDisplayName}
                       className="w-full h-full object-cover"
                       referrerPolicy="no-referrer"
@@ -612,7 +616,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
                   {groupDisplayName}
                 </h2>
                 <p className="text-xs text-[#8696a0] mt-1 font-medium">
-                  Grupo · <span className="text-[#00a884] font-semibold">{groupMembers.length} membros</span>
+                  Grupo · <span className="text-[#00a884] font-semibold">{groupMetadata?.memberCount ?? groupMembers.length} membros</span>
                 </p>
                 {groupError && <p className="mt-2 text-xs text-red-400">{groupError}</p>}
               </div>
@@ -671,7 +675,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
             <div className="p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-[#8696a0]">
-                  {groupMembers.length} membros
+                  {groupMetadata?.memberCount ?? groupMembers.length} membros
                 </span>
                 <button
                   type="button"

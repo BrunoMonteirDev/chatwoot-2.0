@@ -1,7 +1,7 @@
 import type { WhatsAppTransport } from './providers.js';
 
 export interface GroupMetadata {
-  id: string;
+  id: string; avatarUrl?: string;
   subject?: string;
   description?: string;
   participants: Array<{ jid: string; name?: string; phoneNumber?: string; avatarUrl?: string; admin?: string | null }>;
@@ -21,6 +21,7 @@ export class GroupMetadataCache {
     return item.value;
   }
   set(value: GroupMetadata) { this.values.set(this.key(value.transport, value.id), { value, expiresAt: this.now() + this.ttlMs }); return value; }
+  invalidate(transport: WhatsAppTransport, groupJid: string) { this.values.delete(this.key(transport, groupJid)); }
 }
 
 export const groupMetadataCache = new GroupMetadataCache();

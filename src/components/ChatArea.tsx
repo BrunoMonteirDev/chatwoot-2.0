@@ -72,8 +72,8 @@ import { shouldSendMessageOnEnter, type SendMessageShortcut } from '../features/
 import { audioDurationLabel, isAtConversationBottom, preservedScrollTopAfterPrepend } from '../features/messages/scroll';
 import { useContactConversations } from '../features/contacts/useContactConversations';
 import { useConversationAttachments } from '../features/attachments/useConversationAttachments';
-import { groupMetadataClient, type GroupParticipant } from '../features/groups/metadata';
-import { participantColor, participantLabel, participantPhone } from '../features/groups/participant';
+import { groupMetadataClient, type GroupMetadata, type GroupParticipant } from '../features/groups/metadata';
+import { indexGroupParticipants, participantColor, participantLabel, participantPhone } from '../features/groups/participant';
 import { mentionReplacements, mentionTargetFor, participantMentionLabel, pruneMentionSelections, type MentionSelection } from '../features/groups/mentions';
 import { isPhoneDefaultContactName, providerProfileClient } from '../features/contacts/providerProfile';
 
@@ -628,6 +628,7 @@ interface Props {
   onCopyConversationLink?: () => void;
   onOpenDirectConversation?: (conversationId: number) => void;
   onGroupSubjectResolved?: (subject: string) => void;
+  onGroupMetadataResolved?: (metadata: Pick<GroupMetadata, 'subject' | 'avatarUrl'>) => void;
   onContactProfileResolved?: (profile: { name?: string; avatarUrl?: string }) => void;
 }
 
@@ -691,6 +692,7 @@ export const ChatArea: React.FC<Props> = ({
   onCopyConversationLink,
   onOpenDirectConversation,
   onGroupSubjectResolved,
+  onGroupMetadataResolved,
   onContactProfileResolved,
 }) => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -786,6 +788,10 @@ export const ChatArea: React.FC<Props> = ({
   const [replyTo, setReplyTo] = useState<ReplyTo | null>(null);
   const conversationInbox = conversation ? inboxes.find((inbox) => inbox.id === conversation.inboxId) : undefined;
   const [groupParticipants, setGroupParticipants] = useState<Record<string, GroupParticipant>>({});
+  const applyGroupMetadata = (group: GroupMetadata) => {
+    setGroupParticipants(indexGroupParticipants(group.participants));
+    onGroupMetadataResolved?.(group);
+  };
   const [providerContactProfile, setProviderContactProfile] = useState<{ name?: string; avatarUrl?: string }>({});
   const [isSyncingContactProfile, setIsSyncingContactProfile] = useState(false);
   const automaticallySyncedContactProfiles = useRef(new Set<string>());
@@ -796,7 +802,8 @@ export const ChatArea: React.FC<Props> = ({
     let active = true;
     if (!accountId) return;
     void groupMetadataClient.get(accountId, conversation.inboxId, conversation.id, transport).then(({ group }) => {
-      if (active) setGroupParticipants(Object.fromEntries(group.participants.map(participant => [participant.jid, participant])));
+      if (!active) return;
+      applyGroupMetadata(group);
     }).catch(() => { if (active) setGroupParticipants({}); });
     return () => { active = false; };
   }, [chat.id, chat.isGroup, conversation?.id, conversation?.inboxId]);
@@ -906,7 +913,7 @@ export const ChatArea: React.FC<Props> = ({
   const groupMembers = React.useMemo(() => {
     const membersMap = new Map<string, GroupMember>();
     defaultGroupMembers.forEach((m) => membersMap.set(m.providerId, m));
-    Object.values(groupParticipants).forEach((participant) => {
+    Array.from(new Set<GroupParticipant>(Object.values(groupParticipants))).forEach((participant) => {
       const providerId = participant.providerId || participant.jid;
       if (!providerId || membersMap.has(providerId)) return;
       const phone = participant.phone || participantPhone(participant.phoneJid || participant.jid, participant.phoneNumber);
@@ -1890,9 +1897,8 @@ export const ChatArea: React.FC<Props> = ({
           const isGroupMessage = Boolean(chat.isGroup || conversation?.isGroup || msg.whatsappRemoteJid?.endsWith('@g.us'));
           const groupParticipant = msg.senderIdentity ? groupParticipants[msg.senderIdentity] : undefined;
           const participantAvatar = groupParticipant?.avatarUrl;
-          const unresolvedIdentity = msg.senderName === msg.senderIdentity || msg.senderName?.endsWith('@lid') || msg.senderName?.startsWith('+');
           const senderName = groupParticipant
-            ? participantLabel(unresolvedIdentity ? groupParticipant.name : msg.senderName, groupParticipant.jid, groupParticipant.phoneNumber)
+            ? participantLabel(groupParticipant.displayName || groupParticipant.name, groupParticipant.phoneJid || groupParticipant.jid, groupParticipant.phoneNumber || groupParticipant.phone)
             : msg.senderName;
           const senderPhone = msg.senderPhone || (groupParticipant ? participantPhone(groupParticipant.jid, groupParticipant.phoneNumber) : undefined);
           const showDatePill =
@@ -2786,6 +2792,7 @@ export const ChatArea: React.FC<Props> = ({
           onOpenContent={() => setContactPanelTab('content')}
           onOpenImage={(url, title) => onImageClick(url, title)}
           onGroupSubjectResolved={onGroupSubjectResolved}
+          onGroupMetadataResolved={applyGroupMetadata}
         />
       )}
 

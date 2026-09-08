@@ -51,7 +51,7 @@ export interface SentEvolutionMessage {
   remoteJid: string;
   fromMe: boolean;
 }
-export interface EvolutionGroupMetadata { id: string; subject?: string; description?: string; participants: Array<{ jid: string; name?: string; phoneNumber?: string; admin?: string | null }>; }
+export interface EvolutionGroupMetadata { id: string; subject?: string; avatarUrl?: string; description?: string; participants: Array<{ jid: string; name?: string; phoneNumber?: string; admin?: string | null }>; }
 
 // Evolution v2.3 validates one Unicode code point, whereas WhatsApp's red
 // heart from the browser is normally `U+2764 U+FE0F`. Strip presentation and
@@ -139,7 +139,8 @@ const evolutionGroupMetadata = (payload: unknown, groupJid: string): EvolutionGr
     const phoneNumber = jid.match(/^(\d{8,15})@/)?.[1];
     return [{ jid, ...(typeof item.name === 'string' ? { name: item.name } : typeof item.pushName === 'string' ? { name: item.pushName } : {}), ...(phoneNumber ? { phoneNumber } : {}), ...(typeof item.admin === 'string' ? { admin: item.admin } : item.admin === null ? { admin: null } : item.admin === true ? { admin: 'admin' } : {}) }];
   }) : [];
-  return { id: typeof group.id === 'string' ? group.id : groupJid, ...(typeof group.subject === 'string' ? { subject: group.subject } : {}), ...(typeof group.desc === 'string' ? { description: group.desc } : typeof group.description === 'string' ? { description: group.description } : {}), participants };
+  const avatarUrl = [group.pictureUrl, group.profilePictureUrl, group.imgUrl].find((value): value is string => typeof value === 'string' && value.length > 0);
+  return { id: typeof group.id === 'string' ? group.id : groupJid, ...(typeof group.subject === 'string' ? { subject: group.subject } : {}), ...(avatarUrl ? { avatarUrl } : {}), ...(typeof group.desc === 'string' ? { description: group.desc } : typeof group.description === 'string' ? { description: group.description } : {}), participants };
 };
 
 export const evolutionBridge = {
