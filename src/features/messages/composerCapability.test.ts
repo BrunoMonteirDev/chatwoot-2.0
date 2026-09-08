@@ -5,6 +5,15 @@ const capability = (reason: string | null, allowed = false) => ({ applicable: tr
 
 describe('composer capability notice', () => {
   it('keeps normal Meta and internal notes editable', () => { expect(composerNotice(capability(null, true), null, false)).toBeNull(); expect(composerNotice(capability('waha_disconnected'), null, true)).toBeNull(); });
+  it('identifies a closed Meta window as a template requirement, not a disconnected provider', () => {
+    expect(composerNotice(capability('outside_window_template'), null, false)).toMatchObject({
+      title: 'Esta conversa está fora da janela de 24 horas.', action: 'template'
+    });
+  });
+  it('keeps Meta reauthorization and disconnection messages specific', () => {
+    expect(composerNotice(capability('reauthorization_required'), null, false)).toMatchObject({ description: 'A conexão com a Meta precisa ser reautorizada.' });
+    expect(composerNotice(capability('meta_disconnected'), null, false)).toMatchObject({ description: 'Reconecte a conta Meta para voltar a enviar mensagens.' });
+  });
   it('renders the server supplied blocked states without a transport selector', () => {
     expect(composerNotice(capability('outside_window_template'), null, false)).toMatchObject({ action: 'template' });
     expect(composerNotice(capability('reauthorization_required'), null, false)).toMatchObject({ action: 'manager' });

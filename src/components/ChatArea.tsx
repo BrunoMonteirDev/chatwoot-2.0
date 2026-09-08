@@ -63,7 +63,8 @@ import { quickNotesStorage, QUICK_NOTES_UPDATED_EVENT } from '../features/quickN
 import { MetaTemplatePicker } from './MetaTemplatePicker';
 import { ForwardMessageModal } from './ForwardMessageModal';
 import { metaCloudMetadataForInbox } from '../integrations/whatsapp/provider';
-import { canSendWhatsAppMessage, type OperationalWhatsAppConnection } from '../integrations/whatsapp/connection';
+import { type OperationalWhatsAppConnection, type WhatsAppSendCapability } from '../integrations/whatsapp/connection';
+import { composerNotice } from '../features/messages/composerCapability';
 import { finiteAudioDuration, recordingFile, recordingMimeType, releaseRecordingResources, type AudioRecordingPhase } from '../features/audio/recording';
 import { documentPresentation, filesFromTransfer, hasFilesInTransfer, triggerAttachmentDownload } from '../features/attachments/fileUtils';
 import { shouldSendMessageOnEnter, type SendMessageShortcut } from '../features/messages/sendMessageShortcut';
@@ -621,6 +622,7 @@ interface Props {
   accountId?: number | null;
   inboxes?: Inbox[];
   whatsappConnection?: OperationalWhatsAppConnection | null;
+  whatsappSendCapability?: WhatsAppSendCapability | null;
   sendMessageShortcut?: SendMessageShortcut;
   onCopyConversationLink?: () => void;
   onOpenDirectConversation?: (conversationId: number) => void;
@@ -683,6 +685,7 @@ export const ChatArea: React.FC<Props> = ({
   accountId = null,
   inboxes = [],
   whatsappConnection = null,
+  whatsappSendCapability = null,
   sendMessageShortcut = 'enter',
   onCopyConversationLink,
   onOpenDirectConversation,
@@ -828,8 +831,12 @@ export const ChatArea: React.FC<Props> = ({
       if (profile.name || profile.avatarUrl) onContactProfileResolved?.(profile);
     } finally { setIsSyncingContactProfile(false); }
   };
-  const externalSendBlocked = !canSendWhatsAppMessage(whatsappConnection, messageMode === 'privada');
-  const canUseMetaTemplates = !externalSendBlocked && Boolean(conversationInbox && metaCloudMetadataForInbox(conversationInbox));
+  const activeComposerNotice = composerNotice(whatsappSendCapability, whatsappConnection, messageMode === 'privada');
+  const externalSendBlocked = Boolean(activeComposerNotice);
+  const nativeMetaTemplatesAvailable = conversationInbox?.channelType === 'Channel::Whatsapp'
+    && whatsappSendCapability?.applicable
+    && whatsappSendCapability.can_send_message;
+  const canUseMetaTemplates = nativeMetaTemplatesAvailable || (!externalSendBlocked && Boolean(conversationInbox && metaCloudMetadataForInbox(conversationInbox)));
 
   // Context Menu State
   const { menuState, openContextMenu, closeContextMenu } = useContextMenu();
@@ -2419,6 +2426,10 @@ export const ChatArea: React.FC<Props> = ({
           ) : (
             /* Middle Textarea Input */
             <div className="flex items-center gap-2 md:block">
+            {activeComposerNotice && <div className={`mb-2 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${activeComposerNotice.action === 'template' ? 'border-amber-500/30 bg-amber-500/10 text-amber-500' : 'border-red-500/30 bg-red-500/10 text-red-400'}`}>
+              <span><strong>{activeComposerNotice.title}</strong> {activeComposerNotice.description}</span>
+              {activeComposerNotice.action === 'template' && canUseMetaTemplates && <button type="button" onClick={() => setShowTemplatePicker(true)} className="shrink-0 font-bold underline">Enviar template</button>}
+            </div>}
             <div className={`w-full min-w-0 flex-1 rounded-[28px] px-4 py-1 relative md:rounded-none md:px-0 ${messageMode === 'privada' ? isDarkMode ? 'bg-[#1a1710] md:bg-transparent' : 'bg-[#fffbeb] md:bg-transparent' : isDarkMode ? 'bg-[#202c33] md:bg-transparent' : 'bg-[#f0f2f5] md:bg-transparent'}`}>
               <textarea
                 ref={textareaRef}

@@ -40,12 +40,13 @@ import { getChatContextMenuItems } from './utils/contextMenuActions';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import { useAuth } from './features/auth/AuthContext';
 import { useInboxes } from './features/inboxes/useInboxes';
-import { errorMessageForUser } from './integrations/chatwoot/errors';
+import { ChatwootApiError, errorMessageForUser } from './integrations/chatwoot/errors';
 import { useConversations } from './features/conversations/useConversations';
 import { copyConversationLink } from './features/conversations/copyConversationLink';
 import { toChatListItem } from './features/conversations/toChatListItem';
 import { conversationForActiveRoute } from './features/conversations/directConversation';
 import { cacheRealtimeMessage, useConversationMessages } from './features/messages/useConversationMessages';
+import { composerNotice } from './features/messages/composerCapability';
 import { messageHistoryCache, messageHistoryPrefetcher } from './features/messages/MessageHistoryCache';
 import { showSystemMessagesFrom, uiSettingsWithSystemMessageVisibility, visibleConversationMessages } from './features/messages/systemMessageVisibility';
 import { sendMessageShortcutFrom, uiSettingsWithSendMessageShortcut } from './features/messages/sendMessageShortcut';
@@ -57,7 +58,7 @@ import { useContacts } from './features/contacts/useContacts';
 import { toContactListItem } from './features/contacts/toContactListItem';
 import { conversationService, type ConversationServerFilters } from './integrations/chatwoot/conversations';
 import { messageService } from './integrations/chatwoot/messages';
-import { canSendCapabilityMessage, canSendWhatsAppMessage, usesLegacyWhatsAppConnection, whatsappConnectionService, whatsappSendCapabilityService, type OperationalWhatsAppConnection, type WhatsAppSendCapability } from './integrations/whatsapp/connection';
+import { usesLegacyWhatsAppConnection, whatsappConnectionService, whatsappSendCapabilityService, type OperationalWhatsAppConnection, type WhatsAppSendCapability } from './integrations/whatsapp/connection';
 import { authService } from './integrations/chatwoot/auth';
 import { browserNotifications } from './features/notifications/browserNotifications';
 import type { ConversationMessage, ConversationSummary } from './domain/currentUser';
@@ -460,8 +461,30 @@ export default function App() {
     if (!currentAccount || !selectedConversation || inbox?.channelType !== 'Channel::Whatsapp') { setWhatsappSendCapability(null); return; }
     let active = true;
     const refresh = () => whatsappSendCapabilityService.get(currentAccount.id, selectedConversation.id)
-      .then((capability) => { if (active) setWhatsappSendCapability(capability); })
-      .catch(() => { if (active) setWhatsappSendCapability(null); });
+      .then((capability) => {
+        if (!active) return;
+        console.info('[KOPLA_COMPOSER_CAPABILITY]', {
+          conversationId: selectedConversation.id,
+          inboxId,
+          applicable: capability.applicable,
+          canSendMessage: capability.can_send_message,
+          canSendFreeform: capability.can_send_freeform,
+          requiresTemplate: capability.requires_template,
+          reason: capability.send_block_reason,
+          connectionState: capability.connection_state,
+        });
+        setWhatsappSendCapability(capability);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        console.warn('[KOPLA_SEND_CAPABILITY_ERROR]', {
+          accountId: currentAccount.id,
+          conversationId: selectedConversation.id,
+          status: error instanceof ChatwootApiError ? error.status : undefined,
+          error: error instanceof Error ? error.name : 'unknown',
+        });
+        setWhatsappSendCapability(null);
+      });
     void refresh();
     const interval = window.setInterval(() => void refresh(), 60_000);
     return () => { active = false; window.clearInterval(interval); };
@@ -813,8 +836,9 @@ export default function App() {
 
   // Handle sending message
   const handleSendMessage = (chatId: string, text: string, attachments?: File[], isPrivate?: boolean, replyTo?: import('./types').ReplyTo | null) => {
-    if (!canSendWhatsAppMessage(whatsappConnection, Boolean(isPrivate)) || !canSendCapabilityMessage(whatsappSendCapability, Boolean(isPrivate))) {
-      addToast('O WhatsApp desta inbox está desconectado. Reconecte a sessão para enviar mensagens.', 'error');
+    const notice = composerNotice(whatsappSendCapability, whatsappConnection, Boolean(isPrivate));
+    if (notice) {
+      addToast(`${notice.title} ${notice.description}`, 'error');
       return Promise.resolve(false);
     }
     if (selectedConversationId && chatId === String(selectedConversationId)) {
