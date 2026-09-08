@@ -2,13 +2,17 @@ import { createHmac, randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type { Server } from 'node:http';
+import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 let server: Server;
+let railsServer: Server;
 let base: string;
+let railsBase: string;
 let dir: string;
+const railsRequests: string[] = [];
 let waha: typeof import('./waha').wahaTransport;
 let sessions: import('./wahaSessionStore').WahaSessionStore;
 const secret = 'hybrid-route-test-secret';
@@ -25,7 +29,16 @@ const path = (operation: string) => `/internal/official-whatsapp/waha/${operatio
 
 beforeAll(async () => {
   dir = await mkdtemp(`${tmpdir()}/hybrid-routes-`);
-  for (const [key, value] of Object.entries({ BRIDGE_WEBHOOK_SECRET: 'test', CHATWOOT_BASE_URL: 'http://127.0.0.1:1', HYBRID_WAHA_BRIDGE_SECRET: secret,
+  railsServer = createServer((request, response) => {
+    railsRequests.push(request.url || '');
+    response.setHeader('Content-Type', 'application/json');
+    if (request.url === '/internal/official_whatsapp/waha/inbound') response.end(JSON.stringify({ handled: true, ignored: true }));
+    else { response.statusCode = 500; response.end(JSON.stringify({ error: 'unexpected legacy Chatwoot request' })); }
+  });
+  railsServer.listen(0, '127.0.0.1');
+  await new Promise<void>(resolve => railsServer.once('listening', resolve));
+  railsBase = `http://127.0.0.1:${(railsServer.address() as { port: number }).port}`;
+  for (const [key, value] of Object.entries({ BRIDGE_WEBHOOK_SECRET: 'test', WAHA_WEBHOOK_SECRET: 'test', CHATWOOT_BASE_URL: railsBase, HYBRID_WAHA_BRIDGE_SECRET: secret,
     BRIDGE_REDIS_URL: '', BRIDGE_DEDUP_FILE: `${dir}/dedup.json`, BRIDGE_WAHA_SESSION_OWNERSHIP_FILE: `${dir}/sessions.json` })) vi.stubEnv(key, value);
   const { app } = await import('./index');
   waha = (await import('./waha')).wahaTransport;
@@ -33,12 +46,14 @@ beforeAll(async () => {
   sessions = new Store(`${dir}/sessions.json`);
   vi.spyOn(waha, 'getSession').mockResolvedValue(session);
   vi.spyOn(waha, 'sendText').mockResolvedValue({ messageId: 'true_chat_test' } as never);
+  vi.spyOn(waha, 'getChatAvatarUrl').mockResolvedValue(undefined);
   server = app.listen(0, process.env.HYBRID_RAILS_CONTAINER ? '0.0.0.0' : '127.0.0.1');
   await new Promise<void>(resolve => server.once('listening', resolve));
   base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 });
 afterAll(async () => {
   if (server) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  if (railsServer) await new Promise<void>((resolve, reject) => railsServer.close(error => error ? reject(error) : resolve()));
   vi.restoreAllMocks(); vi.unstubAllEnvs();
   await rm(dir, { recursive: true, force: true });
 });
@@ -65,6 +80,18 @@ describe('signed historical hybrid routes', () => {
   it('dispatches only an owned session', async () => {
     expect((await post(path('operations'), { operation: 'text', payload: { remote_jid: '5511999999999@c.us', content: 'test' } })).status).toBe(200);
     expect(waha.sendText).toHaveBeenCalledTimes(1);
+  });
+  it('routes a private hybrid WAHA echo to Rails reconciliation without using the legacy message API', async () => {
+    railsRequests.length = 0;
+    const body = JSON.stringify({ event: 'message.any', session: session.name, payload: {
+      id: 'true_5511999999999@c.us_3EB0ECHO', chatId: '5511999999999@c.us', to: '5511999999999@c.us', fromMe: true, notifyName: 'Contato', body: 'fallback'
+    } });
+    const response = await fetch(`${base}/webhooks/waha`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Webhook-Hmac': createHmac('sha512', 'test').update(body).digest('hex') }, body,
+    });
+    expect(response.status).toBe(202);
+    await vi.waitFor(() => expect(railsRequests).toContain('/internal/official_whatsapp/waha/inbound'));
+    expect(railsRequests).toEqual(['/internal/official_whatsapp/waha/inbound']);
   });
   it('never reclaims a cleanup_pending session', async () => {
     // Read persisted ownership afresh, as a worker would after process restart.

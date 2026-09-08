@@ -1610,14 +1610,23 @@ app.post('/webhooks/waha', (request, response) => {
       const key = externalMessageId('waha', message.externalId);
       if (await dedup.hasOrLock(key)) return;
       try {
+        // Official hybrid sessions must be offered to Rails before the legacy
+        // WAHA inbox resolver. Their ownership record is shared with regular
+        // WAHA sessions, so resolving ownership first would misclassify an
+        // outbound hybrid echo as a new mobile-originated message.
+        const official = await deliverOfficialHybridWahaInbound(message);
+        if (official.handled) {
+          await dedup.commit(key);
+          console.info('[waha] official hybrid message reconciled', {
+            session: message.session, messageId: message.externalId, ignored: Boolean(official.ignored),
+          });
+          return;
+        }
         let inbox;
         try { inbox = await wahaInboxForWebhook(message.session); }
         catch (error) {
           if (!(error instanceof Error) || error.message !== `Nenhuma inbox WAHA encontrada para a sessão ${message.session}.`) throw error;
-          const official = await deliverOfficialHybridWahaInbound(message);
-          if (!official.handled) throw new WahaSessionOwnershipError('not_found');
-          await dedup.commit(key);
-          return;
+          throw new WahaSessionOwnershipError('not_found');
         }
         if (message.fromMe && consumePendingWahaOutgoing(message.session, message)) {
           await dedup.commit(key);
