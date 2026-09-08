@@ -8,6 +8,7 @@ export const WHATSAPP_MODES = ['official', 'web'] as const;
 export type WhatsAppMode = typeof WHATSAPP_MODES[number];
 export const WHATSAPP_TRANSPORT_STATUSES = ['connected', 'disconnected', 'pending'] as const;
 export type WhatsAppTransportStatus = typeof WHATSAPP_TRANSPORT_STATUSES[number];
+export type WhatsAppTransportDisplayStatus = WhatsAppTransportStatus | 'reauthorization_required' | 'error';
 
 export interface MetaCloudInboxMetadata {
   whatsapp_provider?: 'meta_cloud';
@@ -60,15 +61,34 @@ export const whatsappProviderForInbox = (inbox: Inbox): WhatsAppProvider | null 
 };
 
 export const hasWahaTransport = (inbox: Inbox) => whatsappConfigurationForInbox(inbox)?.transports.includes('waha') === true;
+export const hasEvolutionTransport = (inbox: Inbox) => whatsappConfigurationForInbox(inbox)?.transports.includes('evolution') === true;
+export const shouldQueryWahaForInbox = (inbox: Inbox) => {
+  const configuration = whatsappConfigurationForInbox(inbox);
+  return configuration === null || configuration.transports.includes('waha');
+};
 
 export const transportStatusesForInbox = (inbox: Inbox): Partial<Record<WhatsAppTransport, WhatsAppTransportStatus>> => {
   const configuration = whatsappConfigurationForInbox(inbox);
   if (!configuration) return {};
   const status = (transport: WhatsAppTransport, fallback: WhatsAppTransportStatus) => {
-    const value = inbox.additionalAttributes[`${transport}_connection_status`];
+    const key = transport === 'meta_cloud' ? 'meta_connection_status' : `${transport}_connection_status`;
+    const value = inbox.additionalAttributes[key];
     return value === 'connected' || value === 'disconnected' || value === 'pending' ? value : fallback;
   };
   return Object.fromEntries(configuration.transports.map(transport => [transport, status(transport, transport === 'meta_cloud' ? 'connected' : 'pending')])) as Partial<Record<WhatsAppTransport, WhatsAppTransportStatus>>;
+};
+
+export const transportDisplayStatusesForInbox = (inbox: Inbox): Partial<Record<WhatsAppTransport, WhatsAppTransportDisplayStatus>> => {
+  const statuses = transportStatusesForInbox(inbox);
+  if (statuses.meta_cloud && inbox.reauthorizationRequired) statuses.meta_cloud = 'reauthorization_required';
+  return statuses;
+};
+
+export const transportStatusLabel = (status: WhatsAppTransportDisplayStatus | undefined) => {
+  if (status === 'connected') return 'Conectado';
+  if (status === 'reauthorization_required') return 'Reautorização necessária';
+  if (status === 'connecting' || status === 'pending') return 'Conectando';
+  return 'Desconectado';
 };
 
 export const metaCloudMetadataForInbox = (inbox: Inbox): MetaCloudInboxMetadata | null => {

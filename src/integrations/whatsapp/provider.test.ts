@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { externalMessageId, hasWahaTransport, isNativeWhatsAppInbox, metaCloudMetadataForInbox, parseExternalMessageId, transportStatusesForInbox, whatsappConfigurationForInbox, whatsappProviderForInbox } from './provider';
+import { externalMessageId, hasEvolutionTransport, hasWahaTransport, isNativeWhatsAppInbox, metaCloudMetadataForInbox, parseExternalMessageId, shouldQueryWahaForInbox, transportDisplayStatusesForInbox, transportStatusesForInbox, whatsappConfigurationForInbox, whatsappProviderForInbox } from './provider';
 
 const inbox = { id: 1, name: 'WhatsApp', avatarUrl: null, channelType: 'Channel::Api', channelId: 1, webhookUrl: null, inboxIdentifier: 'token', additionalAttributes: {} };
 
@@ -50,6 +50,24 @@ describe('WhatsApp providers', () => {
   it('mantém status público independente por transport', () => {
     const hybrid = { ...inbox, additionalAttributes: { whatsapp_transports: ['meta_cloud', 'evolution'], meta_connection_status: 'connected', evolution_connection_status: 'disconnected' } };
     expect(transportStatusesForInbox(hybrid)).toEqual({ meta_cloud: 'connected', evolution: 'disconnected' });
+  });
+
+  it('mantém Meta e WAHA independentes em todos os estados híbridos', () => {
+    const hybrid = (meta: string, waha: string) => ({ ...inbox, additionalAttributes: { whatsapp_transports: ['meta_cloud', 'waha'], meta_connection_status: meta, waha_connection_status: waha } });
+    expect(transportDisplayStatusesForInbox(hybrid('connected', 'disconnected'))).toEqual({ meta_cloud: 'connected', waha: 'disconnected' });
+    expect(transportDisplayStatusesForInbox(hybrid('disconnected', 'connected'))).toEqual({ meta_cloud: 'disconnected', waha: 'connected' });
+    expect(transportDisplayStatusesForInbox(hybrid('connected', 'connected'))).toEqual({ meta_cloud: 'connected', waha: 'connected' });
+  });
+
+  it('consulta somente os providers declarados pelos transports', () => {
+    const metaOnly = { ...inbox, additionalAttributes: { whatsapp_transports: ['meta_cloud'] } };
+    const evolutionOnly = { ...inbox, additionalAttributes: { whatsapp_transports: ['evolution'] } };
+    const hybrid = { ...inbox, additionalAttributes: { whatsapp_transports: ['meta_cloud', 'waha'] } };
+    expect(shouldQueryWahaForInbox(metaOnly)).toBe(false);
+    expect(shouldQueryWahaForInbox(evolutionOnly)).toBe(false);
+    expect(shouldQueryWahaForInbox(hybrid)).toBe(true);
+    expect(hasEvolutionTransport(metaOnly)).toBe(false);
+    expect(hasEvolutionTransport(hybrid)).toBe(false);
   });
 
   it('mantém coexistência Meta independente de outras conexões vinculadas', () => {

@@ -6,12 +6,19 @@ import { inboxService } from '../integrations/chatwoot/inboxes';
 import { wahaClient, type WahaHistoryJob, type WahaHistoryRange, type WahaQrCode, type WahaSession } from '../integrations/waha/client';
 import { MetaCloudSetup } from './MetaCloudSetup';
 import { InboxCollaboratorsPanel } from './InboxCollaboratorsPanel';
+import { shouldQueryWahaForInbox, transportDisplayStatusesForInbox, transportStatusLabel, whatsappConfigurationForInbox } from '../integrations/whatsapp/provider';
 
 type Props = { accountId: number; inbox: Inbox; webhookUrl: string; isDarkMode: boolean; onSaved: () => Promise<void> | void };
 const statusLabel: Record<string, string> = { STOPPED: 'Parada', STARTING: 'Iniciando', SCAN_QR_CODE: 'Aguardando QR Code', WORKING: 'Conectada', FAILED: 'Erro' };
 
 export const WahaSetup = ({ accountId, inbox, webhookUrl, isDarkMode, onSaved }: Props) => {
   const context = { accountId, inboxId: inbox.id };
+  const configuration = whatsappConfigurationForInbox(inbox);
+  // An unconfigured Channel::Api is the initial WAHA setup flow. Once a
+  // transport declaration exists, it is authoritative: never probe WAHA for
+  // a Meta-only or Evolution-only inbox.
+  const usesWaha = shouldQueryWahaForInbox(inbox);
+  const transportStatuses = transportDisplayStatusesForInbox(inbox);
   const [sessions, setSessions] = useState<WahaSession[]>([]);
   const [selected, setSelected] = useState(inbox.additionalAttributes.waha_session_name as string || '');
   const [newSession, setNewSession] = useState('');
@@ -29,6 +36,10 @@ export const WahaSetup = ({ accountId, inbox, webhookUrl, isDarkMode, onSaved }:
   const card = isDarkMode ? 'border-[#2a3942] bg-[#182228]' : 'border-[#d1d7db] bg-[#f0f2f5]';
 
   const refresh = useCallback(async () => {
+    if (!usesWaha) {
+      setSessions([]); setCurrent(null); setSelected('');
+      return;
+    }
     setBusy(true); setError(null);
     try {
       const result = await wahaClient.listSessions(context);
@@ -37,26 +48,27 @@ export const WahaSetup = ({ accountId, inbox, webhookUrl, isDarkMode, onSaved }:
       if (name) { setSelected(name); setCurrent(result.sessions.find(item => item.name === name) || await wahaClient.getSession(context, name).then(result => result.session)); }
     } catch (cause) { setError(errorMessageForUser(cause)); }
     finally { setBusy(false); }
-  }, [accountId, inbox.id, selected]);
-  useEffect(() => { void refresh(); }, []);
+  }, [accountId, inbox.id, selected, usesWaha]);
+  useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => { setInboxName(inbox.name); }, [inbox.name]);
   useEffect(() => { setAssociatedSession(inbox.additionalAttributes.waha_session_name as string || ''); }, [inbox.additionalAttributes.waha_session_name]);
   useEffect(() => {
+    if (!usesWaha) return;
     let active = true;
     void wahaClient.getCurrentHistoryImport(context)
       .then((result) => { if (active) setHistoryJob(result.job); })
       .catch(() => undefined);
     return () => { active = false; };
-  }, [accountId, inbox.id]);
+  }, [accountId, inbox.id, usesWaha]);
   useEffect(() => {
-    if (!historyJob || !['pending', 'running'].includes(historyJob.status)) return;
+    if (!usesWaha || !historyJob || !['pending', 'running'].includes(historyJob.status)) return;
     const timer = window.setInterval(() => {
       void wahaClient.getHistoryImport(context, historyJob.id)
         .then((result) => setHistoryJob(result.job))
         .catch((cause) => setError(errorMessageForUser(cause)));
     }, 1500);
     return () => window.clearInterval(timer);
-  }, [accountId, inbox.id, historyJob?.id, historyJob?.status]);
+  }, [accountId, inbox.id, historyJob?.id, historyJob?.status, usesWaha]);
 
   const selectSession = async (name: string) => {
     setSelected(name); setQr(null); setBusy(true); setError(null);
@@ -123,6 +135,7 @@ export const WahaSetup = ({ accountId, inbox, webhookUrl, isDarkMode, onSaved }:
   }, [isConnected]);
   const hasSession = sessions.length > 0;
   const isAssociated = selected.length > 0 && associatedSession === selected;
+  const wahaStatus = current ? (current.status === 'WORKING' ? 'connected' : 'disconnected') : transportStatuses.waha;
   // The collaborators list is an overlay. The card must not clip it when the
   // picker opens near the bottom of the settings panel.
   return <div className={`mx-auto max-w-3xl overflow-visible rounded-2xl border ${card}`}>
@@ -132,9 +145,9 @@ export const WahaSetup = ({ accountId, inbox, webhookUrl, isDarkMode, onSaved }:
     </div>
     <div className="space-y-4 p-5">
     {error && <div className="flex gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400"><AlertCircle className="h-4 w-4 shrink-0" />{error}</div>}
-    {tab === 'general' && <section className="space-y-3"><div><h5 className="text-sm font-bold">Nome da caixa de entrada</h5><p className="mt-1 text-xs text-[#8696a0]">Este nome é exibido para a equipe na lista de canais.</p></div><div className="flex gap-2"><input value={inboxName} onChange={(event) => setInboxName(event.target.value)} maxLength={160} className={`min-w-0 flex-1 rounded-xl border px-3 py-3 text-sm ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-gray-300 bg-white'}`} /><button type="button" onClick={() => void saveInboxName()} disabled={!inboxName.trim() || inboxName.trim() === inbox.name || savingName} className="rounded-xl bg-[#00a884] px-4 text-xs font-bold text-white disabled:opacity-40">{savingName ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}<span className="sr-only">Salvar nome</span></button></div></section>}
+    {tab === 'general' && <section className="space-y-3"><div><h5 className="text-sm font-bold">Nome da caixa de entrada</h5><p className="mt-1 text-xs text-[#8696a0]">Este nome é exibido para a equipe na lista de canais.</p></div><div className="flex gap-2"><input value={inboxName} onChange={(event) => setInboxName(event.target.value)} maxLength={160} className={`min-w-0 flex-1 rounded-xl border px-3 py-3 text-sm ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-gray-300 bg-white'}`} /><button type="button" onClick={() => void saveInboxName()} disabled={!inboxName.trim() || inboxName.trim() === inbox.name || savingName} className="rounded-xl bg-[#00a884] px-4 text-xs font-bold text-white disabled:opacity-40">{savingName ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}<span className="sr-only">Salvar nome</span></button></div>{configuration && <div className="rounded-xl border border-white/10 bg-black/10 p-3 text-xs"><p className="mb-2 font-semibold">Status por conexão</p>{configuration.transports.map((transport) => { const transportStatus = transport === 'waha' ? wahaStatus : transportStatuses[transport]; return <div key={transport} className="flex justify-between gap-4 py-1"><span>{transport === 'meta_cloud' ? 'Meta Cloud' : transport === 'waha' ? 'WAHA' : 'Evolution'}</span><span className={transportStatus === 'connected' ? 'text-[#00a884]' : transport === 'meta_cloud' ? 'text-red-400' : 'text-amber-500'}>{transportStatusLabel(transportStatus)}</span></div>; })}</div>}</section>}
     {tab === 'collaborators' && <InboxCollaboratorsPanel accountId={accountId} inboxId={inbox.id} isDarkMode={isDarkMode} onSaved={onSaved} />}
-    {tab === 'unofficial' && <section className="space-y-5">
+    {tab === 'unofficial' && usesWaha && <section className="space-y-5">
       <div><h5 className="font-bold">Conexão WhatsApp não oficial</h5><p className="mt-1 text-xs text-[#8696a0]">Conecte uma sessão WAHA por QR Code. A conexão é privada desta inbox.</p></div>
 
       <div className="rounded-xl border border-white/10 p-4">
