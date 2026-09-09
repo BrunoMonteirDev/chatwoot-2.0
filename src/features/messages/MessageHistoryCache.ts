@@ -1,5 +1,6 @@
-import type { ConversationMessage } from '../../domain/currentUser';
+import type { ConversationMessage, ConversationSummary } from '../../domain/currentUser';
 import type { MessageHistoryPage } from '../../integrations/chatwoot/messages';
+import { messageHistoryPersistence, type MessageHistoryPersistence, type PersistedMessageHistory } from './MessageHistoryPersistence';
 
 export const MESSAGE_HISTORY_TTL_MS = 30_000;
 export const MESSAGE_HISTORY_MAX_CONVERSATIONS = 12;
@@ -38,6 +39,7 @@ export interface CachedMessageHistory {
   hasOlderMessages: boolean;
   updatedAt: number;
   scrollTop: number;
+  conversation?: ConversationSummary;
 }
 
 type Entry = CachedMessageHistory & { key: string };
@@ -47,7 +49,9 @@ type Fetcher = (signal: AbortSignal) => Promise<MessageHistoryPage>;
 export class MessageHistoryCache {
   private entries = new Map<string, Entry>();
   private inFlight = new Map<string, { controller: AbortController; promise: Promise<MessageHistoryPage> }>();
-  constructor(private readonly maxEntries = MESSAGE_HISTORY_MAX_CONVERSATIONS, private readonly ttlMs = MESSAGE_HISTORY_TTL_MS, private readonly now = () => Date.now()) {}
+  private hydrateInFlight = new Map<string, Promise<(CachedMessageHistory & { isFresh: boolean }) | null>>();
+  private generation = 0;
+  constructor(private readonly maxEntries = MESSAGE_HISTORY_MAX_CONVERSATIONS, private readonly ttlMs = MESSAGE_HISTORY_TTL_MS, private readonly now = () => Date.now(), private readonly persistence?: MessageHistoryPersistence) {}
 
   key(accountId: number, conversationId: number) { return `${accountId}:${conversationId}`; }
 
@@ -57,21 +61,52 @@ export class MessageHistoryCache {
     if (!entry) return null;
     this.entries.delete(key); // Map insertion order is our LRU list.
     this.entries.set(key, entry);
-    return { messages: entry.messages, hasOlderMessages: entry.hasOlderMessages, updatedAt: entry.updatedAt, scrollTop: entry.scrollTop, isFresh: this.now() - entry.updatedAt < this.ttlMs };
+    return { messages: entry.messages, hasOlderMessages: entry.hasOlderMessages, updatedAt: entry.updatedAt, scrollTop: entry.scrollTop, conversation: entry.conversation, isFresh: this.now() - entry.updatedAt < this.ttlMs };
   }
 
   has(accountId: number, conversationId: number) { return this.entries.has(this.key(accountId, conversationId)); }
 
-  set(accountId: number, conversationId: number, page: MessageHistoryPage, options: { prepend?: boolean; preserveExisting?: boolean } = {}) {
+  set(accountId: number, conversationId: number, page: MessageHistoryPage, options: { prepend?: boolean; preserveExisting?: boolean; conversation?: ConversationSummary } = {}) {
     const key = this.key(accountId, conversationId);
     const previous = this.entries.get(key);
     const base = options.prepend || options.preserveExisting ? previous?.messages || [] : [];
     const messages = page.messages.reduce(mergeMessage, base);
-    const entry: Entry = { key, messages, hasOlderMessages: options.prepend ? page.hasOlderMessages : (previous?.hasOlderMessages || page.hasOlderMessages), updatedAt: this.now(), scrollTop: previous?.scrollTop || 0 };
+    const entry: Entry = { key, messages, hasOlderMessages: options.prepend ? page.hasOlderMessages : (previous?.hasOlderMessages || page.hasOlderMessages), updatedAt: this.now(), scrollTop: previous?.scrollTop || 0, conversation: options.conversation || previous?.conversation };
     this.entries.delete(key);
     this.entries.set(key, entry);
     while (this.entries.size > this.maxEntries) this.entries.delete(this.entries.keys().next().value!);
+    void this.persistence?.put(this.persisted(accountId, conversationId, entry));
     return entry;
+  }
+
+  async hydrate(accountId: number, conversationId: number) {
+    const memory = this.get(accountId, conversationId);
+    if (memory) return memory;
+    const key = this.key(accountId, conversationId);
+    let pending = this.hydrateInFlight.get(key);
+    if (!pending) {
+      pending = this.persistence?.get(accountId, conversationId).then((stored) => {
+        if (!stored) return null;
+        const entry: Entry = { key, messages: stored.messages, hasOlderMessages: stored.hasOlderMessages, updatedAt: stored.updatedAt, scrollTop: stored.scrollTop, conversation: stored.conversation };
+        this.install(entry);
+        return { ...entry, isFresh: this.now() - entry.updatedAt < this.ttlMs };
+      }).finally(() => this.hydrateInFlight.delete(key)) || Promise.resolve(null);
+      this.hydrateInFlight.set(key, pending);
+    }
+    return pending;
+  }
+
+  async conversation(accountId: number, conversationId: number) {
+    return (await this.hydrate(accountId, conversationId))?.conversation || null;
+  }
+
+  setConversation(accountId: number, conversation: ConversationSummary) {
+    const key = this.key(accountId, conversation.id);
+    const previous = this.entries.get(key);
+    if (!previous) return;
+    const entry = { ...previous, conversation };
+    this.install(entry);
+    void this.persistence?.put(this.persisted(accountId, conversation.id, entry));
   }
 
   upsertIfPresent(accountId: number, message: ConversationMessage) {
@@ -79,20 +114,22 @@ export class MessageHistoryCache {
     const previous = this.entries.get(key);
     if (!previous) return false;
     this.entries.delete(key);
-    this.entries.set(key, { ...previous, messages: mergeMessage(previous.messages, message), updatedAt: this.now() });
+    const entry = { ...previous, messages: mergeMessage(previous.messages, message), updatedAt: this.now() };
+    this.entries.set(key, entry);
+    void this.persistence?.put(this.persisted(accountId, message.conversationId, entry));
     return true;
   }
 
   setScroll(accountId: number, conversationId: number, scrollTop: number) {
     const key = this.key(accountId, conversationId);
     const entry = this.entries.get(key);
-    if (entry) entry.scrollTop = scrollTop;
+    if (entry) { entry.scrollTop = scrollTop; void this.persistence?.put(this.persisted(accountId, conversationId, entry)); }
   }
 
   removeMessage(accountId: number, conversationId: number, messageId: number) {
     const key = this.key(accountId, conversationId);
     const entry = this.entries.get(key);
-    if (entry) entry.messages = entry.messages.filter((message) => message.id !== messageId);
+    if (entry) { entry.messages = entry.messages.filter((message) => message.id !== messageId); void this.persistence?.put(this.persisted(accountId, conversationId, entry)); }
   }
 
   request(accountId: number, conversationId: number, fetcher: Fetcher, signal?: AbortSignal, variant = 'latest'): Promise<MessageHistoryPage> {
@@ -100,7 +137,11 @@ export class MessageHistoryCache {
     let shared = this.inFlight.get(key);
     if (!shared) {
       const controller = new AbortController();
-      const promise = fetcher(controller.signal).finally(() => this.inFlight.delete(key));
+      const generation = this.generation;
+      const promise = fetcher(controller.signal).then(page => {
+        if (generation !== this.generation) throw new DOMException('Aborted', 'AbortError');
+        return page;
+      }).finally(() => this.inFlight.delete(key));
       shared = { controller, promise };
       this.inFlight.set(key, shared);
     }
@@ -112,9 +153,20 @@ export class MessageHistoryCache {
   abort(accountId: number, conversationId: number, variant = 'latest') { this.inFlight.get(`${this.key(accountId, conversationId)}:${variant}`)?.controller.abort(); }
   isLoading(accountId: number, conversationId: number, variant = 'latest') { return this.inFlight.has(`${this.key(accountId, conversationId)}:${variant}`); }
   size() { return this.entries.size; }
+  async clear() { this.generation += 1; this.entries.clear(); this.hydrateInFlight.clear(); await this.persistence?.clear(); }
+
+  private install(entry: Entry) {
+    this.entries.delete(entry.key);
+    this.entries.set(entry.key, entry);
+    while (this.entries.size > this.maxEntries) this.entries.delete(this.entries.keys().next().value!);
+  }
+
+  private persisted(accountId: number, conversationId: number, entry: Entry): PersistedMessageHistory {
+    return { key: entry.key, accountId, conversationId, messages: entry.messages, hasOlderMessages: entry.hasOlderMessages, updatedAt: entry.updatedAt, scrollTop: entry.scrollTop, oldestMessageId: entry.messages[0]?.id, conversation: entry.conversation };
+  }
 }
 
-export const messageHistoryCache = new MessageHistoryCache();
+export const messageHistoryCache = new MessageHistoryCache(MESSAGE_HISTORY_MAX_CONVERSATIONS, MESSAGE_HISTORY_TTL_MS, () => Date.now(), messageHistoryPersistence);
 
 /** Idle-only prefetch queue. Explicit opens never wait for this queue. */
 export class MessageHistoryPrefetcher {
@@ -122,7 +174,8 @@ export class MessageHistoryPrefetcher {
   private active = 0;
   private scheduled = false;
   private pending = new Set<string>();
-  constructor(private readonly limit = 2) {}
+  private latencySamples: number[] = [];
+  constructor(private limit = 3, private readonly now = () => performance.now()) {}
 
   enqueue(key: string, task: () => Promise<void>) {
     if (this.pending.has(key)) return;
@@ -143,9 +196,19 @@ export class MessageHistoryPrefetcher {
     while (this.active < this.limit && this.queue.length) {
       const { key, task } = this.queue.shift()!;
       this.active += 1;
-      void task().finally(() => { this.active -= 1; this.pending.delete(key); this.drain(); });
+      const startedAt = this.now();
+      void task().catch(() => undefined).finally(() => { this.recordLatency(this.now() - startedAt); this.active -= 1; this.pending.delete(key); this.drain(); });
     }
   }
+
+  private recordLatency(duration: number) {
+    this.latencySamples.push(duration);
+    if (this.latencySamples.length > 5) this.latencySamples.shift();
+    const average = this.latencySamples.reduce((total, item) => total + item, 0) / this.latencySamples.length;
+    this.limit = average > 1_500 ? 1 : average > 750 ? 2 : 3;
+  }
+
+  concurrency() { return this.limit; }
 }
 
 export const messageHistoryPrefetcher = new MessageHistoryPrefetcher();

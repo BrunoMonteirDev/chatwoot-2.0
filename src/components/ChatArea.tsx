@@ -797,7 +797,9 @@ export const ChatArea: React.FC<Props> = ({
   }, []);
   const [replyTo, setReplyTo] = useState<ReplyTo | null>(null);
   const conversationInbox = conversation ? inboxes.find((inbox) => inbox.id === conversation.inboxId) : undefined;
-  const groupMetadataTransport = chat.messages.slice().reverse().find(message => message.whatsappTransport && message.whatsappTransport !== 'meta_cloud')?.whatsappTransport;
+  const persistedGroupTransport = contact?.additionalAttributes.whatsapp_group_transport;
+  const groupMetadataTransport = chat.messages.slice().reverse().find(message => message.whatsappTransport && message.whatsappTransport !== 'meta_cloud')?.whatsappTransport
+    || (persistedGroupTransport === 'waha' || persistedGroupTransport === 'evolution' ? persistedGroupTransport : undefined);
   const isGroupConversation = Boolean(chat.isGroup || conversation?.isGroup || contact?.additionalAttributes.whatsapp_chat_type === 'group'
     || chat.messages.some(message => message.whatsappRemoteJid?.endsWith('@g.us')));
   const initialGroupMetadata = contact ? persistedGroupMetadata(contact.additionalAttributes, groupMetadataTransport, contact.name) : null;
@@ -827,12 +829,19 @@ export const ChatArea: React.FC<Props> = ({
     const controller = new AbortController();
     const capturedKey = groupRequestKey;
     const expectedGroupJid = initialGroupMetadata?.id || chat.messages.find(message => message.whatsappRemoteJid?.endsWith('@g.us'))?.whatsappRemoteJid;
-    void groupMetadataClient.get(accountId, conversation.inboxId, conversation.id, groupMetadataTransport, controller.signal).then(({ group }) => {
-      if (controller.signal.aborted || activeGroupRequest.current !== capturedKey || (expectedGroupJid && group.id !== expectedGroupJid)) return;
-      applyGroupMetadata(group);
+    void groupMetadataClient.cached(accountId, conversation.inboxId, conversation.id, groupMetadataTransport).then((cached) => {
+      if (controller.signal.aborted || activeGroupRequest.current !== capturedKey) return;
+      if (cached && (!expectedGroupJid || cached.group.id === expectedGroupJid)) applyGroupMetadata(cached.group);
+      // Provider/bridge metadata is secondary: never compete with the first
+      // message page. Fresh persisted metadata needs no network request.
+      if (historyStatus !== 'ready' || cached?.isFresh) return;
+      return groupMetadataClient.get(accountId, conversation.inboxId, conversation.id, groupMetadataTransport, controller.signal).then(({ group }) => {
+        if (controller.signal.aborted || activeGroupRequest.current !== capturedKey || (expectedGroupJid && group.id !== expectedGroupJid)) return;
+        applyGroupMetadata(group);
+      });
     }).catch(() => undefined);
     return () => controller.abort();
-  }, [accountId, conversation?.id, conversation?.inboxId, groupMetadataTransport, groupRequestKey, isGroupConversation]);
+  }, [accountId, conversation?.id, conversation?.inboxId, groupMetadataTransport, groupRequestKey, historyStatus, isGroupConversation]);
   useEffect(() => {
     if (initialGroupMetadata) applyGroupMetadata(initialGroupMetadata);
   }, [groupRequestKey, contact?.additionalAttributes.whatsapp_group_metadata_synced_at]);

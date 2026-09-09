@@ -5,6 +5,10 @@ import { ChatwootApiError } from '../../integrations/chatwoot/errors';
 import { authService } from '../../integrations/chatwoot/auth';
 import { normalizeProfile } from '../../integrations/chatwoot/normalizers';
 import type { AuthCredentials, MfaRequiredResponse, MfaVerificationCredentials } from '../../integrations/chatwoot/types';
+import { messageHistoryCache } from '../messages/MessageHistoryCache';
+import { groupMetadataClient } from '../groups/metadata';
+import { clearContactDetailsCache } from '../contacts/useContactDetails';
+import { clearWhatsAppCapabilityCache } from '../../integrations/whatsapp/connection';
 
 export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'error';
 
@@ -38,6 +42,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const clearAuthentication = useCallback(() => {
     authSession.clear();
+    void messageHistoryCache.clear();
+    void groupMetadataClient.clear();
+    clearContactDetailsCache();
+    clearWhatsAppCapabilityCache();
     setUser(null);
     setSelectedAccountId(null);
     setStatus('unauthenticated');

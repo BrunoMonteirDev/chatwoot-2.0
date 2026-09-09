@@ -8,7 +8,7 @@ import type { EvolutionGroupParticipant } from './evolutionEvent.js';
 
 export type ApiInbox = { id: number; name?: string; channel_type: string; inbox_identifier?: string; additional_attributes?: Record<string, unknown>; secret?: string };
 type Contact = { id: number; source_id: string; name?: string; phone_number?: string; thumbnail?: string | null };
-type Conversation = { id: number; internal_id?: number; status: string; inbox_id?: number; last_activity_at?: number };
+type Conversation = { id: number; internal_id?: number; status: string; inbox_id?: number; last_activity_at?: number; meta?: { sender?: { id?: number } } };
 type ConversationTarget = { id: number; inbox_id: number; meta?: { sender?: { id?: number; name?: string; thumbnail?: string | null; phone_number?: string | null; additional_attributes?: Record<string, unknown> | null } }; contact_inbox?: { source_id?: string | null } };
 type AccountContact = {
   id: number;
@@ -140,7 +140,10 @@ const request = async <T>(path: string, init: RequestInit = {}, apiToken = false
 // bridge service token. This keeps the check tenant-scoped and makes the
 // local development bridge work before the service-account endpoint exists.
 const requestWithSession = async <T>(path: string, sessionHeaders: Headers, init: RequestInit = {}): Promise<T> => {
-  const response = await fetch(`${config.chatwootBaseUrl}${path}`, { ...init, headers: sessionHeaders });
+  const headers = new Headers(sessionHeaders);
+  if (init.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json');
+  if (init.headers) new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+  const response = await fetch(`${config.chatwootBaseUrl}${path}`, { ...init, headers });
   const raw = await response.text();
   let body: unknown;
   try { body = raw ? JSON.parse(raw) : undefined; } catch { body = undefined; }
@@ -284,6 +287,26 @@ export const chatwootBridge = {
       return response.payload;
     }));
   },
+  async createOrFindContactForSession(accountId: number, input: { name: string; phoneNumber: string }, sessionHeaders: Headers) {
+    const exactPhone = `+${input.phoneNumber.replace(/\D/g, '')}`;
+    const findExact = async () => {
+      const response = await requestWithSession<{ payload: AccountContact[] }>(`/api/v1/accounts/${accountId}/contacts/search?q=${encodeURIComponent(exactPhone)}&include_contact_inboxes=false`, sessionHeaders);
+      return response.payload.find(contact => contact.phone_number && `+${contact.phone_number.replace(/\D/g, '')}` === exactPhone);
+    };
+    const existing = await findExact();
+    if (existing) return { id: existing.id, name: existing.name || exactPhone, phoneNumber: existing.phone_number || exactPhone, avatarUrl: existing.thumbnail || null, existing: true };
+    try {
+      const created = await requestWithSession<{ payload: { contact: AccountContact; existing?: boolean } }>(`/api/v1/accounts/${accountId}/contacts`, sessionHeaders, {
+        method: 'POST', body: JSON.stringify({ name: input.name.trim(), phone_number: exactPhone }),
+      });
+      const contact = created.payload.contact;
+      return { id: contact.id, name: contact.name || exactPhone, phoneNumber: contact.phone_number || exactPhone, avatarUrl: contact.thumbnail || null, existing: Boolean(created.payload.existing) };
+    } catch (error) {
+      const raced = await findExact();
+      if (!raced) throw error;
+      return { id: raced.id, name: raced.name || exactPhone, phoneNumber: raced.phone_number || exactPhone, avatarUrl: raced.thumbnail || null, existing: true };
+    }
+  },
   async isApiInbox(inboxId: number) {
     return (await this.listApiInboxes()).some(inbox => inbox.id === inboxId);
   },
@@ -395,9 +418,10 @@ export const chatwootBridge = {
       },
     }),
   }, true),
-  saveEvolutionGroup: (contactId: number, groupJid: string, name: string, details: { avatarUrl?: string; description?: string; participants?: EvolutionGroupParticipant[]; historicalParticipants?: EvolutionGroupParticipant[]; participantAction?: string } = {}) => request(`/api/v1/accounts/${currentAccountId()}/contacts/${contactId}`, {
+  saveEvolutionGroup: (contactId: number, groupJid: string, name: string, details: { transport?: 'waha' | 'evolution'; avatarUrl?: string; description?: string; participants?: EvolutionGroupParticipant[]; historicalParticipants?: EvolutionGroupParticipant[]; participantAction?: string } = {}) => request(`/api/v1/accounts/${currentAccountId()}/contacts/${contactId}`, {
     method: 'PATCH', body: JSON.stringify({ name, additional_attributes: {
       whatsapp_chat_type: 'group', whatsapp_group_jid: groupJid,
+      ...(details.transport ? { whatsapp_group_transport: details.transport } : {}),
       ...(details.avatarUrl ? { whatsapp_group_avatar_url: details.avatarUrl } : {}),
       ...(details.description !== undefined ? { whatsapp_group_description: details.description } : {}),
       ...(details.participants ? { whatsapp_group_participants: details.participants.map(item => ({ jid: item.jid, ...('lid' in item && item.lid ? { lid: item.lid } : {}), ...('phoneJid' in item && item.phoneJid ? { phone_jid: item.phoneJid } : {}), ...(item.phoneNumber ? { phone: item.phoneNumber } : {}), ...(item.name ? { name: item.name } : {}), ...(item.displayName ? { display_name: item.displayName } : {}), ...(item.avatarUrl ? { avatar_url: item.avatarUrl } : {}), ...(item.contactId ? { contact_id: item.contactId } : {}), ...(item.admin !== undefined ? { admin: item.admin } : {}) })) } : {}),
@@ -406,6 +430,27 @@ export const chatwootBridge = {
       ...(details.participantAction ? { whatsapp_group_last_participant_action: details.participantAction } : {}),
     } }),
   }, true),
+  async ensureGroupConversation(inboxId: number, groupJid: string, name: string, transport: 'waha' | 'evolution', description?: string) {
+    const sourceId = `whatsapp:group:${groupJid}`;
+    let contact: AccountContact | undefined;
+    try {
+      const created = await request<{ payload: { contact: AccountContact } }>(`/api/v1/accounts/${currentAccountId()}/contacts`, {
+        method: 'POST', body: JSON.stringify({ name, inbox_id: inboxId, source_id: sourceId, additional_attributes: { whatsapp_chat_type: 'group', whatsapp_group_jid: groupJid } }),
+      }, true);
+      contact = created.payload.contact;
+    } catch {
+      // A lifecycle webhook or an earlier idempotent attempt may already own
+      // this source id. The conversation endpoint resolves that ContactInbox.
+    }
+    const existing = contact ? (await request<{ payload: Conversation[] }>(`/api/v1/accounts/${currentAccountId()}/contacts/${contact.id}/conversations`, {}, true)).payload.find(item => item.inbox_id === inboxId) : undefined;
+    const conversation = existing || await request<Conversation>(`/api/v1/accounts/${currentAccountId()}/conversations`, {
+      method: 'POST', body: JSON.stringify({ inbox_id: inboxId, ...(contact ? { contact_id: contact.id } : {}), source_id: sourceId, idempotent: true }),
+    }, true);
+    const contactId = contact?.id || conversation.meta?.sender?.id;
+    if (!contactId) throw new Error('O Chatwoot não retornou o Contact do grupo.');
+    await this.saveEvolutionGroup(contactId, groupJid, name, { transport, ...(description !== undefined ? { description } : {}) });
+    return { conversationId: conversation.id, contactId, sourceId };
+  },
   groupContactAttributes: (contactId: number) => request<{ payload: AccountContact }>(`/api/v1/accounts/${currentAccountId()}/contacts/${contactId}`, {}, true).then(response => response.payload.additional_attributes || {}),
   groupParticipantContact: (contactId: number) => request<{ payload: AccountContact }>(`/api/v1/accounts/${currentAccountId()}/contacts/${contactId}`, {}, true).then(response => ({ id: response.payload.id, name: response.payload.name, phoneNumber: response.payload.phone_number, avatarUrl: response.payload.thumbnail || undefined })),
   async findOrCreateConversation(identifier: string, sourceId: string, contactId: number, inboxId: number): Promise<Conversation> {

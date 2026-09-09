@@ -82,6 +82,11 @@ describe('WAHA session transport', () => {
     await expect(wahaTransport.getGroupInviteLink('empresa', '2@g.us')).resolves.toBe('https://chat.whatsapp.com/invite-code');
   });
 
+  it('aceita o JID estruturado devolvido pelo GOWS sem perder o grupo já criado', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ GID: { User: '120363999', Server: 'g.us' } }))));
+    await expect(wahaTransport.createGroup('empresa', 'Equipe')).resolves.toEqual({ id: '120363999@g.us' });
+  });
+
   it('normaliza o contrato GOWS atual com campos em maiúsculas', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ JID: '1@g.us', Name: 'Equipe', Topic: 'Descrição', Participants: [{ JID: '5511999999999@c.us', PhoneNumber: '5511999999999', DisplayName: 'Ana', IsAdmin: true }] }))));
     await expect(wahaTransport.getGroupMetadata('empresa', '1@g.us')).resolves.toMatchObject({ id: '1@g.us', subject: 'Equipe', description: 'Descrição', participants: [{ jid: '5511999999999@c.us', name: 'Ana', phoneNumber: '5511999999999', admin: 'admin' }] });

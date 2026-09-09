@@ -1,15 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { authSession } from '../chatwoot/authSession';
-import { canSendWhatsAppMessage, whatsappConnectionService } from './connection';
+import { canSendWhatsAppMessage, clearWhatsAppCapabilityCache, whatsappConnectionService, whatsappSendCapabilityService } from './connection';
+import { chatwootApiClient } from '../chatwoot/client';
 
 describe('operational WhatsApp connection', () => {
   beforeEach(() => {
     sessionStorage.clear();
     authSession.set({ accessToken: 'token', tokenType: 'Bearer', client: 'client', expiry: '1', uid: 'agent@example.test' });
     vi.stubGlobal('fetch', vi.fn());
+    clearWhatsAppCapabilityCache();
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
   it('consulta a inbox e mantém o transporte efetivamente selecionado', async () => {
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ applicable: true, transport: 'meta_cloud', status: 'disconnected', sendAllowed: false }), { status: 200 }));
@@ -22,5 +24,12 @@ describe('operational WhatsApp connection', () => {
     expect(canSendWhatsAppMessage(offline, false)).toBe(false);
     expect(canSendWhatsAppMessage(offline, true)).toBe(true);
     expect(canSendWhatsAppMessage({ applicable: false, sendAllowed: true }, false)).toBe(true);
+  });
+
+  it('deduplica e reutiliza capability dentro do TTL', async () => {
+    const get = vi.spyOn(chatwootApiClient, 'get').mockResolvedValue({ applicable: true, can_send_message: true } as never);
+    await Promise.all([whatsappSendCapabilityService.get(2, 29), whatsappSendCapabilityService.get(2, 29)]);
+    await whatsappSendCapabilityService.get(2, 29);
+    expect(get).toHaveBeenCalledTimes(1);
   });
 });

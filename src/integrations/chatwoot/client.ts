@@ -34,6 +34,7 @@ export class ChatwootApiClient {
   }
 
   private async request<T>(path: string, options: RequestOptions): Promise<T> {
+    const startedAt = performance.now();
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     const headers = new Headers(options.headers);
@@ -56,8 +57,10 @@ export class ChatwootApiClient {
         credentials: 'same-origin',
         signal: options.signal ?? controller.signal,
       });
+      const responseAt = performance.now();
       this.captureAuthHeaders(response.headers);
       const responseBody = await parseBody(response);
+      reportSlowRequest(path, startedAt, responseAt, performance.now(), response.headers);
       if (!response.ok) {
         throw new ChatwootApiError({
           status: response.status,
@@ -113,6 +116,25 @@ const parseBody = async (response: Response): Promise<unknown> => {
   const text = await response.text();
   if (!text) return undefined;
   try { return JSON.parse(text); } catch { return text; }
+};
+
+const reportSlowRequest = (path: string, startedAt: number, responseAt: number, completedAt: number, headers: Headers) => {
+  const total = completedAt - startedAt;
+  if (total < 750) return;
+  const pathname = path.split('?')[0];
+  const proxyHeader = headers.get('x-kopla-proxy-time');
+  const upstreamHeader = headers.get('x-kopla-upstream-time');
+  const proxySeconds = Number(proxyHeader);
+  const upstreamSeconds = Number(upstreamHeader);
+  console.warn('[performance] slow Chatwoot request', {
+    path: pathname,
+    totalMs: Math.round(total),
+    ttfbMs: Math.round(responseAt - startedAt),
+    downloadMs: Math.round(completedAt - responseAt),
+    ...(proxyHeader && Number.isFinite(proxySeconds) ? { proxyMs: Math.round(proxySeconds * 1_000) } : {}),
+    ...(upstreamHeader && Number.isFinite(upstreamSeconds) ? { upstreamMs: Math.round(upstreamSeconds * 1_000) } : {}),
+    serverTiming: headers.get('server-timing') || undefined,
+  });
 };
 
 const messageFromBody = (body: unknown, fallback: string): string => {

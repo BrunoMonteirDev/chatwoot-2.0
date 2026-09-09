@@ -85,6 +85,8 @@ export const useConversations = (accountId: number | null, selectedInbox: string
   const requestIdRef = useRef(0);
   const refreshRequestIdRef = useRef(0);
   const pageRef = useRef(1);
+  const loadingPageRef = useRef<number | null>(null);
+  const loadedPagesRef = useRef(new Set<number>());
   const loadedAccountRef = useRef<number | null>(null);
 
   const inboxId = /^\d+$/.test(selectedInbox) ? Number(selectedInbox) : undefined;
@@ -94,6 +96,8 @@ export const useConversations = (accountId: number | null, selectedInbox: string
   scopeKeyRef.current = scopeKey;
   const load = useCallback(async (page: number, append: boolean) => {
     if (!accountId) return;
+    if (loadingPageRef.current === page || (append && loadedPagesRef.current.has(page))) return;
+    loadingPageRef.current = page;
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -110,6 +114,7 @@ export const useConversations = (accountId: number | null, selectedInbox: string
         ? result.conversations.reduce((items, conversation) => mergeRealtimeConversation(items, conversation, selectedInbox), current)
         : result.conversations);
       pageRef.current = page;
+      loadedPagesRef.current.add(page);
       setHasNextPage(result.hasNextPage);
       loadedAccountRef.current = accountId;
       setStatus('ready');
@@ -120,6 +125,7 @@ export const useConversations = (accountId: number | null, selectedInbox: string
       // instead of replacing it with an error state on a transient failure.
       if (isInitialLoad) setStatus('error');
     } finally {
+      if (loadingPageRef.current === page) loadingPageRef.current = null;
       if (!controller.signal.aborted && requestId === requestIdRef.current) {
         setIsLoadingMore(false);
         setIsRefreshing(false);
@@ -131,6 +137,8 @@ export const useConversations = (accountId: number | null, selectedInbox: string
     if (!accountId) { loadedAccountRef.current = null; setConversations([]); setStatus('idle'); setIsRefreshing(false); return; }
     refreshAbortRef.current?.abort();
     pageRef.current = 1;
+    loadingPageRef.current = null;
+    loadedPagesRef.current.clear();
     setHasNextPage(false);
     setConversations([]);
     setStatus('loading');
@@ -144,7 +152,8 @@ export const useConversations = (accountId: number | null, selectedInbox: string
   }, [accountId, inboxId, filterKey, load]);
 
   const loadMore = useCallback(() => {
-    if (status === 'ready' && !isLoadingMore && hasNextPage) void load(pageRef.current + 1, true);
+    const nextPage = pageRef.current + 1;
+    if (status === 'ready' && !isLoadingMore && hasNextPage && loadingPageRef.current !== nextPage && !loadedPagesRef.current.has(nextPage)) void load(nextPage, true);
   }, [hasNextPage, isLoadingMore, load, status]);
 
   const applyOutgoingMessage = useCallback((message: ConversationMessage) => {
@@ -183,8 +192,9 @@ export const useConversations = (accountId: number | null, selectedInbox: string
 
   const refreshRecentConversations = useCallback(() => {
     if (!accountId) return;
-
-    refreshAbortRef.current?.abort();
+    // Several realtime events can describe the same change. Keep one page-1
+    // refresh instead of aborting and restarting work Rails will still finish.
+    if (loadingPageRef.current === 1 || (refreshAbortRef.current && !refreshAbortRef.current.signal.aborted)) return;
     const controller = new AbortController();
     refreshAbortRef.current = controller;
     const refreshId = ++refreshRequestIdRef.current;
@@ -208,7 +218,7 @@ export const useConversations = (accountId: number | null, selectedInbox: string
       ));
     }).catch((cause) => {
       if (cause?.name !== 'AbortError') console.error('Failed to refresh conversations:', cause);
-    });
+    }).finally(() => { if (refreshAbortRef.current === controller) refreshAbortRef.current = null; });
   }, [accountId, filterKey, inboxId, scopeKey, selectedInbox]);
 
   const addCreatedConversation = useCallback((created: ConversationSummary) => {

@@ -41,6 +41,7 @@ export const config = {
   wahaHistoryMessageConcurrency: Number(process.env.WAHA_HISTORY_MESSAGE_CONCURRENCY || 4),
   dedupFile: process.env.BRIDGE_DEDUP_FILE || './bridge/data/evolution-message-ids.json',
   identityFile: process.env.BRIDGE_IDENTITY_FILE || './bridge/data/evolution-identities.json',
+  groupCreationFile: process.env.BRIDGE_GROUP_CREATION_FILE || './bridge/data/group-creations.json',
   // Ownership is security state, not UI metadata. Keep the local fallback in
   // the bridge data volume; production uses the encrypted Redis document.
   wahaSessionOwnershipFile: process.env.BRIDGE_WAHA_SESSION_OWNERSHIP_FILE || './bridge/data/waha-session-ownerships.json',

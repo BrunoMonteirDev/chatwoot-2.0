@@ -32,6 +32,27 @@ const requireWaha = () => {
 };
 
 const record = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' ? value as Record<string, unknown> : null;
+const jidFrom = (value: unknown): string => {
+  if (typeof value === 'string' && /^\d+@g\.us$/i.test(value)) return value;
+  const item = record(value);
+  if (!item) return '';
+  const user = typeof item.user === 'string' ? item.user : typeof item.User === 'string' ? item.User : '';
+  const server = typeof item.server === 'string' ? item.server : typeof item.Server === 'string' ? item.Server : '';
+  if (/^\d+$/.test(user) && server.toLowerCase() === 'g.us') return `${user}@g.us`;
+  return '';
+};
+export const wahaCreatedGroupId = (raw: unknown): string => {
+  const payload = record(raw);
+  const group = record(payload?.group || payload?.Group || payload?.data || payload?.payload);
+  const candidates = [raw, payload?.id, payload?.ID, payload?.jid, payload?.JID, payload?.gid, payload?.GID,
+    group, group?.id, group?.ID, group?.jid, group?.JID, group?.gid, group?.GID];
+  return candidates.map(jidFrom).find(Boolean) || '';
+};
+const safeResponseShape = (body: unknown) => {
+  if (Array.isArray(body)) return { type: 'array', length: body.length };
+  const value = record(body);
+  return value ? { type: 'object', keys: Object.keys(value).slice(0, 20) } : { type: typeof body };
+};
 const statusFor = (value: string): WahaConnectionStatus => {
   if (value === 'WORKING') return 'connected';
   if (value === 'FAILED') return 'error';
@@ -67,6 +88,7 @@ const request = async (path: string, init: RequestInit = {}): Promise<unknown> =
     const text = await response.text();
     let body: unknown = null;
     try { body = text ? JSON.parse(text) : null; } catch { if (response.ok) throw new WahaApiError('invalid_response'); }
+    if (path.includes('/groups')) console.info('[waha] group provider response', { path: path.replace(/\/api\/[^/]+\//, '/api/:session/'), status: response.status, body: safeResponseShape(body) });
     if (!response.ok) {
       const root = record(body);
       const detail = typeof root?.message === 'string' ? root.message.slice(0, 240) : response.statusText;
@@ -195,8 +217,7 @@ export const wahaTransport = {
   },
   async createGroup(session: string, name: string, participants: string[] = []): Promise<CreatedWahaGroup> {
     const raw = await request(`/api/${namePath(session)}/groups`, { method: 'POST', body: JSON.stringify({ name, participants: participants.map(id => ({ id: normalizeWahaChatId(id) })) }) });
-    const payload = record(raw); const group = record(payload?.group);
-    const id = typeof payload?.id === 'string' ? payload.id : typeof payload?.JID === 'string' ? payload.JID : typeof payload?.gid === 'string' ? payload.gid : typeof group?.id === 'string' ? group.id : typeof group?.JID === 'string' ? group.JID : '';
+    const id = wahaCreatedGroupId(raw);
     if (!id) throw new WahaApiError('invalid_response');
     return { id };
   },

@@ -45,8 +45,23 @@ export const whatsappConnectionService = {
   },
 };
 
+const capabilityCache = new Map<string, { value: WhatsAppSendCapability; expiresAt: number }>();
+const capabilityRequests = new Map<string, Promise<WhatsAppSendCapability>>();
+let capabilityCacheGeneration = 0;
+export const clearWhatsAppCapabilityCache = () => { capabilityCacheGeneration += 1; capabilityCache.clear(); capabilityRequests.clear(); };
 export const whatsappSendCapabilityService = {
-  get: (accountId: number, conversationId: number) => chatwootApiClient.get<WhatsAppSendCapability>(
-    `/api/v1/accounts/${accountId}/conversations/${conversationId}/send_capability`
-  ),
+  get: (accountId: number, conversationId: number) => {
+    const key = `${accountId}:${conversationId}`;
+    const cached = capabilityCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return Promise.resolve(cached.value);
+    let pending = capabilityRequests.get(key);
+    if (!pending) {
+      const generation = capabilityCacheGeneration;
+      pending = chatwootApiClient.get<WhatsAppSendCapability>(`/api/v1/accounts/${accountId}/conversations/${conversationId}/send_capability`)
+        .then(value => { if (generation === capabilityCacheGeneration) capabilityCache.set(key, { value, expiresAt: Date.now() + 30_000 }); return value; })
+        .finally(() => capabilityRequests.delete(key));
+      capabilityRequests.set(key, pending);
+    }
+    return pending;
+  },
 };

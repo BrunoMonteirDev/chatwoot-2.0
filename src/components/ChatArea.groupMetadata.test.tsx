@@ -57,7 +57,7 @@ describe('ChatArea group metadata loading', () => {
     const groupChat = { ...chat([{ id: '1', sender: 'them' as const, senderName: 'Ricardo', senderPhone: '+5544988687221', senderIdentity: 'contact:44', text: 'Olá', time: '10:00', whatsappTransport: 'waha' as const, whatsappRemoteJid: '123@g.us' }]), isGroup: true };
     await render(groupChat, { ...conversation, isGroup: true });
     await act(async () => { container.querySelector<HTMLButtonElement>('button[aria-label="Abrir contato de Ricardo"]')?.click(); });
-    expect(contactGet).toHaveBeenCalledWith(1, 44, expect.any(AbortSignal));
+    expect(contactGet).toHaveBeenCalledWith(1, 44);
     await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Fechar painel"]')?.click(); });
     const nameButton = Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'Ricardo' && button.className.includes('hover:underline'));
     expect(nameButton).toBeTruthy();

@@ -92,19 +92,28 @@ export const useConversationMessages = (accountId: number | null, conversationId
     pendingMessageFiles.current.clear();
     setHasOlderMessages(false);
     if (!accountId || !conversationId) { setStatus('idle'); return; }
+    let cancelled = false;
     const cached = messageHistoryCache.get(accountId, conversationId);
     if (cached) {
       setMessages(cached.messages);
       setHasOlderMessages(cached.hasOlderMessages);
       setStatus('ready');
-      // A cache hit is always rendered first. Expired entries are revalidated
-      // immediately; fresh entries still get a low-cost SWR merge.
-      void load(undefined, false, true);
+      if (!cached.isFresh) void load(undefined, false, true);
     } else {
       setMessages([]);
-      void load();
+      setStatus('loading');
+      void messageHistoryCache.hydrate(accountId, conversationId).then((persisted) => {
+        if (cancelled) return;
+        if (persisted) {
+          setMessages(persisted.messages);
+          setHasOlderMessages(persisted.hasOlderMessages);
+          setStatus('ready');
+          if (persisted.isFresh) return;
+        }
+        void load(undefined, false, Boolean(persisted));
+      });
     }
-    return () => abortRef.current?.abort();
+    return () => { cancelled = true; abortRef.current?.abort(); };
   }, [accountId, conversationId, load]);
 
   const loadOlder = useCallback(() => {

@@ -5,6 +5,8 @@ export interface ToastMessage {
   id: string;
   type?: 'success' | 'info' | 'error';
   title: string;
+  actionLabel?: string;
+  onAction?: () => void;
 }
 
 interface ToastProps {
@@ -22,7 +24,7 @@ export const ToastContainer: React.FC<ToastProps> = ({
     if (toasts.length === 0) return;
     const timer = setTimeout(() => {
       onDismiss(toasts[0].id);
-    }, 3000);
+    }, toasts[0].onAction ? 10_000 : 3000);
     return () => clearTimeout(timer);
   }, [toasts, onDismiss]);
 
@@ -46,7 +48,8 @@ export const ToastContainer: React.FC<ToastProps> = ({
           ) : (
             <CheckCircle2 className="w-5 h-5 text-[#00a884] shrink-0" />
           )}
-          <span className="text-xs font-medium truncate">{toast.title}</span>
+          <span className="min-w-0 flex-1 text-xs font-medium">{toast.title}</span>
+          {toast.actionLabel && toast.onAction && <button type="button" onClick={toast.onAction} className="shrink-0 text-xs font-bold text-[#00a884]">{toast.actionLabel}</button>}
         </div>
       ))}
     </div>

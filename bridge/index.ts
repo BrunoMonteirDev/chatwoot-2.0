@@ -33,6 +33,7 @@ import { connectionStatusPatch, evolutionConnectionStatus, metaConnectionStatus,
 import { groupMetadataCache, mergeParticipantHistory, persistedGroupMetadata, type GroupMetadata } from './groupMetadata.js';
 import { bestEffortContactProfile, contactProfileSyncPlan } from './contactProfile.js';
 import { linkGroupParticipantContacts, resolveGroupParticipantIdentity } from './groupParticipantIdentity.js';
+import { GroupCreationStore, type StoredGroupCreation } from './groupCreationStore.js';
 
 const app = express();
 const templateHeaderUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: config.maxMediaBytes, files: 1 } });
@@ -43,6 +44,7 @@ const metaEmbeddedSignupSessions = new MetaEmbeddedSignupSessionStore(config.met
 const metaHistory = new MetaHistoryStore(config.metaHistoryFile);
 const wahaSessions = new WahaSessionStore(config.wahaSessionOwnershipFile);
 const wahaHistory = new WahaHistoryStore(config.wahaHistoryFile);
+const groupCreations = new GroupCreationStore(config.groupCreationFile);
 const historyImports = new Map<number, Promise<void>>();
 const wahaHistoryImports = new Map<number, Promise<void>>();
 const staleGroups = new Set<string>();
@@ -155,30 +157,36 @@ const groupTransport = (configuration: { transports: Array<'evolution' | 'waha' 
   // gets it from the conversation's latest group message; never assume Meta.
   return configuration.transports.length === 1 ? configuration.transports[0] : null;
 };
-const eligibleGroupInbox = async (accountId: number, inbox: Awaited<ReturnType<typeof chatwootBridge.listInboxesForSession>>[number]) => {
+class GroupFlowError extends Error { constructor(readonly code: string, message: string, readonly status = 422) { super(message); } }
+const resolveGroupInbox = async (accountId: number, inbox: Awaited<ReturnType<typeof chatwootBridge.listInboxesForSession>>[number], requested?: unknown) => {
   const attributes = inbox.additional_attributes || {};
   const apiConfiguration = inbox.channel_type === 'Channel::Api' ? transportConfigurationForInbox(attributes) : null;
   const hybridSession = inbox.channel_type === 'Channel::Whatsapp' && attributes.hybrid_enabled === true && typeof attributes.hybrid_waha_session === 'string' ? attributes.hybrid_waha_session : null;
-  const transport = hybridSession || apiConfiguration?.transports.includes('waha') ? 'waha' : apiConfiguration?.transports.includes('evolution') ? 'evolution' : null;
+  const available: Array<'waha' | 'evolution'> = hybridSession ? ['waha'] : apiConfiguration?.transports.filter((value): value is 'waha' | 'evolution' => value !== 'meta_cloud') || [];
+  const transport: 'waha' | 'evolution' | null = requested === 'waha' || requested === 'evolution' ? (available.includes(requested) ? requested : null)
+    : hybridSession || available.includes('waha') ? 'waha' : available.includes('evolution') ? 'evolution' : null;
   const session = hybridSession || apiConfiguration?.wahaSessionName || null;
-  if (!transport) return null;
-  try {
-    if (transport === 'waha') {
-      if (!session) return null;
-      await adoptLegacyWahaOwnership(accountId, inbox.id);
-      await wahaSessions.assertOwned(accountId, inbox.id, session);
-      if ((await wahaTransport.getSession(session)).status !== 'WORKING') return null;
-    } else if (!apiConfiguration?.evolutionInstanceName || evolutionConnectionStatus(await evolutionBridge.getConnection(apiConfiguration.evolutionInstanceName)) !== 'connected') return null;
-    return { id: inbox.id, name: inbox.name || `Inbox ${inbox.id}`, transport, sessionName: session, instanceName: apiConfiguration?.evolutionInstanceName || null };
-  } catch { return null; }
+  if (!transport) throw new GroupFlowError('inbox_not_group_capable', 'Esta caixa de entrada não suporta grupos.');
+  if (transport === 'waha') {
+    if (!session) throw new GroupFlowError('provider_session_mismatch', 'A sessão WAHA desta inbox não está configurada.');
+    await adoptLegacyWahaOwnership(accountId, inbox.id, hybridSession ? { waha_session_name: session, whatsapp_transports: ['waha'] } : attributes);
+    try { await wahaSessions.assertOwned(accountId, inbox.id, session); }
+    catch { throw new GroupFlowError('provider_session_mismatch', 'A sessão WAHA não pertence à inbox selecionada.', 409); }
+    if ((await wahaTransport.getSession(session)).status !== 'WORKING') throw new GroupFlowError('provider_session_not_working', 'A sessão da inbox selecionada não está conectada.', 409);
+  } else {
+    if (!apiConfiguration?.evolutionInstanceName) throw new GroupFlowError('provider_session_mismatch', 'A instância Evolution desta inbox não está configurada.', 409);
+    if (evolutionConnectionStatus(await evolutionBridge.getConnection(apiConfiguration.evolutionInstanceName)) !== 'connected') throw new GroupFlowError('provider_session_not_working', 'A instância da inbox selecionada não está conectada.', 409);
+  }
+  return { id: inbox.id, name: inbox.name || `Inbox ${inbox.id}`, transport, sessionName: session, instanceName: apiConfiguration?.evolutionInstanceName || null };
 };
+const eligibleGroupInbox = async (accountId: number, inbox: Awaited<ReturnType<typeof chatwootBridge.listInboxesForSession>>[number]) => resolveGroupInbox(accountId, inbox).catch(() => null);
 const normalizedContactDigits = (value: unknown) => typeof value === 'string' ? value.replace(/\D/g, '') : '';
 const groupCreationContacts = async (accountId: number, contactIds: number[], sessionHeaders: Headers) => {
   if (!contactIds.length || contactIds.some(id => !Number.isInteger(id)) || new Set(contactIds).size !== contactIds.length) throw new Error('Seleção de contatos inválida.');
   const contacts = await chatwootBridge.contactsByIdsForSession(accountId, contactIds, sessionHeaders);
   return contacts.map(contact => {
     const phone = normalizedContactDigits(contact.phone_number);
-    if (!phone) throw new Error(`O contato ${contact.id} não possui telefone válido.`);
+    if (!/^\d{8,15}$/.test(phone)) throw new GroupFlowError('contact_invalid', `O contato ${contact.id} não possui telefone válido.`);
     return { id: contact.id, name: contact.name || contact.phone_number || phone, phone, avatarUrl: contact.thumbnail || null };
   });
 };
@@ -214,39 +222,120 @@ app.get('/groups/creation/contacts', async (request, response) => {
   } catch { return response.status(403).json({ error: 'Não foi possível buscar contatos desta conta.' }); }
 });
 
+app.post('/groups/creation/contacts', async (request, response) => {
+  if (!(await requireBridgeUser(request, response))) return;
+  const body = request.body as Record<string, unknown>; const accountId = Number(body.accountId); const name = typeof body.name === 'string' ? body.name.trim() : ''; const digits = normalizedContactDigits(body.phoneNumber); const sessionHeaders = chatwootSessionHeaders(request);
+  if (!Number.isInteger(accountId) || !sessionHeaders || !name || !/^\d{8,15}$/.test(digits)) return response.status(422).json({ error: 'Contato inválido.', code: 'contact_invalid' });
+  try {
+    const contact = await chatwootBridge.createOrFindContactForSession(accountId, { name, phoneNumber: digits }, sessionHeaders);
+    return response.status(contact.existing ? 200 : 201).json({ contact: { id: contact.id, name: contact.name, phoneNumber: contact.phoneNumber, avatarUrl: contact.avatarUrl }, existing: contact.existing });
+  } catch { return response.status(422).json({ error: 'Não foi possível criar o contato.', code: 'contact_invalid' }); }
+});
+
+const publicCreationResult = (result: StoredGroupCreation) => ({
+  created: true, creationRequestId: result.creationRequestId, conversationId: result.conversationId,
+  groupId: result.groupId, groupJid: result.groupJid, inbox: { id: result.inboxId, name: result.inboxName },
+  provider: { transport: result.transport, session: result.providerSession }, inviteLink: result.inviteLink,
+  inviteStatus: result.inviteStatus, results: result.results, warnings: result.warnings,
+});
+const groupErrorResponse = (response: express.Response, error: unknown, fallbackCode: string) => {
+  const flow = error instanceof GroupFlowError ? error : null;
+  console.warn('[groups] operation failed', { code: flow?.code || fallbackCode, error: error instanceof Error ? error.message : 'unknown' });
+  return response.status(flow?.status || 502).json({ error: flow?.message || 'Não foi possível criar o grupo.', code: flow?.code || fallbackCode });
+};
+
 app.post('/groups/creation', async (request, response) => {
   if (!(await requireBridgeUser(request, response))) return;
-  const body = request.body as Record<string, unknown>; const accountId = Number(body.accountId); const inboxId = Number(body.inboxId); const mode = body.mode; const name = typeof body.name === 'string' ? body.name.trim() : ''; const description = typeof body.description === 'string' ? body.description.trim() : ''; const contactIds = Array.isArray(body.contactIds) ? body.contactIds.map(Number) : []; const sessionHeaders = chatwootSessionHeaders(request);
-  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !sessionHeaders || !name || (mode !== 'invite' && mode !== 'direct')) return response.status(422).json({ error: 'Dados de criação inválidos.' });
+  const body = request.body as Record<string, unknown>; const accountId = Number(body.accountId); const inboxId = Number(body.inboxId); const mode = body.mode; const creationRequestId = typeof body.creationRequestId === 'string' ? body.creationRequestId : ''; const name = typeof body.name === 'string' ? body.name.trim() : ''; const description = typeof body.description === 'string' ? body.description.trim() : ''; const contactIds = Array.isArray(body.contactIds) ? body.contactIds.map(Number) : []; const sessionHeaders = chatwootSessionHeaders(request);
+  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !sessionHeaders || !name || !/^[a-zA-Z0-9_-]{8,128}$/.test(creationRequestId) || (mode !== 'invite' && mode !== 'direct') || (mode === 'direct' && body.directConfirmed !== true)) return response.status(422).json({ error: 'Dados de criação inválidos.', code: mode === 'direct' ? 'direct_add_failed' : 'group_creation_failed' });
   try {
-    const rawInbox = (await chatwootBridge.listInboxesForSession(accountId, sessionHeaders)).find(inbox => inbox.id === inboxId);
-    const inbox = rawInbox && await eligibleGroupInbox(accountId, rawInbox); if (!inbox) return response.status(422).json({ error: 'Esta caixa de entrada não está conectada ou não suporta grupos.' });
-    const contacts = await groupCreationContacts(accountId, contactIds, sessionHeaders); const direct = mode === 'direct' ? contacts.map(contact => contact.phone) : [];
-    const created = inbox.transport === 'waha' ? await wahaTransport.createGroup(inbox.sessionName!, name, direct) : await evolutionBridge.createGroup(inbox.instanceName!, name, direct);
-    if (description) {
-      if (inbox.transport === 'waha') await wahaTransport.updateGroupDescription(inbox.sessionName!, created.id, description);
-      else await evolutionBridge.updateGroupDescription(inbox.instanceName!, created.id, description);
-    }
-    if (mode === 'direct') return response.status(201).json({ groupId: created.id, results: contacts.map(contact => ({ contactId: contact.id, ok: true })) });
-    const inviteLink = inbox.transport === 'waha' ? await wahaTransport.getGroupInviteLink(inbox.sessionName!, created.id) : await evolutionBridge.getGroupInviteLink(inbox.instanceName!, created.id);
-    const text = `Você foi convidado para participar do grupo ${name}. Entrar no grupo: ${inviteLink}`;
-    const results = await Promise.all(contacts.map(async contact => { try { inbox.transport === 'waha' ? await wahaTransport.sendText(inbox.sessionName!, contact.phone, text) : await evolutionBridge.sendText(inbox.instanceName!, contact.phone, text); return { contactId: contact.id, ok: true }; } catch (error) { return { contactId: contact.id, ok: false, error: error instanceof Error ? error.message : 'Falha ao enviar convite.' }; } }));
-    return response.status(201).json({ groupId: created.id, inviteLink, results });
-  } catch (error) { return response.status(502).json({ error: error instanceof Error ? error.message : 'Não foi possível criar o grupo.' }); }
+    const result = await groupCreations.exclusive(accountId, creationRequestId, async () => {
+      const existing = await groupCreations.get(accountId, creationRequestId);
+      if (existing) {
+        if (existing.inboxId !== inboxId || existing.mode !== mode || existing.name !== name) throw new GroupFlowError('provider_session_mismatch', 'Esta tentativa já pertence a outra criação.', 409);
+        let recovered = existing;
+        if (!recovered.conversationId) {
+          try {
+            const linked = await chatwootBridge.withAccount(accountId, () => chatwootBridge.ensureGroupConversation(inboxId, recovered.groupJid, recovered.name, recovered.transport));
+            await identities.save([`${inboxId}:group:${recovered.groupJid}`], linked.sourceId); await identities.save([`group-contact:${groupScopeKey(accountId, inboxId, recovered.groupJid)}`], String(linked.contactId));
+            recovered = { ...recovered, conversationId: linked.conversationId };
+          } catch { /* Preserve the already-created provider group. */ }
+        }
+        if (recovered.mode === 'invite' && recovered.results.length < recovered.contactIds.length) {
+          const completed = new Set(recovered.results.map(item => item.contactId));
+          recovered = { ...recovered, inviteStatus: recovered.results.some(item => item.ok) ? 'partial' : 'failed', results: [...recovered.results, ...recovered.contactIds.filter(id => !completed.has(id)).map(contactId => ({ contactId, ok: false, error: 'invite_send_failed' }))] };
+        }
+        return groupCreations.save(recovered);
+      }
+      const rawInbox = (await chatwootBridge.listInboxesForSession(accountId, sessionHeaders)).find(inbox => inbox.id === inboxId);
+      if (!rawInbox) throw new GroupFlowError('inbox_not_group_capable', 'A inbox não pertence a esta conta.', 403);
+      const inbox = await resolveGroupInbox(accountId, rawInbox);
+      const contacts = await groupCreationContacts(accountId, contactIds, sessionHeaders); const direct = mode === 'direct' ? contacts.map(contact => contact.phone) : [];
+      let created: { id: string };
+      try { created = inbox.transport === 'waha' ? await wahaTransport.createGroup(inbox.sessionName!, name, direct) : await evolutionBridge.createGroup(inbox.instanceName!, name, direct); }
+      catch (error) { console.warn('[groups] provider stage failed', { stage: 'create_group', accountId, inboxId, transport: inbox.transport, providerSession: inbox.sessionName || inbox.instanceName, error: error instanceof Error ? error.message : 'unknown' }); throw new GroupFlowError('group_creation_failed', 'Não foi possível criar o grupo.', 502); }
+      let state: StoredGroupCreation = { creationRequestId, accountId, inboxId, inboxName: inbox.name, mode: mode as 'invite' | 'direct', transport: inbox.transport, providerSession: inbox.sessionName || inbox.instanceName!, name, contactIds, created: true, groupId: created.id, groupJid: created.id, inviteStatus: mode === 'invite' ? 'pending' : 'not_requested', results: mode === 'direct' ? contacts.map(contact => ({ contactId: contact.id, ok: true })) : [], warnings: [] };
+      await groupCreations.save(state);
+      try {
+        const linked = await chatwootBridge.withAccount(accountId, () => chatwootBridge.ensureGroupConversation(inboxId, created.id, name, inbox.transport));
+        await identities.save([`${inboxId}:group:${created.id}`], linked.sourceId);
+        await identities.save([`group-contact:${groupScopeKey(accountId, inboxId, created.id)}`], String(linked.contactId));
+        state = { ...state, conversationId: linked.conversationId }; await groupCreations.save(state);
+      } catch (error) { console.warn('[groups] provider stage failed', { stage: 'conversation_link', accountId, inboxId, groupJid: created.id, error: error instanceof Error ? error.message : 'unknown' }); state = { ...state, warnings: [...state.warnings, { code: 'conversation_link_failed' }] }; await groupCreations.save(state); }
+      if (description) {
+        try { if (inbox.transport === 'waha') await wahaTransport.updateGroupDescription(inbox.sessionName!, created.id, description); else await evolutionBridge.updateGroupDescription(inbox.instanceName!, created.id, description); }
+        catch (error) { console.warn('[groups] provider stage failed', { stage: 'set_description', accountId, inboxId, groupJid: created.id, error: error instanceof Error ? error.message : 'unknown' }); state = { ...state, warnings: [...state.warnings, { code: 'description_update_failed' }] }; await groupCreations.save(state); }
+      }
+      if (mode === 'direct') return state;
+      try { state = { ...state, inviteLink: inbox.transport === 'waha' ? await wahaTransport.getGroupInviteLink(inbox.sessionName!, created.id) : await evolutionBridge.getGroupInviteLink(inbox.instanceName!, created.id) }; await groupCreations.save(state); }
+      catch (error) { console.warn('[groups] provider stage failed', { stage: 'invite_link', accountId, inboxId, groupJid: created.id, error: error instanceof Error ? error.message : 'unknown' }); state = { ...state, inviteStatus: 'failed', results: contacts.map(contact => ({ contactId: contact.id, ok: false, error: 'invite_link_failed' })), warnings: [...state.warnings, { code: 'invite_link_failed' }] }; await groupCreations.save(state); return state; }
+      const text = `Você foi convidado para participar do grupo ${name}. Entrar no grupo: ${state.inviteLink}`;
+      for (const contact of contacts) {
+        let item;
+        try { if (inbox.transport === 'waha') await wahaTransport.sendText(inbox.sessionName!, contact.phone, text); else await evolutionBridge.sendText(inbox.instanceName!, contact.phone, text); item = { contactId: contact.id, ok: true }; }
+        catch { item = { contactId: contact.id, ok: false, error: 'invite_send_failed' }; }
+        state = { ...state, results: [...state.results, item] }; await groupCreations.save(state);
+      }
+      const failed = state.results.filter(item => !item.ok).length;
+      state = { ...state, inviteStatus: failed ? (failed === state.results.length ? 'failed' : 'partial') : 'complete', ...(failed ? { warnings: [...state.warnings, { code: 'invite_send_failed' }] } : {}) };
+      return groupCreations.save(state);
+    });
+    return response.status(201).json(publicCreationResult(result));
+  } catch (error) { return groupErrorResponse(response, error, 'group_creation_failed'); }
 });
 
 app.post('/groups/creation/invitations', async (request, response) => {
   if (!(await requireBridgeUser(request, response))) return;
-  const body = request.body as Record<string, unknown>; const accountId = Number(body.accountId); const inboxId = Number(body.inboxId); const groupId = typeof body.groupId === 'string' ? body.groupId : ''; const name = typeof body.name === 'string' ? body.name.trim() : ''; const contactIds = Array.isArray(body.contactIds) ? body.contactIds.map(Number) : []; const sessionHeaders = chatwootSessionHeaders(request);
-  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !sessionHeaders || !groupId || !name) return response.status(422).json({ error: 'Dados de convite inválidos.' });
+  const body = request.body as Record<string, unknown>; const accountId = Number(body.accountId); const inboxId = Number(body.inboxId); const creationRequestId = typeof body.creationRequestId === 'string' ? body.creationRequestId : ''; const groupId = typeof body.groupId === 'string' ? body.groupId : ''; const contactIds = Array.isArray(body.contactIds) ? body.contactIds.map(Number) : []; const sessionHeaders = chatwootSessionHeaders(request);
+  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !sessionHeaders || !groupId || !creationRequestId) return response.status(422).json({ error: 'Dados de convite inválidos.', code: 'invite_send_failed' });
   try {
-    const rawInbox = (await chatwootBridge.listInboxesForSession(accountId, sessionHeaders)).find(inbox => inbox.id === inboxId); const inbox = rawInbox && await eligibleGroupInbox(accountId, rawInbox); if (!inbox) return response.status(422).json({ error: 'Inbox indisponível.' });
-    const contacts = await groupCreationContacts(accountId, contactIds, sessionHeaders);
-    if (inbox.transport === 'waha') await wahaTransport.getGroupMetadata(inbox.sessionName!, groupId); else await evolutionBridge.getGroupMetadata(inbox.instanceName!, groupId);
-    const inviteLink = inbox.transport === 'waha' ? await wahaTransport.getGroupInviteLink(inbox.sessionName!, groupId) : await evolutionBridge.getGroupInviteLink(inbox.instanceName!, groupId); const text = `Você foi convidado para participar do grupo ${name}. Entrar no grupo: ${inviteLink}`;
-    const results = await Promise.all(contacts.map(async contact => { try { inbox.transport === 'waha' ? await wahaTransport.sendText(inbox.sessionName!, contact.phone, text) : await evolutionBridge.sendText(inbox.instanceName!, contact.phone, text); return { contactId: contact.id, ok: true }; } catch (error) { return { contactId: contact.id, ok: false, error: error instanceof Error ? error.message : 'Falha ao enviar convite.' }; } }));
-    return response.json({ groupId, inviteLink, results });
-  } catch (error) { return response.status(502).json({ error: error instanceof Error ? error.message : 'Não foi possível reenviar os convites.' }); }
+    const result = await groupCreations.exclusive(accountId, creationRequestId, async () => {
+      let state = await groupCreations.get(accountId, creationRequestId);
+      if (!state || state.inboxId !== inboxId || state.groupId !== groupId || state.mode !== 'invite') throw new GroupFlowError('provider_session_mismatch', 'O grupo não pertence a esta tentativa.', 403);
+      const failedIds = new Set(state.results.filter(item => !item.ok).map(item => item.contactId));
+      if (contactIds.some(id => !failedIds.has(id))) throw new GroupFlowError('invite_send_failed', 'Somente convites com falha podem ser reenviados.', 409);
+      const rawInbox = (await chatwootBridge.listInboxesForSession(accountId, sessionHeaders)).find(inbox => inbox.id === inboxId);
+      if (!rawInbox) throw new GroupFlowError('inbox_not_group_capable', 'A inbox não pertence a esta conta.', 403);
+      const inbox = await resolveGroupInbox(accountId, rawInbox, state.transport);
+      if ((inbox.sessionName || inbox.instanceName) !== state.providerSession) throw new GroupFlowError('provider_session_mismatch', 'O provider deste grupo não pertence mais à inbox.', 409);
+      const contacts = await groupCreationContacts(accountId, contactIds, sessionHeaders);
+      let inviteLink = state.inviteLink;
+      if (!inviteLink) {
+        try { inviteLink = inbox.transport === 'waha' ? await wahaTransport.getGroupInviteLink(inbox.sessionName!, groupId) : await evolutionBridge.getGroupInviteLink(inbox.instanceName!, groupId); }
+        catch { state = { ...state, inviteStatus: 'failed' }; await groupCreations.save(state); return state; }
+      }
+      const text = `Você foi convidado para participar do grupo ${state.name}. Entrar no grupo: ${inviteLink}`;
+      const updates = new Map<number, { contactId: number; ok: boolean; error?: string }>();
+      for (const contact of contacts) {
+        try { if (inbox.transport === 'waha') await wahaTransport.sendText(inbox.sessionName!, contact.phone, text); else await evolutionBridge.sendText(inbox.instanceName!, contact.phone, text); updates.set(contact.id, { contactId: contact.id, ok: true }); }
+        catch { updates.set(contact.id, { contactId: contact.id, ok: false, error: 'invite_send_failed' }); }
+      }
+      const results = state.results.map(item => updates.get(item.contactId) || item); const failed = results.filter(item => !item.ok).length;
+      state = { ...state, inviteLink, results, inviteStatus: failed ? (failed === results.length ? 'failed' : 'partial') : 'complete' };
+      return groupCreations.save(state);
+    });
+    return response.json(publicCreationResult(result));
+  } catch (error) { return groupErrorResponse(response, error, 'invite_send_failed'); }
 });
 const loadGroupMetadata = async (transport: 'evolution' | 'waha', configuration: { evolutionInstanceName: string | null; wahaSessionName: string | null }, groupJid: string): Promise<GroupMetadata> => {
   if (transport === 'waha') {
@@ -320,6 +409,12 @@ app.get('/groups/metadata', async (request, response) => {
       providerUnavailable = true;
       metadata = persisted;
     }
+    // Persisted/provider-cached metadata is already sufficient to paint the
+    // group. Resolving every participant Contact is enrichment and previously
+    // turned this fast path into N account API requests on every opening.
+    if (cached || persistedFresh || providerUnavailable) {
+      return response.json({ group: { ...metadata, memberCount: metadata.participants.length }, cached: true, providerUnavailable });
+    }
     // Persist even when metadata came from the five-minute cache. This fixes
     // groups opened before the subject-sync existed without another provider
     // request, while a persistence failure must never hide valid metadata.
@@ -386,21 +481,19 @@ app.get('/contacts/profile', async (request, response) => {
 
 app.patch('/groups/description', async (request, response) => {
   if (!(await requireBridgeUser(request, response))) return;
-  const body = request.body as { inboxId?: unknown; conversationId?: unknown; transport?: unknown; description?: unknown };
-  if (!Number.isInteger(body.inboxId) || !Number.isInteger(body.conversationId) || typeof body.description !== 'string') return response.status(400).json({ error: 'Descrição de grupo inválida.' });
+  const body = request.body as { accountId?: unknown; inboxId?: unknown; conversationId?: unknown; transport?: unknown; description?: unknown };
+  const accountId = Number(body.accountId); const inboxId = Number(body.inboxId); const conversationId = Number(body.conversationId); const sessionHeaders = chatwootSessionHeaders(request);
+  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !Number.isInteger(conversationId) || !sessionHeaders || typeof body.description !== 'string') return response.status(400).json({ error: 'Descrição de grupo inválida.' });
   try {
-    const inbox = await chatwootBridge.findWhatsAppInboxById(body.inboxId as number);
-    const groupJid = await chatwootBridge.conversationGroupTarget(body.conversationId as number, body.inboxId as number);
-    const transport = groupTransport(inbox.configuration, body.transport);
-    if (!transport) return response.status(409).json({ error: 'Não foi possível determinar o transporte deste grupo.', category: 'transport_unavailable' });
-    if (transport === 'meta_cloud') return response.status(422).json({ error: 'A Meta Cloud não permite editar descrição de grupos.', category: 'unsupported_operation' });
+    const rawInbox = (await chatwootBridge.listInboxesForSession(accountId, sessionHeaders)).find(inbox => inbox.id === inboxId);
+    if (!rawInbox) throw new GroupFlowError('inbox_not_group_capable', 'A inbox não pertence a esta conta.', 403);
+    const inbox = await resolveGroupInbox(accountId, rawInbox, body.transport);
+    const groupJid = (await chatwootBridge.conversationGroupTargetDetailsForSession(accountId, conversationId, inboxId, sessionHeaders)).groupJid;
     let group: GroupMetadata;
-    if (transport === 'waha') {
-      if (!inbox.configuration.wahaSessionName) throw new Error('A sessão WAHA desta inbox não está configurada.');
-      group = { ...(await wahaTransport.updateGroupDescription(inbox.configuration.wahaSessionName, groupJid, body.description)), transport, canEditDescription: true };
+    if (inbox.transport === 'waha') {
+      group = { ...(await wahaTransport.updateGroupDescription(inbox.sessionName!, groupJid, body.description)), transport: inbox.transport, canEditDescription: true };
     } else {
-      if (!inbox.configuration.evolutionInstanceName) throw new Error('A instância Evolution desta inbox não está configurada.');
-      group = { ...(await evolutionBridge.updateGroupDescription(inbox.configuration.evolutionInstanceName, groupJid, body.description)), transport, canEditDescription: true };
+      group = { ...(await evolutionBridge.updateGroupDescription(inbox.instanceName!, groupJid, body.description)), transport: inbox.transport, canEditDescription: true };
     }
     return response.json({ group: groupMetadataCache.set({ ...group, description: group.description ?? body.description }) });
   } catch (error) {
@@ -411,30 +504,52 @@ app.patch('/groups/description', async (request, response) => {
 
 app.post('/groups/participants', async (request, response) => {
   if (!(await requireBridgeUser(request, response))) return;
-  const body = request.body as { inboxId?: unknown; conversationId?: unknown; transport?: unknown; participant?: unknown };
-  if (!Number.isInteger(body.inboxId) || !Number.isInteger(body.conversationId) || typeof body.participant !== 'string' || !body.participant.trim()) return response.status(400).json({ error: 'Participante inválido.' });
+  const body = request.body as { accountId?: unknown; inboxId?: unknown; conversationId?: unknown; transport?: unknown; mode?: unknown; contactIds?: unknown; directConfirmed?: unknown };
+  const accountId = Number(body.accountId); const inboxId = Number(body.inboxId); const conversationId = Number(body.conversationId); const contactIds = Array.isArray(body.contactIds) ? body.contactIds.map(Number) : []; const sessionHeaders = chatwootSessionHeaders(request);
+  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !Number.isInteger(conversationId) || !sessionHeaders || (body.mode !== 'invite' && body.mode !== 'direct') || (body.mode === 'direct' && body.directConfirmed !== true)) return response.status(422).json({ error: 'Participantes inválidos.', code: 'contact_invalid' });
   try {
-    const inbox = await chatwootBridge.findWhatsAppInboxById(body.inboxId as number); const groupJid = await chatwootBridge.conversationGroupTarget(body.conversationId as number, body.inboxId as number); const transport = groupTransport(inbox.configuration, body.transport);
-    if (!transport) return response.status(409).json({ error: 'Não foi possível determinar o transporte deste grupo.', category: 'transport_unavailable' });
-    if (transport === 'meta_cloud') return response.status(422).json({ error: 'A Meta Cloud não permite participantes de grupos.', category: 'unsupported_operation' });
-    const group = transport === 'waha'
-      ? !inbox.configuration.wahaSessionName ? null : { ...(await wahaTransport.addGroupParticipant(inbox.configuration.wahaSessionName, groupJid, body.participant)), transport, canEditDescription: true }
-      : !inbox.configuration.evolutionInstanceName ? null : { ...(await evolutionBridge.addGroupParticipant(inbox.configuration.evolutionInstanceName, groupJid, body.participant)), transport, canEditDescription: true };
-    if (!group) throw new Error('A conexão deste grupo não está configurada.');
-    return response.json({ group: groupMetadataCache.set(group) });
-  } catch (error) { const message = error instanceof Error ? error.message : 'Não foi possível adicionar o participante.'; return response.status(/\b(401|403)\b|admin|permission|not authorized/i.test(message) ? 403 : 502).json({ error: message }); }
+    const rawInbox = (await chatwootBridge.listInboxesForSession(accountId, sessionHeaders)).find(inbox => inbox.id === inboxId);
+    if (!rawInbox) throw new GroupFlowError('inbox_not_group_capable', 'A inbox não pertence a esta conta.', 403);
+    const inbox = await resolveGroupInbox(accountId, rawInbox, body.transport);
+    const target = await chatwootBridge.conversationGroupTargetDetailsForSession(accountId, conversationId, inboxId, sessionHeaders); const groupJid = target.groupJid;
+    const contacts = await groupCreationContacts(accountId, contactIds, sessionHeaders);
+    const current = await loadGroupMetadata(inbox.transport, { evolutionInstanceName: inbox.instanceName, wahaSessionName: inbox.sessionName }, groupJid);
+    const memberPhones = new Set(current.participants.map(item => normalizedContactDigits(item.phoneNumber || item.phoneJid || (/@(c\.us|s\.whatsapp\.net)$/i.test(item.jid) ? item.jid : ''))).filter(Boolean));
+    const results: Array<{ contactId: number; ok: boolean; error?: string }> = [];
+    if (body.mode === 'invite') {
+      let inviteLink: string;
+      try { inviteLink = inbox.transport === 'waha' ? await wahaTransport.getGroupInviteLink(inbox.sessionName!, groupJid) : await evolutionBridge.getGroupInviteLink(inbox.instanceName!, groupJid); }
+      catch { return response.json({ group: current, groupId: groupJid, inviteStatus: 'failed', results: contacts.map(contact => ({ contactId: contact.id, ok: false, error: 'invite_link_failed' })), warnings: [{ code: 'invite_link_failed' }] }); }
+      const text = `Você foi convidado para participar do grupo ${current.subject || 'WhatsApp'}. Entrar no grupo: ${inviteLink}`;
+      for (const contact of contacts) {
+        if (memberPhones.has(contact.phone)) { results.push({ contactId: contact.id, ok: false, error: 'already_member' }); continue; }
+        try { if (inbox.transport === 'waha') await wahaTransport.sendText(inbox.sessionName!, contact.phone, text); else await evolutionBridge.sendText(inbox.instanceName!, contact.phone, text); results.push({ contactId: contact.id, ok: true }); }
+        catch { results.push({ contactId: contact.id, ok: false, error: 'invite_send_failed' }); }
+      }
+      const failed = results.filter(item => !item.ok).length;
+      return response.json({ group: current, groupId: groupJid, inviteLink, inviteStatus: failed ? 'partial' : 'complete', results });
+    }
+    for (const contact of contacts) {
+      if (memberPhones.has(contact.phone)) { results.push({ contactId: contact.id, ok: false, error: 'already_member' }); continue; }
+      try { if (inbox.transport === 'waha') await wahaTransport.addGroupParticipant(inbox.sessionName!, groupJid, contact.phone); else await evolutionBridge.addGroupParticipant(inbox.instanceName!, groupJid, contact.phone); results.push({ contactId: contact.id, ok: true }); }
+      catch { results.push({ contactId: contact.id, ok: false, error: 'direct_add_failed' }); }
+    }
+    const refreshed = await loadGroupMetadata(inbox.transport, { evolutionInstanceName: inbox.instanceName, wahaSessionName: inbox.sessionName }, groupJid).catch(() => current);
+    return response.json({ group: groupMetadataCache.set(refreshed), groupId: groupJid, results });
+  } catch (error) { return groupErrorResponse(response, error, body.mode === 'direct' ? 'direct_add_failed' : 'invite_send_failed'); }
 });
 
 app.post('/groups/leave', async (request, response) => {
   if (!(await requireBridgeUser(request, response))) return;
-  const body = request.body as { inboxId?: unknown; conversationId?: unknown; transport?: unknown };
-  if (!Number.isInteger(body.inboxId) || !Number.isInteger(body.conversationId)) return response.status(400).json({ error: 'Grupo inválido.' });
+  const body = request.body as { accountId?: unknown; inboxId?: unknown; conversationId?: unknown; transport?: unknown };
+  const accountId = Number(body.accountId); const inboxId = Number(body.inboxId); const conversationId = Number(body.conversationId); const sessionHeaders = chatwootSessionHeaders(request);
+  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !Number.isInteger(conversationId) || !sessionHeaders) return response.status(400).json({ error: 'Grupo inválido.' });
   try {
-    const inbox = await chatwootBridge.findWhatsAppInboxById(body.inboxId as number); const groupJid = await chatwootBridge.conversationGroupTarget(body.conversationId as number, body.inboxId as number); const transport = groupTransport(inbox.configuration, body.transport);
-    if (!transport) return response.status(409).json({ error: 'Não foi possível determinar o transporte deste grupo.', category: 'transport_unavailable' });
-    if (transport === 'meta_cloud') return response.status(422).json({ error: 'A Meta Cloud não permite sair de grupos.', category: 'unsupported_operation' });
-    if (transport === 'waha') { if (!inbox.configuration.wahaSessionName) throw new Error('A sessão WAHA desta inbox não está configurada.'); await wahaTransport.leaveGroup(inbox.configuration.wahaSessionName, groupJid); }
-    else { if (!inbox.configuration.evolutionInstanceName) throw new Error('A instância Evolution desta inbox não está configurada.'); await evolutionBridge.leaveGroup(inbox.configuration.evolutionInstanceName, groupJid); }
+    const rawInbox = (await chatwootBridge.listInboxesForSession(accountId, sessionHeaders)).find(inbox => inbox.id === inboxId);
+    if (!rawInbox) throw new GroupFlowError('inbox_not_group_capable', 'A inbox não pertence a esta conta.', 403);
+    const inbox = await resolveGroupInbox(accountId, rawInbox, body.transport); const groupJid = (await chatwootBridge.conversationGroupTargetDetailsForSession(accountId, conversationId, inboxId, sessionHeaders)).groupJid;
+    if (inbox.transport === 'waha') await wahaTransport.leaveGroup(inbox.sessionName!, groupJid);
+    else await evolutionBridge.leaveGroup(inbox.instanceName!, groupJid);
     return response.status(204).end();
   } catch (error) { const message = error instanceof Error ? error.message : 'Não foi possível sair do grupo.'; return response.status(/\b(401|403)\b|admin|permission|not authorized/i.test(message) ? 403 : 502).json({ error: message }); }
 });

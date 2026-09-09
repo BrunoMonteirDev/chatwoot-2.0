@@ -48,6 +48,8 @@ import { triggerAttachmentDownload } from '../features/attachments/fileUtils';
 import { useContactDetails } from '../features/contacts/useContactDetails';
 import { useContactConversations } from '../features/contacts/useContactConversations';
 import { ContactDetailsPanel } from './ContactDetailsPanel';
+import { GroupContactSelector } from './GroupContactSelector';
+import type { GroupCreationContact } from '../features/groups/creation';
 
 interface GroupMember {
   id: string;
@@ -139,8 +141,10 @@ export const ContactAttributesPanel: React.FC<Props> = ({
   // Toggle & input states
   // Add Member Modal State
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
-  const [newMemberName, setNewMemberName] = useState('');
-  const [newMemberPhone, setNewMemberPhone] = useState('');
+  const [newMembers, setNewMembers] = useState<GroupCreationContact[]>([]);
+  const [memberMode, setMemberMode] = useState<'invite' | 'direct'>('invite');
+  const [directConfirmed, setDirectConfirmed] = useState(false);
+  const [memberResults, setMemberResults] = useState<Array<{ contactId: number; name: string; ok: boolean; error?: string }>>([]);
 
   const membersFor = (group: GroupMetadata) => group.participants.map(member => {
     const phone = participantPhone(member.phoneJid || member.jid, member.phoneNumber || member.phone);
@@ -176,9 +180,9 @@ export const ContactAttributesPanel: React.FC<Props> = ({
   }, [chat.isGroup, accountId, conversationId, inboxId, groupTransport]);
 
   const saveDescription = async () => {
-    if (!conversationId || !inboxId || !groupMetadata?.transport) return;
+    if (!accountId || !conversationId || !inboxId || !groupMetadata?.transport) return;
     setSavingDescription(true); setGroupError(null);
-    try { const { group } = await groupMetadataClient.updateDescription(inboxId, conversationId, groupMetadata.transport, descriptionDraft); setGroupMetadata(group); setDescriptionDraft(group.description || descriptionDraft); setEditingDescription(false); }
+    try { const { group } = await groupMetadataClient.updateDescription(accountId, inboxId, conversationId, groupMetadata.transport, descriptionDraft); setGroupMetadata(group); setDescriptionDraft(group.description || descriptionDraft); setEditingDescription(false); }
     catch (error) { setGroupError(error instanceof Error ? error.message : 'Não foi possível editar a descrição.'); }
     finally { setSavingDescription(false); }
   };
@@ -223,17 +227,32 @@ export const ContactAttributesPanel: React.FC<Props> = ({
   };
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMemberPhone.trim() || !conversationId || !inboxId || !groupMetadata) return;
+    if (!newMembers.length || !accountId || !conversationId || !inboxId || !groupMetadata || (memberMode === 'direct' && !directConfirmed)) return;
     setAddingMember(true); setGroupError(null);
-    try { const { group } = await groupMetadataClient.addParticipant(inboxId, conversationId, groupMetadata.transport, newMemberPhone.trim()); applyGroup(group); setNewMemberName(''); setNewMemberPhone(''); setShowAddMemberModal(false); }
+    try {
+      const { group, results } = await groupMetadataClient.addParticipants({ accountId, inboxId, conversationId, transport: groupMetadata.transport, mode: memberMode, contactIds: newMembers.map(contact => contact.id), directConfirmed });
+      applyGroup(group);
+      setMemberResults(results.map(result => ({ ...result, name: newMembers.find(contact => contact.id === result.contactId)?.name || `Contact #${result.contactId}` })));
+      const failedIds = new Set(results.filter(item => !item.ok).map(item => item.contactId));
+      if (failedIds.size) {
+        setGroupError(`${results.length - failedIds.size} de ${results.length} concluídos. ${failedIds.size} falhou.`);
+        setNewMembers(current => current.filter(contact => failedIds.has(contact.id)));
+        return;
+      }
+      setNewMembers([]);
+      setMemberMode('invite');
+      setDirectConfirmed(false);
+      setMemberResults([]);
+      setShowAddMemberModal(false);
+    }
     catch (error) { setGroupError(error instanceof Error ? error.message : 'Não foi possível adicionar o participante.'); }
     finally { setAddingMember(false); }
   };
 
   const leaveGroup = async () => {
-    if (!conversationId || !inboxId || !groupMetadata || !window.confirm('Sair deste grupo? Esta ação será feita no WhatsApp.')) return;
+    if (!accountId || !conversationId || !inboxId || !groupMetadata || !window.confirm('Sair deste grupo? Esta ação será feita no WhatsApp.')) return;
     setLeavingGroup(true); setGroupError(null);
-    try { await groupMetadataClient.leave(inboxId, conversationId, groupMetadata.transport); onClose(); }
+    try { await groupMetadataClient.leave(accountId, inboxId, conversationId, groupMetadata.transport); onClose(); }
     catch (error) { setGroupError(error instanceof Error ? error.message : 'Não foi possível sair do grupo.'); }
     finally { setLeavingGroup(false); }
   };
@@ -653,7 +672,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
               <div className="flex items-center justify-center gap-4 pt-3">
                 {groupMetadata && <button
                   type="button"
-                  onClick={() => setShowAddMemberModal(true)}
+                  onClick={() => { setMemberMode('invite'); setDirectConfirmed(false); setNewMembers([]); setMemberResults([]); setShowAddMemberModal(true); }}
                   className="flex flex-col items-center space-y-1 text-xs text-[#8696a0] hover:text-[#00a884] cursor-pointer group"
                 >
                   <div className="w-10 h-10 rounded-full bg-black/5 dark:bg-white/10 flex items-center justify-center text-[#e9edef] group-hover:bg-[#00a884] group-hover:text-white transition-colors">
@@ -1130,21 +1149,10 @@ export const ContactAttributesPanel: React.FC<Props> = ({
             </div>
 
             <form onSubmit={handleAddMember} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-[11px] font-bold text-[#8696a0] uppercase mb-1">
-                  Telefone (WhatsApp)
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={newMemberPhone}
-                  onChange={(e) => setNewMemberPhone(e.target.value)}
-                  placeholder="Ex: +55 11 98888-7777"
-                  className={`w-full px-3 py-2 rounded-xl border outline-none ${
-                    isDarkMode ? 'bg-[#202c33] border-[#2a3942] text-white' : 'bg-gray-50 border-gray-300'
-                  }`}
-                />
-              </div>
+              <div className="grid grid-cols-2 rounded-xl border border-current/20 p-1"><button type="button" onClick={() => { setMemberMode('invite'); setDirectConfirmed(false); setMemberResults([]); }} className={`py-2 rounded-lg font-bold ${memberMode === 'invite' ? 'bg-[#00a884] text-white' : ''}`}>Convidar</button><button type="button" onClick={() => { setMemberMode('direct'); setDirectConfirmed(false); setMemberResults([]); }} className={`py-2 rounded-lg font-bold ${memberMode === 'direct' ? 'bg-[#00a884] text-white' : ''}`}>Adicionar diretamente</button></div>
+              {memberMode === 'direct' && !directConfirmed && <div className="rounded-xl border border-amber-500/30 p-3"><p>Adicionar pessoas diretamente a grupos sem consentimento pode gerar denúncias, restrições ou suspensão da conta do WhatsApp. Use esta opção somente para contatos que autorizaram previamente a inclusão.</p><button type="button" onClick={() => setDirectConfirmed(true)} className="mt-3 rounded-lg bg-amber-600 px-3 py-2 font-bold text-white">Entendo o risco e quero continuar</button></div>}
+              {accountId && <GroupContactSelector accountId={accountId} selected={newMembers} onChange={contacts => { setNewMembers(contacts); setMemberResults([]); }} memberPhones={groupMembers.map(member => member.phone)} memberContactIds={groupMembers.map(member => member.contactId).filter((id): id is number => Boolean(id))} isDarkMode={isDarkMode}/>}
+              {memberResults.length > 0 && <div className="space-y-1 rounded-xl border border-current/15 p-3">{memberResults.map(result => <p key={result.contactId} className={result.ok ? 'text-emerald-500' : 'text-red-400'}>{result.name}: {result.ok ? 'enviado' : 'falhou'}</p>)}</div>}
 
               <div className="flex justify-end space-x-2 pt-2">
                 <button
@@ -1156,10 +1164,10 @@ export const ContactAttributesPanel: React.FC<Props> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={addingMember || !newMemberPhone.trim()}
+                  disabled={addingMember || !newMembers.length || (memberMode === 'direct' && !directConfirmed)}
                   className="px-4 py-2 rounded-xl bg-[#00a884] hover:bg-[#008f70] text-white text-xs font-bold shadow-md cursor-pointer"
                 >
-                  {addingMember ? 'Adicionando…' : 'Adicionar'}
+                  {addingMember ? 'Processando…' : memberResults.some(item => !item.ok) ? (memberMode === 'invite' ? 'Reenviar convite' : 'Tentar novamente') : memberMode === 'invite' ? 'Enviar convite' : 'Adicionar'}
                 </button>
               </div>
             </form>

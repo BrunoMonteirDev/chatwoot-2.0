@@ -1,12 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ConversationMessage } from '../../domain/currentUser';
 import { MessageHistoryCache, MessageHistoryPrefetcher } from './MessageHistoryCache';
+import { MemoryMessageHistoryPersistence } from './MessageHistoryPersistence';
+import type { ConversationSummary } from '../../domain/currentUser';
 
 const message = (id: number, overrides: Partial<ConversationMessage> = {}): ConversationMessage => ({
   id, conversationId: 1, kind: 'incoming', contentType: 'text', content: String(id), createdAt: id,
   updatedAt: null, status: 'sent', senderName: null, senderEmail: null, senderAvatarUrl: null, origin: null, attachments: [], contentAttributes: {}, ...overrides,
 });
 const page = (...messages: ConversationMessage[]) => ({ messages, hasOlderMessages: false });
+const conversation = (id = 1): ConversationSummary => ({ id, inboxId: 2, channelType: 'Channel::Api', contactName: 'Ana', contactId: 3, contactAvatarUrl: null, lastMessage: 'Oi', lastMessageByCurrentUser: false, lastActivityAt: 100, updatedAt: 100, unreadCount: 0, status: 'open', priority: null, assigneeId: null, assigneeName: null, participantIds: [], teamId: null, teamName: null, labels: [], isGroup: false });
 
 describe('MessageHistoryCache', () => {
   it('diferencia cache hit/miss e expira o TTL sem apagar o histórico', () => {
@@ -105,6 +108,56 @@ describe('MessageHistoryCache', () => {
     cache.setScroll(1, 1, 328);
     expect(cache.get(1, 1)?.scrollTop).toBe(328);
   });
+
+  it('hidrata RAM a partir do L2 após refresh e preserva metadata da conversa', async () => {
+    const persistence = new MemoryMessageHistoryPersistence();
+    const beforeRefresh = new MessageHistoryCache(12, 30_000, () => 100, persistence);
+    beforeRefresh.set(1, 7, page(message(7, { conversationId: 7 })), { conversation: conversation(7) });
+    await Promise.resolve();
+    const afterRefresh = new MessageHistoryCache(12, 30_000, () => 110, persistence);
+    expect(await afterRefresh.hydrate(1, 7)).toMatchObject({ messages: [{ id: 7 }], isFresh: true });
+    expect(await afterRefresh.conversation(1, 7)).toMatchObject({ id: 7, contactName: 'Ana' });
+  });
+
+  it('entrega L2 stale imediatamente para SWR sem apagar o conteúdo', async () => {
+    const persistence = new MemoryMessageHistoryPersistence();
+    const first = new MessageHistoryCache(12, 30_000, () => 0, persistence);
+    first.set(1, 1, page(message(1)));
+    await Promise.resolve();
+    const reopened = new MessageHistoryCache(12, 30_000, () => 31_000, persistence);
+    expect(await reopened.hydrate(1, 1)).toMatchObject({ messages: [{ id: 1 }], isFresh: false });
+  });
+
+  it('persiste prefetch e atualizações realtime, isoladas por account', async () => {
+    const persistence = new MemoryMessageHistoryPersistence();
+    const cache = new MessageHistoryCache(12, 30_000, () => 100, persistence);
+    cache.set(1, 1, page(message(1)));
+    cache.set(2, 1, page(message(20)));
+    cache.upsertIfPresent(1, message(2));
+    await Promise.resolve();
+    const reopened = new MessageHistoryCache(12, 30_000, () => 101, persistence);
+    expect((await reopened.hydrate(1, 1))?.messages.map(item => item.id)).toEqual([1, 2]);
+    expect((await reopened.hydrate(2, 1))?.messages.map(item => item.id)).toEqual([20]);
+  });
+
+  it('limpa RAM e IndexedDB no logout', async () => {
+    const persistence = new MemoryMessageHistoryPersistence();
+    const cache = new MessageHistoryCache(12, 30_000, () => 100, persistence);
+    cache.set(1, 1, page(message(1)));
+    await cache.clear();
+    expect(cache.get(1, 1)).toBeNull();
+    expect(await persistence.get(1, 1)).toBeNull();
+  });
+
+  it('descarta resposta iniciada antes do logout', async () => {
+    const cache = new MessageHistoryCache();
+    let resolve!: (value: ReturnType<typeof page>) => void;
+    const pending = cache.request(1, 1, () => new Promise(done => { resolve = done; }));
+    await cache.clear();
+    resolve(page(message(1)));
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(cache.get(1, 1)).toBeNull();
+  });
 });
 
 describe('MessageHistoryPrefetcher', () => {
@@ -120,6 +173,16 @@ describe('MessageHistoryPrefetcher', () => {
     await vi.runAllTimersAsync();
     expect(max).toBe(2);
     expect(completed).toBe(3);
+    vi.useRealTimers();
+  });
+
+  it('reduz a concorrência quando o servidor fica lento', async () => {
+    vi.useFakeTimers();
+    let now = 0;
+    const prefetcher = new MessageHistoryPrefetcher(3, () => now);
+    prefetcher.enqueue('slow', async () => { now += 2_000; });
+    await vi.runAllTimersAsync();
+    expect(prefetcher.concurrency()).toBe(1);
     vi.useRealTimers();
   });
 });

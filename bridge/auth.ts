@@ -39,6 +39,7 @@ export const requireChatwootSession = async (request: express.Request, administr
     if (!accountId) return false;
     const account = profile.accounts?.find(item => item.id === accountId);
     const role = account?.role || (profile.account_id === accountId ? profile.role : null);
+    if (!role) return false;
     return !administrator || role === 'administrator';
   } catch {
     return false;
@@ -52,7 +53,7 @@ export const bridgeCors = (request: express.Request, response: express.Response,
     response.setHeader('Vary', 'Origin');
     response.setHeader('Access-Control-Allow-Credentials', 'true');
     response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Access-Token, Token-Type, Client, Expiry, Uid, X-Chatwoot-Account-Id');
-    response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
   }
   if (request.method === 'OPTIONS') return response.sendStatus(origin && config.allowedOrigins.includes(origin) ? 204 : 403);
   return next();

@@ -7,6 +7,7 @@ import { groupMetadataClient } from '../features/groups/metadata';
 import type { Chat } from '../types';
 import type { WhatsAppTransport } from '../integrations/whatsapp/provider';
 import { contactService } from '../integrations/chatwoot/contacts';
+import { groupCreationClient } from '../features/groups/creation';
 
 const get = vi.spyOn(groupMetadataClient, 'get');
 let container: HTMLDivElement;
@@ -22,7 +23,7 @@ describe('group metadata requests', () => {
     container = document.createElement('div'); document.body.append(container); root = createRoot(container);
     get.mockReset().mockResolvedValue({ group: { id: '123@g.us', subject: 'Real group', transport: 'waha', participants: [], canEditDescription: true } });
   });
-  afterEach(() => { act(() => root.unmount()); container.remove(); });
+  afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimers(); });
 
   it.each(['meta_cloud', 'waha'] as const)('never requests metadata for private %s, including rerenders', async transport => {
     await render(false, transport); await render(false, transport);
@@ -68,5 +69,19 @@ describe('group metadata requests', () => {
     expect(button).toBeTruthy();
     await act(async () => { button?.click(); });
     expect(start).toHaveBeenCalledWith(44);
+  });
+  it('abre Adicionar em Convidar, bloqueia membro existente e exige confirmação no direto', async () => {
+    vi.useFakeTimers();
+    get.mockResolvedValue({ group: { id: '123@g.us', subject: 'Equipe', transport: 'waha', canEditDescription: true, participants: [{ jid: '5544999999999@c.us', phoneNumber: '+5544999999999', name: 'Ana', contactId: 8 }] } });
+    vi.spyOn(groupCreationClient, 'searchContacts').mockResolvedValue({ contacts: [{ id: 8, name: 'Ana', phoneNumber: '+5544999999999', avatarUrl: null }] });
+    await render(true);
+    await act(async () => { Array.from(container.querySelectorAll('button')).find(item => item.textContent?.trim() === 'Adicionar')?.click(); });
+    expect(container.textContent).toContain('Enviar convite');
+    const search = container.querySelector<HTMLInputElement>('input[placeholder="Nome ou telefone"]')!;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, '99999999'); search.dispatchEvent(new Event('input', { bubbles: true })); await vi.advanceTimersByTimeAsync(300); });
+    expect(container.textContent).toContain('Já está no grupo'); expect(Array.from(container.querySelectorAll('button')).find(item => item.textContent?.includes('Ana') && item.textContent?.includes('Já está no grupo'))?.hasAttribute('disabled')).toBe(true);
+    await act(async () => { Array.from(container.querySelectorAll('button')).find(item => item.textContent?.includes('Adicionar diretamente'))?.click(); });
+    expect(container.textContent).toContain('Adicionar pessoas diretamente a grupos sem consentimento');
+    expect(Array.from(container.querySelectorAll('button')).filter(item => item.textContent?.trim() === 'Adicionar').at(-1)?.hasAttribute('disabled')).toBe(true);
   });
 });

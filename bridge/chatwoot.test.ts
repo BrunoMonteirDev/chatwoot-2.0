@@ -69,6 +69,38 @@ describe('chatwootBridge media messages', () => {
     expect(JSON.parse((createCall?.[1] as RequestInit).body as string)).toMatchObject({ inbox_id: 7, phone_number: '+5544888888888' });
   });
 
+  it('reutiliza por E.164 exato no quick create e preserva o Contact existente', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ payload: [{ id: 77, name: 'Nome editado', phone_number: '+5544999999999', thumbnail: 'avatar.jpg', custom_attributes: { vip: true } }] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(chatwootBridge.createOrFindContactForSession(3, { name: 'Novo nome', phoneNumber: '5544999999999' }, new Headers({ uid: 'agent@example.test' }))).resolves.toMatchObject({ id: 77, name: 'Nome editado', avatarUrl: 'avatar.jpg', existing: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1); expect(String(fetchMock.mock.calls[0][0])).toContain('/accounts/3/contacts/search');
+  });
+
+  it('não une por telefone parcial ao criar Contact', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ payload: [{ id: 70, name: 'Outro', phone_number: '+5511999999999' }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ payload: { contact: { id: 78, name: 'Novo', phone_number: '+5544999999999' }, existing: false } }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(chatwootBridge.createOrFindContactForSession(3, { name: 'Novo', phoneNumber: '5544999999999' }, new Headers())).resolves.toMatchObject({ id: 78, existing: false });
+    expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toEqual({ name: 'Novo', phone_number: '+5544999999999' });
+  });
+
+  it('cria uma única Conversation account+inbox+groupJid e persiste o subject', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes('/bridge/access_token')) return Promise.resolve(new Response(JSON.stringify({ api_access_token: 'service-token' }), { status: 200 }));
+      if (url.endsWith('/contacts') && init?.method === 'POST') return Promise.resolve(new Response(JSON.stringify({ payload: { contact: { id: 55, name: 'Equipe' } } }), { status: 200 }));
+      if (url.includes('/contacts/55/conversations')) return Promise.resolve(new Response(JSON.stringify({ payload: [] }), { status: 200 }));
+      if (url.endsWith('/conversations') && init?.method === 'POST') return Promise.resolve(new Response(JSON.stringify({ id: 91, inbox_id: 20, meta: { sender: { id: 55 } } }), { status: 200 }));
+      return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(chatwootBridge.withAccount(1, () => chatwootBridge.ensureGroupConversation(20, '120363@g.us', 'Equipe real', 'waha'))).resolves.toMatchObject({ conversationId: 91, contactId: 55, sourceId: 'whatsapp:group:120363@g.us' });
+    const conversationCreates = fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith('/conversations') && (init as RequestInit)?.method === 'POST');
+    expect(conversationCreates).toHaveLength(1); expect(JSON.parse((conversationCreates[0][1] as RequestInit).body as string)).toMatchObject({ inbox_id: 20, contact_id: 55, source_id: 'whatsapp:group:120363@g.us', idempotent: true });
+    const contactPatch = fetchMock.mock.calls.find(([url, init]) => String(url).endsWith('/contacts/55') && (init as RequestInit)?.method === 'PATCH');
+    expect(JSON.parse((contactPatch?.[1] as RequestInit).body as string)).toMatchObject({ name: 'Equipe real', additional_attributes: { whatsapp_group_jid: '120363@g.us', whatsapp_group_transport: 'waha' } });
+  });
+
   it('reutiliza a conversa da mesma inbox quando o contato foi criado manualmente', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ payload: [
       { id: 86, inbox_id: 106, status: 'open', last_activity_at: 100 },

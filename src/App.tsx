@@ -29,6 +29,7 @@ import { enabledDashboardAppForId, useDashboardApps } from './features/apps/useD
 import { useLauncherRouteState } from './features/apps/useLauncherRouteState';
 import { NewConversationModal } from './components/NewConversationModal';
 import { NewGroupModal } from './components/NewGroupModal';
+import { groupCreationClient, type GroupCreationResult } from './features/groups/creation';
 import { APP_VIEWPORT_CHANGE_EVENT, applyVisualViewport, measureVisualViewport } from './features/mobile/visualViewport';
 import { WallpaperId } from './components/WhatsAppDoodleBg';
 import { FloatingMobileNav } from './components/FloatingMobileNav';
@@ -100,6 +101,22 @@ export default function App() {
 
   const removeToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+  const finishGroupCreation = (result: GroupCreationResult) => {
+    setShowNewGroupModal(false);
+    void refreshRecentConversations();
+    if (result.conversationId) openConversationDirectly(result.conversationId);
+    const sent = result.results.filter(item => item.ok).length; const failed = result.results.length - sent;
+    if (!failed || result.inviteStatus === 'not_requested') { addToast(result.warnings.some(item => item.code === 'description_update_failed') ? 'Grupo criado, mas não foi possível atualizar a descrição.' : 'Grupo criado.', result.warnings.length ? 'info' : 'success'); return; }
+    const failedIds = result.results.filter(item => !item.ok).map(item => item.contactId);
+    const id = `group-warning-${Date.now()}`;
+    setToasts(current => [...current, {
+      id, type: 'info', title: `Grupo criado. ${sent} de ${result.results.length} convites enviados. ${failed} falhou.`, actionLabel: 'Reenviar convite',
+      onAction: () => { void groupCreationClient.retryInvitations({ accountId: Number(currentAccount?.id), inboxId: result.inbox.id, creationRequestId: result.creationRequestId, groupId: result.groupId, contactIds: failedIds }).then(retried => {
+        setToasts(items => items.filter(item => item.id !== id)); const retryFailed = retried.results.filter(item => !item.ok).length;
+        addToast(retryFailed ? `Grupo criado. ${retryFailed} convite(s) ainda falharam.` : 'Convites reenviados com sucesso.', retryFailed ? 'info' : 'success');
+      }).catch(cause => addToast(errorMessageForUser(cause), 'error')); },
+    }]);
   };
 
   // Mobile browsers keep `100vh` tied to the layout viewport while their
@@ -505,10 +522,13 @@ export default function App() {
     window.addEventListener('open-whatsapp-manager', openManager);
     return () => window.removeEventListener('open-whatsapp-manager', openManager);
   }, [navigateToSettingsInbox, selectedConversation?.inboxId]);
-  const contactDetails = useContactDetails(currentAccount?.id ?? null, selectedConversation?.contactId ?? null);
+  const contactDetails = useContactDetails(currentAccount?.id ?? null, selectedConversation?.contactId ?? null, 500);
   const selectedContact = contactForConversation(contactDetails.contact, selectedConversation);
   const messageHistory = useConversationMessages(currentAccount?.id ?? null, selectedConversationId, selectedConversation?.inboxId ?? null, selectedContact?.phoneNumber,
     inboxes.find((inbox) => inbox.id === selectedConversation?.inboxId)?.channelType);
+  useEffect(() => {
+    if (currentAccount && selectedConversation && messageHistory.status === 'ready') messageHistoryCache.setConversation(currentAccount.id, selectedConversation);
+  }, [currentAccount, messageHistory.status, selectedConversation]);
   const showSystemMessages = showSystemMessagesFrom(authenticatedUser?.uiSettings);
   const sendMessageShortcut = sendMessageShortcutFrom(authenticatedUser?.uiSettings);
   const scopedHistoryMessages = useMemo(() => messagesForConversation(messageHistory.messages, selectedConversationId), [messageHistory.messages, selectedConversationId]);
@@ -625,11 +645,15 @@ export default function App() {
     const conversationId = Number(activeChatId);
     // Number('') is 0. Do not request the synthetic /conversations/0 route
     // while the user is on the inbox list without a selected conversation.
-    if (!currentAccount || !Number.isInteger(conversationId) || conversationId < 1 || selectedConversation || conversationsStatus !== 'ready') return;
+    if (!currentAccount || !Number.isInteger(conversationId) || conversationId < 1 || selectedConversation) return;
     let cancelled = false;
-    void conversationService.get(currentAccount.id, conversationId)
-      .then((conversation) => { if (!cancelled) setDirectlyLoadedConversation(conversation); })
-      .catch((cause) => { if (!cancelled) addToast(`Não foi possível abrir esta conversa: ${errorMessageForUser(cause)}`, 'error'); });
+    void messageHistoryCache.conversation(currentAccount.id, conversationId).then((persisted) => {
+      if (cancelled || persisted) { if (!cancelled && persisted) setDirectlyLoadedConversation(persisted); return; }
+      if (conversationsStatus !== 'ready') return;
+      return conversationService.get(currentAccount.id, conversationId)
+        .then((conversation) => { if (!cancelled) setDirectlyLoadedConversation(conversation); })
+        .catch((cause) => { if (!cancelled) addToast(`Não foi possível abrir esta conversa: ${errorMessageForUser(cause)}`, 'error'); });
+    });
     return () => { cancelled = true; };
   }, [activeChatId, conversationsStatus, currentAccount, selectedConversation]);
 
@@ -839,19 +863,20 @@ export default function App() {
   const prefetchConversation = useCallback((chat: Chat) => {
     if (!currentAccount) return;
     const conversationId = Number(chat.id);
-    if (!Number.isInteger(conversationId) || conversationId < 1 || messageHistoryCache.has(currentAccount.id, conversationId) || messageHistoryCache.isLoading(currentAccount.id, conversationId)) return;
+    if (!Number.isInteger(conversationId) || conversationId < 1 || messageHistoryCache.get(currentAccount.id, conversationId)?.isFresh || messageHistoryCache.isLoading(currentAccount.id, conversationId)) return;
     const key = messageHistoryCache.key(currentAccount.id, conversationId);
     messageHistoryPrefetcher.enqueue(key, async () => {
-      if (messageHistoryCache.has(currentAccount.id, conversationId)) return;
+      const cached = messageHistoryCache.get(currentAccount.id, conversationId) || await messageHistoryCache.hydrate(currentAccount.id, conversationId);
+      if (cached?.isFresh) return;
       const page = await messageHistoryCache.request(currentAccount.id, conversationId, (signal) => messageService.list({ accountId: currentAccount.id, conversationId, signal }));
-      messageHistoryCache.set(currentAccount.id, conversationId, page);
+      messageHistoryCache.set(currentAccount.id, conversationId, page, { preserveExisting: Boolean(cached), conversation: conversations.find(item => item.id === conversationId) });
     });
-  }, [currentAccount]);
+  }, [conversations, currentAccount]);
 
-  // Warm only the three most likely visible conversations while the browser is
-  // idle. Pointer intent can enqueue any other visible row on demand.
+  // Warm the next visible conversations while idle. Pointer intent can enqueue
+  // any other row; the queue adapts concurrency to observed server latency.
   useEffect(() => {
-    filteredAndSortedChats.slice(0, 3).forEach(prefetchConversation);
+    filteredAndSortedChats.slice(0, 8).forEach(prefetchConversation);
   }, [filteredAndSortedChats, prefetchConversation]);
 
   // Handle sending message
@@ -1498,6 +1523,7 @@ export default function App() {
       {showNewGroupModal && (
         <NewGroupModal
           accountId={currentAccount!.id}
+          onCreated={finishGroupCreation}
           onClose={() => setShowNewGroupModal(false)}
           isDarkMode={isDarkMode}
         />
