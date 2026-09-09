@@ -4,7 +4,7 @@ vi.mock('./config.js', () => ({
   config: { publicUrl: 'https://bridge.test', chatwootBaseUrl: 'http://chatwoot.test', maxMediaBytes: 1_000_000, wahaBaseUrl: 'http://waha.test', wahaApiKey: 'server-only-key', wahaWebhookSecret: 'webhook-secret', wahaDefaultEngine: 'GOWS', wahaRequestTimeoutMs: 20 },
 }));
 
-import { WahaApiError, wahaTransport } from './waha';
+import { WahaApiError, canonicalWhatsAppGroupInviteLink, wahaGroupInviteLinkFromResponse, wahaTransport } from './waha';
 import { config } from './config';
 
 describe('WAHA session transport', () => {
@@ -74,6 +74,28 @@ describe('WAHA session transport', () => {
     await expect(wahaTransport.getGroupInviteLink('empresa', '1@g.us')).resolves.toBe('https://chat.whatsapp.com/abc');
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({ name: 'Equipe', participants: [{ id: '5511999999999@c.us' }] });
+  });
+
+  it('transforma o code documentado pelo WAHA na URL canônica e usa session/groupJid corretos', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 'JMegmkEQlI68VzL5B9r9uT' })));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(wahaTransport.getGroupInviteLink('session-b', '120363430066438295@g.us')).resolves.toBe('https://chat.whatsapp.com/JMegmkEQlI68VzL5B9r9uT');
+    expect(fetchMock.mock.calls[0][0]).toBe('http://waha.test/api/session-b/groups/120363430066438295%40g.us/invite-code');
+  });
+
+  it('remove query params de uma URL completa e rejeita responses sem code', async () => {
+    expect(canonicalWhatsAppGroupInviteLink('https://chat.whatsapp.com/JMegmkEQlI68VzL5B9r9uT?s=cl&p=a&mlu=4&ilr=4')).toBe('https://chat.whatsapp.com/JMegmkEQlI68VzL5B9r9uT');
+    expect(wahaGroupInviteLinkFromResponse({ code: 'https://chat.whatsapp.com/JMegmkEQlI68VzL5B9r9uT?s=cl' })).toBe('https://chat.whatsapp.com/JMegmkEQlI68VzL5B9r9uT');
+    expect(wahaGroupInviteLinkFromResponse({ inviteLink: 'https://chat.whatsapp.com/not-documented' })).toBe('');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 'https://chat.whatsapp.com/JMegmkEQlI68VzL5B9r9uT?s=cl&p=a' }))));
+    await expect(wahaTransport.getGroupInviteLink('session-b', '1@g.us')).resolves.toBe('https://chat.whatsapp.com/JMegmkEQlI68VzL5B9r9uT');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({}))));
+    await expect(wahaTransport.getGroupInviteLink('session-b', '1@g.us')).rejects.toMatchObject({ code: 'invite_code_invalid' });
+  });
+
+  it('separa falha HTTP ao buscar o code de response inválida', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: 'unavailable' }), { status: 503 })));
+    await expect(wahaTransport.getGroupInviteLink('session-b', '1@g.us')).rejects.toMatchObject({ code: 'invite_code_fetch_failed' });
   });
 
   it('aceita a resposta GOWS real de criação e invite-code sem objeto', async () => {

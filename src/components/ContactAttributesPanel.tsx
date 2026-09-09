@@ -42,7 +42,7 @@ import {
 } from 'lucide-react';
 import { Chat, Attachment } from '../types';
 import { groupMetadataClient, type GroupMetadata } from '../features/groups/metadata';
-import { participantColor, participantPhone } from '../features/groups/participant';
+import { participantColor, participantLabel, participantPhone } from '../features/groups/participant';
 import type { WhatsAppTransport } from '../integrations/whatsapp/provider';
 import { triggerAttachmentDownload } from '../features/attachments/fileUtils';
 import { useContactDetails } from '../features/contacts/useContactDetails';
@@ -148,8 +148,8 @@ export const ContactAttributesPanel: React.FC<Props> = ({
 
   const membersFor = (group: GroupMetadata) => group.participants.map(member => {
     const phone = participantPhone(member.phoneJid || member.jid, member.phoneNumber || member.phone);
-    return { id: member.jid, name: member.displayName || member.name || phone || 'Participante', phone, avatar: member.avatarUrl, contactId: member.contactId, isAdmin: Boolean(member.admin), status: member.admin === 'superadmin' ? 'Superadministrador' : member.admin ? 'Administrador' : undefined, avatarBg: participantColor(member.jid) };
-  });
+    return { id: member.jid, name: participantLabel(member.displayName || member.name, member.phoneJid || member.jid, member.phoneNumber || member.phone, group.subject), phone, avatar: member.avatarUrl, contactId: member.contactId, isAdmin: Boolean(member.admin), status: member.admin === 'superadmin' ? 'Superadministrador' : member.admin ? 'Administrador' : undefined, avatarBg: participantColor(member.jid) };
+  }).filter(member => Boolean(member.name));
   const [groupMembers, setGroupMembers] = useState<GroupMember[]>(() => initialGroupMetadata ? membersFor(initialGroupMetadata) : []);
   const [groupMetadata, setGroupMetadata] = useState<GroupMetadata | null>(initialGroupMetadata);
   const [groupError, setGroupError] = useState<string | null>(null);
@@ -290,7 +290,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
 
   // Private contact details are rendered by ContactDetailsPanel.
   if (!chat.isGroup) return null;
-  if (selectedMemberContact?.contactId) return <ContactDetailsPanel contact={memberContact.contact} notes={memberContact.notes} status={memberContact.status} error={memberContact.error} isSaving={memberContact.isSaving} isCreatingNote={memberContact.isCreatingNote} isDarkMode={isDarkMode} panelTitle="Dados do contato" onClose={() => setSelectedMemberContact(null)} onRetry={memberContact.retry} onUpdate={updateMemberContact} onCreateNote={memberContact.createNote} onStartConversation={onStartParticipantConversation ? () => onStartParticipantConversation(selectedMemberContact.contactId!) : undefined} onNewConversation={onStartParticipantConversation ? () => onStartParticipantConversation(selectedMemberContact.contactId!) : undefined} contactConversations={memberConversations.conversations} contactConversationsStatus={memberConversations.status} contactConversationsError={memberConversations.error} inboxes={inboxes} onOpenConversation={onOpenConversation} onDelete={memberContact.remove} isDeleting={memberContact.isDeleting} />;
+  if (selectedMemberContact?.contactId) return <ContactDetailsPanel accountId={accountId || null} contact={memberContact.contact} notes={memberContact.notes} status={memberContact.status} error={memberContact.error} isSaving={memberContact.isSaving} isCreatingNote={memberContact.isCreatingNote} isDarkMode={isDarkMode} panelTitle="Dados do contato" onClose={() => setSelectedMemberContact(null)} onRetry={memberContact.retry} onUpdate={updateMemberContact} onCreateNote={memberContact.createNote} onStartConversation={onStartParticipantConversation ? () => onStartParticipantConversation(selectedMemberContact.contactId!) : undefined} onNewConversation={onStartParticipantConversation ? () => onStartParticipantConversation(selectedMemberContact.contactId!) : undefined} contactConversations={memberConversations.conversations} contactConversationsStatus={memberConversations.status} contactConversationsError={memberConversations.error} inboxes={inboxes} onOpenConversation={onOpenConversation} onDelete={memberContact.remove} isDeleting={memberContact.isDeleting} />;
 
   return (
     <div

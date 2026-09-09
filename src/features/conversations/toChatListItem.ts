@@ -1,10 +1,10 @@
-import type { ConversationSummary, Inbox } from '../../domain/currentUser';
+import type { AccountLabel, ConversationSummary, Inbox } from '../../domain/currentUser';
 import type { Chat } from '../../types';
 
 const statusMap: Record<string, Chat['status']> = { open: 'aberta', pending: 'pendente', resolved: 'resolvida', snoozed: 'adiada' };
 const priorityMap: Record<string, NonNullable<Chat['priority']>> = { high: 'alta', urgent: 'urgente', medium: 'media', low: 'baixa' };
 
-export const toChatListItem = (conversation: ConversationSummary, inboxes: Inbox[]): Chat => {
+export const toChatListItem = (conversation: ConversationSummary, inboxes: Inbox[], labels: AccountLabel[] = []): Chat => {
   const inbox = inboxes.find((item) => item.id === conversation.inboxId);
   return {
     id: String(conversation.id), inboxId: conversation.inboxId, name: conversation.contactName, avatar: conversation.contactAvatarUrl || conversation.contactName.slice(0, 2).toUpperCase(),
@@ -13,7 +13,7 @@ export const toChatListItem = (conversation: ConversationSummary, inboxes: Inbox
     lastActivityAt: new Date(conversation.lastActivityAt * 1000).toISOString(), unreadCount: conversation.unreadCount,
     channelName: inbox?.name || conversation.channelType || 'Canal', assignedAgent: conversation.assigneeName || undefined,
     responsibleUserIds: [...new Set([...(conversation.participantIds || []), ...(conversation.assigneeId ? [conversation.assigneeId] : [])])],
-    teamName: conversation.teamName || undefined, tags: conversation.labels.map((label) => ({ label })),
+    teamName: conversation.teamName || undefined, tags: conversation.labels.map((label) => ({ label, color: labels.find(item => item.title === label)?.color || undefined })),
     unassigned: !conversation.assigneeName, status: statusMap[conversation.status] || 'aberta',
     priority: conversation.priority ? priorityMap[conversation.priority] || 'media' : undefined, messages: [],
   };

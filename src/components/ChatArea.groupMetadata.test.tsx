@@ -33,11 +33,11 @@ describe('ChatArea group metadata loading', () => {
     await render(chat());
     expect(get).not.toHaveBeenCalled();
 
-    const groupChat = chat([{ id: '1', sender: 'them', senderName: 'Participante', senderIdentity: '19696904601705@lid', text: 'Olá', time: '10:00', whatsappTransport: 'waha', whatsappRemoteJid: '123@g.us' }]);
+    const groupChat = chat([{ id: '1', sender: 'them', senderIdentity: '19696904601705@lid', text: 'Olá', time: '10:00', whatsappTransport: 'waha', whatsappRemoteJid: '123@g.us' }]);
     await render(groupChat);
     expect(get).toHaveBeenCalledTimes(1);
     expect(get.mock.calls[0].slice(0, 4)).toEqual([1, 5, 81, 'waha']);
-    expect(container.textContent).toContain('Participante');
+    expect(container.textContent).not.toContain('Participante');
 
     await act(async () => resolveMetadata({ group: { id: '123@g.us', subject: 'Equipe', memberCount: 5, transport: 'waha', canEditDescription: true, participants: [
       { jid: '19696904601705@lid', lid: '19696904601705@lid', phoneJid: '554497755329@c.us', phoneNumber: '554497755329', name: 'Maria' },
@@ -69,9 +69,9 @@ describe('ChatArea group metadata loading', () => {
     let resolveA!: (value: { group: GroupMetadata }) => void;
     let resolveB!: (value: { group: GroupMetadata }) => void;
     get.mockImplementation((_account, _inbox, id) => new Promise(resolve => { if (id === 81) resolveA = resolve; else resolveB = resolve; }));
-    const chatA = chat([{ id: 'a', sender: 'them', senderName: 'Participante', senderIdentity: '1@lid', text: 'A', time: '10:00', whatsappTransport: 'waha', whatsappRemoteJid: 'a@g.us' }]);
+    const chatA = chat([{ id: 'a', sender: 'them', senderIdentity: '1@lid', text: 'A', time: '10:00', whatsappTransport: 'waha', whatsappRemoteJid: 'a@g.us' }]);
     const conversationB = { ...conversation, id: 82, contactName: 'Grupo B' };
-    const chatB = { ...chat([{ id: 'b', sender: 'them', senderName: 'Participante', senderIdentity: '2@lid', text: 'B', time: '10:01', whatsappTransport: 'waha', whatsappRemoteJid: 'b@g.us' }]), id: '82', name: 'Grupo B' };
+    const chatB = { ...chat([{ id: 'b', sender: 'them', senderIdentity: '2@lid', text: 'B', time: '10:01', whatsappTransport: 'waha', whatsappRemoteJid: 'b@g.us' }]), id: '82', name: 'Grupo B' };
 
     await render(chatA);
     await render(chatB, conversationB);
@@ -97,12 +97,14 @@ describe('ChatArea group metadata loading', () => {
     let resolveA!: (value: { group: GroupMetadata }) => void;
     get.mockImplementation(() => new Promise(resolve => { resolveA = resolve; }));
     const [chatA, conversationA, contactA] = groupSelection(81, 'Grupo A', 'a.jpg');
-    const [chatC, conversationC, contactC] = privateSelection(83, 'Contato C', 'c.jpg');
+    const [privateChat, conversationC, contactC] = privateSelection(83, 'Contato C', 'c.jpg');
+    const chatC = { ...privateChat, messages: [{ id: 'private-1', sender: 'them' as const, senderName: 'Autor indevido', text: 'Mensagem privada', time: '10:02' }] };
     await render(chatA, conversationA, contactA);
     await render(chatC, conversationC, contactC);
     expect(container.querySelector('h2')?.textContent).toBe('Contato C');
     expect(container.querySelector<HTMLImageElement>('img[alt="Contato C"]')?.src).toContain('c.jpg');
     expect(container.textContent).not.toContain('dados do grupo');
+    expect(container.textContent).not.toContain('Autor indevido');
     await act(async () => resolveA({ group: { id: '81@g.us', subject: 'Grupo A atrasado', avatarUrl: 'late-a.jpg', transport: 'waha', canEditDescription: true, participants: [] } }));
     expect(container.querySelector('h2')?.textContent).toBe('Contato C');
   });

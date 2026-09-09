@@ -33,7 +33,7 @@ describe('toChatMessages reactions', () => {
   });
 
   it('identifica participante de grupo por JID, mantém cor estável e mostra somente o nome conhecido', () => {
-    const item = baseMessage({ contentAttributes: { whatsapp_participant_jid: '5511999999999@s.whatsapp.net', whatsapp_participant_name: 'Ana' } });
+    const item = baseMessage({ contentAttributes: { whatsapp_remote_jid: '120363@g.us', whatsapp_participant_jid: '5511999999999@s.whatsapp.net', whatsapp_participant_name: 'Ana' } });
     const [first] = toChatMessages([item]); const [second] = toChatMessages([item]);
     expect(first.senderName).toBe('Ana');
     expect(first.senderColor).toBe(second.senderColor);
@@ -41,10 +41,16 @@ describe('toChatMessages reactions', () => {
   });
 
   it('usa nome sobre LID e nunca expõe LID bruto como fallback', () => {
-    const [item] = toChatMessages([baseMessage({ contentAttributes: { whatsapp_participant_jid: '12345@lid', whatsapp_participant_name: 'Ana' } })]);
+    const [item] = toChatMessages([baseMessage({ contentAttributes: { whatsapp_remote_jid: '120363@g.us', whatsapp_participant_jid: '12345@lid', whatsapp_participant_name: 'Ana' } })]);
     expect(item.senderName).toBe('Ana');
     expect(item.senderIdentity).toBe('12345@lid');
-    expect(toChatMessages([baseMessage({ senderName: null, contentAttributes: { whatsapp_participant_jid: '12345@lid' } })])[0].senderName).toBe('Participante');
+    expect(toChatMessages([baseMessage({ senderName: null, contentAttributes: { whatsapp_remote_jid: '120363@g.us', whatsapp_participant_jid: '12345@lid' } })])[0].senderName).toBeUndefined();
+  });
+
+  it('não mostra autor em conversa privada e o restaura somente ao voltar a grupo', () => {
+    const privateMessage = baseMessage({ senderName: 'Ana', senderPhoneNumber: '+5544999999999', contentAttributes: { whatsapp_remote_jid: '5544999999999@c.us' } });
+    expect(toChatMessages([privateMessage])[0].senderName).toBeUndefined();
+    expect(toChatMessages([{ ...privateMessage, contentAttributes: { whatsapp_remote_jid: '120363@g.us', whatsapp_participant_phone: '+5544999999999' } }])[0].senderName).toBe('+5544999999999');
   });
 
   it('nunca usa o nome do grupo e distingue dois participantes da mesma conversa', () => {

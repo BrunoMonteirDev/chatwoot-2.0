@@ -15,7 +15,10 @@ export interface MentionSelection {
 }
 
 export const participantMentionLabel = (identity: GroupParticipantIdentity) => (
-  identity.displayName?.trim() || identity.phone || 'Participante'
+  (identity.displayName?.trim() && !/^participante$/i.test(identity.displayName.trim()) && !/@(lid|g\.us|c\.us|s\.whatsapp\.net)$/i.test(identity.displayName.trim()) ? identity.displayName.trim() : '')
+  || (identity.phone?.replace(/\D/g, '') ? `+${identity.phone.replace(/\D/g, '')}` : '')
+  || (identity.phoneJid?.match(/^(\d{8,15})@/)?.[1] ? `+${identity.phoneJid.match(/^(\d{8,15})@/)![1]}` : '')
+  || ''
 );
 
 // WAHA's sendText contract accepts a real phone JID as its mention target.

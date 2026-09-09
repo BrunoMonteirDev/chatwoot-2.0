@@ -21,7 +21,7 @@ import { bridgeCors, chatwootSessionHeaders, requireChatwootSession } from './au
 import { bridgeRedis } from './redis.js';
 import { bridgeMetrics } from './metrics.js';
 import { enforceRateLimit } from './rateLimit.js';
-import { wahaTransport, WahaApiError } from './waha.js';
+import { canonicalWhatsAppGroupInviteLink, wahaTransport, WahaApiError, WahaGroupInviteError } from './waha.js';
 import { WahaSessionOwnershipError, WahaSessionStore } from './wahaSessionStore.js';
 import { unavailableOwnedWahaSession } from './wahaSessionFallback.js';
 import { deleteWahaInbox } from './wahaInboxDeletion.js';
@@ -190,6 +190,53 @@ const groupCreationContacts = async (accountId: number, contactIds: number[], se
     return { id: contact.id, name: contact.name || contact.phone_number || phone, phone, avatarUrl: contact.thumbnail || null };
   });
 };
+type ResolvedGroupInbox = Awaited<ReturnType<typeof resolveGroupInbox>>;
+type GroupInvitationContact = Awaited<ReturnType<typeof groupCreationContacts>>[number];
+type GroupInvitationResult = { contactId: number; ok: boolean; error?: string };
+const inviteCodeError = (inbox: ResolvedGroupInbox, error: unknown) => inbox.transport === 'waha'
+  ? (error instanceof WahaGroupInviteError ? error.code : 'invite_code_fetch_failed')
+  : 'invite_link_failed';
+const groupInviteLink = async (inbox: ResolvedGroupInbox, groupJid: string, existing?: string) => {
+  if (existing) {
+    const canonical = inbox.transport === 'waha' ? canonicalWhatsAppGroupInviteLink(existing) : existing;
+    if (canonical) return canonical;
+    throw new WahaGroupInviteError('invite_code_invalid');
+  }
+  return inbox.transport === 'waha'
+    ? wahaTransport.getGroupInviteLink(inbox.sessionName!, groupJid)
+    : evolutionBridge.getGroupInviteLink(inbox.instanceName!, groupJid);
+};
+const sendPrivateGroupInvitations = async (input: {
+  inbox: ResolvedGroupInbox;
+  groupJid: string;
+  subject: string;
+  contacts: GroupInvitationContact[];
+  inviteLink?: string;
+  memberPhones?: Set<string>;
+  onLink?: (link: string) => Promise<void>;
+  onResult?: (result: GroupInvitationResult) => Promise<void>;
+}) => {
+  const inviteLink = await groupInviteLink(input.inbox, input.groupJid, input.inviteLink);
+  await input.onLink?.(inviteLink);
+  const text = input.inbox.transport === 'waha'
+    ? `Você foi convidado para entrar no grupo "${input.subject}":\n${inviteLink}`
+    : `Você foi convidado para participar do grupo ${input.subject}. Entrar no grupo: ${inviteLink}`;
+  const results: GroupInvitationResult[] = [];
+  for (const contact of input.contacts) {
+    let result: GroupInvitationResult;
+    if (input.memberPhones?.has(contact.phone)) result = { contactId: contact.id, ok: false, error: 'already_member' };
+    else {
+      try {
+        if (input.inbox.transport === 'waha') await wahaTransport.sendText(input.inbox.sessionName!, contact.phone, text);
+        else await evolutionBridge.sendText(input.inbox.instanceName!, contact.phone, text);
+        result = { contactId: contact.id, ok: true };
+      } catch { result = { contactId: contact.id, ok: false, error: 'invite_send_failed' }; }
+    }
+    results.push(result);
+    await input.onResult?.(result);
+  }
+  return { inviteLink, results };
+};
 
 app.get('/groups/creation/inboxes', async (request, response) => {
   if (!(await requireBridgeUser(request, response))) return;
@@ -287,14 +334,17 @@ app.post('/groups/creation', async (request, response) => {
         catch (error) { console.warn('[groups] provider stage failed', { stage: 'set_description', accountId, inboxId, groupJid: created.id, error: error instanceof Error ? error.message : 'unknown' }); state = { ...state, warnings: [...state.warnings, { code: 'description_update_failed' }] }; await groupCreations.save(state); }
       }
       if (mode === 'direct') return state;
-      try { state = { ...state, inviteLink: inbox.transport === 'waha' ? await wahaTransport.getGroupInviteLink(inbox.sessionName!, created.id) : await evolutionBridge.getGroupInviteLink(inbox.instanceName!, created.id) }; await groupCreations.save(state); }
-      catch (error) { console.warn('[groups] provider stage failed', { stage: 'invite_link', accountId, inboxId, groupJid: created.id, error: error instanceof Error ? error.message : 'unknown' }); state = { ...state, inviteStatus: 'failed', results: contacts.map(contact => ({ contactId: contact.id, ok: false, error: 'invite_link_failed' })), warnings: [...state.warnings, { code: 'invite_link_failed' }] }; await groupCreations.save(state); return state; }
-      const text = `Você foi convidado para participar do grupo ${name}. Entrar no grupo: ${state.inviteLink}`;
-      for (const contact of contacts) {
-        let item;
-        try { if (inbox.transport === 'waha') await wahaTransport.sendText(inbox.sessionName!, contact.phone, text); else await evolutionBridge.sendText(inbox.instanceName!, contact.phone, text); item = { contactId: contact.id, ok: true }; }
-        catch { item = { contactId: contact.id, ok: false, error: 'invite_send_failed' }; }
-        state = { ...state, results: [...state.results, item] }; await groupCreations.save(state);
+      try {
+        await sendPrivateGroupInvitations({
+          inbox, groupJid: created.id, subject: name, contacts,
+          onLink: async inviteLink => { state = { ...state, inviteLink }; await groupCreations.save(state); },
+          onResult: async item => { state = { ...state, results: [...state.results, item] }; await groupCreations.save(state); },
+        });
+      } catch (error) {
+        const code = inviteCodeError(inbox, error);
+        console.warn('[groups] provider stage failed', { stage: 'invite_code', accountId, inboxId, groupJid: created.id, providerSession: inbox.sessionName || inbox.instanceName, code });
+        state = { ...state, inviteStatus: 'failed', results: contacts.map(contact => ({ contactId: contact.id, ok: false, error: code })), warnings: [...state.warnings, { code }] };
+        await groupCreations.save(state); return state;
       }
       const failed = state.results.filter(item => !item.ok).length;
       state = { ...state, inviteStatus: failed ? (failed === state.results.length ? 'failed' : 'partial') : 'complete', ...(failed ? { warnings: [...state.warnings, { code: 'invite_send_failed' }] } : {}) };
@@ -319,16 +369,15 @@ app.post('/groups/creation/invitations', async (request, response) => {
       const inbox = await resolveGroupInbox(accountId, rawInbox, state.transport);
       if ((inbox.sessionName || inbox.instanceName) !== state.providerSession) throw new GroupFlowError('provider_session_mismatch', 'O provider deste grupo não pertence mais à inbox.', 409);
       const contacts = await groupCreationContacts(accountId, contactIds, sessionHeaders);
-      let inviteLink = state.inviteLink;
-      if (!inviteLink) {
-        try { inviteLink = inbox.transport === 'waha' ? await wahaTransport.getGroupInviteLink(inbox.sessionName!, groupId) : await evolutionBridge.getGroupInviteLink(inbox.instanceName!, groupId); }
-        catch { state = { ...state, inviteStatus: 'failed' }; await groupCreations.save(state); return state; }
-      }
-      const text = `Você foi convidado para participar do grupo ${state.name}. Entrar no grupo: ${inviteLink}`;
       const updates = new Map<number, { contactId: number; ok: boolean; error?: string }>();
-      for (const contact of contacts) {
-        try { if (inbox.transport === 'waha') await wahaTransport.sendText(inbox.sessionName!, contact.phone, text); else await evolutionBridge.sendText(inbox.instanceName!, contact.phone, text); updates.set(contact.id, { contactId: contact.id, ok: true }); }
-        catch { updates.set(contact.id, { contactId: contact.id, ok: false, error: 'invite_send_failed' }); }
+      let inviteLink: string;
+      try {
+        const sent = await sendPrivateGroupInvitations({ inbox, groupJid: groupId, subject: state.name, contacts, inviteLink: state.inviteLink });
+        inviteLink = sent.inviteLink; sent.results.forEach(item => updates.set(item.contactId, item));
+      } catch (error) {
+        const code = inviteCodeError(inbox, error);
+        state = { ...state, inviteStatus: 'failed', results: state.results.map(item => contactIds.includes(item.contactId) ? { contactId: item.contactId, ok: false, error: code } : item), warnings: [...state.warnings, { code }] };
+        return groupCreations.save(state);
       }
       const results = state.results.map(item => updates.get(item.contactId) || item); const failed = results.filter(item => !item.ok).length;
       state = { ...state, inviteLink, results, inviteStatus: failed ? (failed === results.length ? 'failed' : 'partial') : 'complete' };
@@ -517,17 +566,16 @@ app.post('/groups/participants', async (request, response) => {
     const memberPhones = new Set(current.participants.map(item => normalizedContactDigits(item.phoneNumber || item.phoneJid || (/@(c\.us|s\.whatsapp\.net)$/i.test(item.jid) ? item.jid : ''))).filter(Boolean));
     const results: Array<{ contactId: number; ok: boolean; error?: string }> = [];
     if (body.mode === 'invite') {
-      let inviteLink: string;
-      try { inviteLink = inbox.transport === 'waha' ? await wahaTransport.getGroupInviteLink(inbox.sessionName!, groupJid) : await evolutionBridge.getGroupInviteLink(inbox.instanceName!, groupJid); }
-      catch { return response.json({ group: current, groupId: groupJid, inviteStatus: 'failed', results: contacts.map(contact => ({ contactId: contact.id, ok: false, error: 'invite_link_failed' })), warnings: [{ code: 'invite_link_failed' }] }); }
-      const text = `Você foi convidado para participar do grupo ${current.subject || 'WhatsApp'}. Entrar no grupo: ${inviteLink}`;
-      for (const contact of contacts) {
-        if (memberPhones.has(contact.phone)) { results.push({ contactId: contact.id, ok: false, error: 'already_member' }); continue; }
-        try { if (inbox.transport === 'waha') await wahaTransport.sendText(inbox.sessionName!, contact.phone, text); else await evolutionBridge.sendText(inbox.instanceName!, contact.phone, text); results.push({ contactId: contact.id, ok: true }); }
-        catch { results.push({ contactId: contact.id, ok: false, error: 'invite_send_failed' }); }
+      try {
+        const sent = await sendPrivateGroupInvitations({ inbox, groupJid, subject: current.subject || 'WhatsApp', contacts, memberPhones });
+        results.push(...sent.results);
+        const failed = results.filter(item => !item.ok).length;
+        return response.json({ group: current, groupId: groupJid, inviteLink: sent.inviteLink, inviteStatus: failed ? (inbox.transport === 'waha' && failed === results.length ? 'failed' : 'partial') : 'complete', results });
+      } catch (error) {
+        const code = inviteCodeError(inbox, error);
+        console.warn('[groups] provider stage failed', { stage: 'invite_code', accountId, inboxId, groupJid, providerSession: inbox.sessionName || inbox.instanceName, code });
+        return response.json({ group: current, groupId: groupJid, inviteStatus: 'failed', results: contacts.map(contact => ({ contactId: contact.id, ok: false, error: code })), warnings: [{ code }] });
       }
-      const failed = results.filter(item => !item.ok).length;
-      return response.json({ group: current, groupId: groupJid, inviteLink, inviteStatus: failed ? 'partial' : 'complete', results });
     }
     for (const contact of contacts) {
       if (memberPhones.has(contact.phone)) { results.push({ contactId: contact.id, ok: false, error: 'already_member' }); continue; }

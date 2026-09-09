@@ -33,6 +33,10 @@ import {
   Italic,
   Strikethrough,
   Code,
+  List,
+  ListOrdered,
+  Quote,
+  MoreHorizontal,
   User,
   Sliders,
   SlidersHorizontal,
@@ -320,37 +324,22 @@ const DocumentAttachmentCard: React.FC<{
   const Icon = presentation.kind === 'spreadsheet' ? FileSpreadsheet : presentation.kind === 'archive' ? FileArchive : FileText;
   const iconColor = presentation.kind === 'pdf' ? 'bg-[#ef4444]' : presentation.kind === 'spreadsheet' ? 'bg-[#16a34a]' : presentation.kind === 'archive' ? 'bg-[#f59e0b]' : 'bg-[#64748b]';
   return (
-    <div className="my-1.5 rounded-xl overflow-hidden border border-black/10 dark:border-white/10 bg-black/20 dark:bg-black/35 shadow-xs transition-all hover:border-[#00a884]">
+    <div className="my-1 flex w-full max-w-[360px] items-center gap-2 overflow-hidden rounded-lg bg-black/10 p-2 dark:bg-black/20">
       {attachment.previewUrl && (
-        <div className="h-28 w-full overflow-hidden bg-black/40 border-b border-white/10">
+        <div className="h-14 w-14 shrink-0 overflow-hidden rounded-md bg-black/20">
           <img
             src={attachment.previewUrl}
             alt={attachment.title || 'Document Preview'}
-            className="w-full h-full object-cover object-top"
+            className="h-full w-full object-cover object-top"
           />
         </div>
       )}
-      <div className="p-3 flex items-center space-x-3 bg-black/10 dark:bg-black/20">
-        <div className={`w-10 h-11 ${iconColor} text-white rounded-lg flex flex-col items-center justify-center font-black shadow-xs shrink-0`}>
-          <Icon className="w-5 h-5 mb-0.5" />
-          <span className="text-[9px] uppercase tracking-tighter leading-none">{presentation.kind === 'archive' ? 'ZIP' : presentation.label}</span>
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold truncate text-[#e9edef] leading-snug">
-            {attachment.title || 'documento.pdf'}
-          </p>
-          <p className="text-xs text-[#8696a0] truncate mt-0.5">
-            {presentation.label}{attachment.size ? ` • ${attachment.size}` : ''}
-          </p>
-        </div>
-        <button
-          onClick={(event) => { event.stopPropagation(); triggerAttachmentDownload(attachment.url, attachment.title, 'anexo'); }}
-          className="w-8 h-8 rounded-full bg-black/20 hover:bg-black/40 text-white flex items-center justify-center transition-colors shrink-0"
-          title="Baixar arquivo"
-        >
-          <Download className="w-4 h-4" />
-        </button>
+      {!attachment.previewUrl && <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white ${iconColor}`}><Icon className="h-5 w-5" /></div>}
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold leading-snug">{attachment.title || 'Documento'}</p>
+        <p className="mt-0.5 truncate text-[11px] text-[#8696a0]">{presentation.label}{attachment.size ? ` · ${attachment.size}` : ''}</p>
       </div>
+      <button onClick={(event) => { event.stopPropagation(); triggerAttachmentDownload(attachment.url, attachment.title, 'anexo'); }} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#8696a0] transition-colors hover:bg-black/10 hover:text-[#00a884] dark:hover:bg-white/10" title="Baixar arquivo"><Download className="h-4 w-4" /></button>
     </div>
   );
 };
@@ -611,6 +600,7 @@ interface Props {
   onAssignConversationAgent?: (agentId: number | null) => void;
   onAssignConversationTeam?: (teamId: number | null) => void;
   onSetConversationLabels?: (labels: string[]) => void;
+  onSetConversationCustomAttributes?: (attributes: Record<string, unknown>) => Promise<void> | void;
   onMarkConversationRead?: () => void;
   onMarkConversationUnread?: () => void;
   onReachLatestMessage?: () => void;
@@ -635,7 +625,7 @@ interface Props {
   onCopyConversationLink?: () => void;
   onOpenDirectConversation?: (conversationId: number) => void;
   onGroupSubjectResolved?: (subject: string) => void;
-  onGroupMetadataResolved?: (metadata: Pick<GroupMetadata, 'id' | 'subject' | 'avatarUrl'>) => void;
+  onGroupMetadataResolved?: (metadata: GroupMetadata) => void;
   onContactProfileResolved?: (profile: { name?: string; avatarUrl?: string }) => void;
   onStartGroupParticipantConversation?: (contactId: number, inboxId: number) => void;
 }
@@ -676,6 +666,7 @@ export const ChatArea: React.FC<Props> = ({
   onAssignConversationAgent,
   onAssignConversationTeam,
   onSetConversationLabels,
+  onSetConversationCustomAttributes,
   onMarkConversationRead,
   onMarkConversationUnread,
   onReachLatestMessage,
@@ -738,6 +729,8 @@ export const ChatArea: React.FC<Props> = ({
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+  const [showFormattingPopup, setShowFormattingPopup] = useState(false);
+  const [showMoreFormatting, setShowMoreFormatting] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [isSendingMessage, setIsSendingMessage] = useState(false);
@@ -956,6 +949,7 @@ export const ChatArea: React.FC<Props> = ({
       if (!providerId || membersMap.has(providerId)) return;
       const phone = participant.phone || participantPhone(participant.phoneJid || participant.jid, participant.phoneNumber);
       const name = participantMentionLabel({ providerId, lid: participant.lid, phoneJid: participant.phoneJid, phone, displayName: participant.displayName || participant.name, avatarUrl: participant.avatarUrl, contactId: participant.contactId });
+      if (!name) return;
       membersMap.set(providerId, { id: providerId, providerId, lid: participant.lid, phoneJid: participant.phoneJid, phone, displayName: participant.displayName || participant.name, avatarUrl: participant.avatarUrl, contactId: participant.contactId, name });
     });
 
@@ -995,6 +989,8 @@ export const ChatArea: React.FC<Props> = ({
   const imageInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const formattingPopupRef = useRef<HTMLDivElement>(null);
+  const selectedTextRangeRef = useRef<{ start: number; end: number } | null>(null);
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -1056,13 +1052,13 @@ export const ChatArea: React.FC<Props> = ({
   const applyFormattingSymbol = (symbol: string) => {
     if (!textareaRef.current) return;
     const textarea = textareaRef.current;
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
+    const savedRange = selectedTextRangeRef.current;
+    const start = savedRange?.start ?? textarea.selectionStart;
+    const end = savedRange?.end ?? textarea.selectionEnd;
     const selectedText = inputText.substring(start, end);
 
     const symLen = symbol.length;
     let newText = '';
-    let newStart = start;
     let newEnd = end;
 
     // Check if selectedText is directly wrapped in symbol e.g. *texto*
@@ -1074,7 +1070,6 @@ export const ChatArea: React.FC<Props> = ({
       // Unwrap selectedText
       const unwrapped = selectedText.slice(symLen, -symLen);
       newText = inputText.substring(0, start) + unwrapped + inputText.substring(end);
-      newStart = start;
       newEnd = start + unwrapped.length;
     }
     // Check if characters surrounding selection are symbol e.g. |texto| with * before & after
@@ -1086,30 +1081,77 @@ export const ChatArea: React.FC<Props> = ({
     ) {
       // Unwrap surrounding
       newText = inputText.substring(0, start - symLen) + selectedText + inputText.substring(end + symLen);
-      newStart = start - symLen;
       newEnd = end - symLen;
     } else {
       // Wrap text
       if (selectedText) {
         newText = inputText.substring(0, start) + `${symbol}${selectedText}${symbol}` + inputText.substring(end);
-        newStart = start;
         newEnd = end + symLen * 2;
       } else {
         newText = inputText.substring(0, start) + `${symbol}${symbol}` + inputText.substring(end);
-        newStart = start + symLen;
         newEnd = start + symLen;
       }
     }
 
     setInputText(newText);
+    setShowFormattingPopup(false);
+    setShowMoreFormatting(false);
+    selectedTextRangeRef.current = null;
 
     setTimeout(() => {
       if (textareaRef.current) {
         textareaRef.current.focus();
-        textareaRef.current.setSelectionRange(newStart, newEnd);
+        textareaRef.current.setSelectionRange(newEnd, newEnd);
       }
     }, 10);
   };
+
+  const applyLineFormatting = (kind: 'list' | 'ordered' | 'quote') => {
+    const textarea = textareaRef.current;
+    const range = selectedTextRangeRef.current;
+    if (!textarea || !range || range.start === range.end) return;
+    const selected = inputText.slice(range.start, range.end);
+    const lines = selected.split('\n');
+    const formatted = lines.map((line, index) => `${kind === 'ordered' ? `${index + 1}. ` : kind === 'quote' ? '> ' : '- '}${line}`).join('\n');
+    setInputText(`${inputText.slice(0, range.start)}${formatted}${inputText.slice(range.end)}`);
+    setShowFormattingPopup(false);
+    setShowMoreFormatting(false);
+    selectedTextRangeRef.current = null;
+    window.setTimeout(() => {
+      textarea.focus();
+      const cursor = range.start + formatted.length;
+      textarea.setSelectionRange(cursor, cursor);
+    }, 10);
+  };
+
+  const updateFormattingSelection = () => {
+    const textarea = textareaRef.current;
+    if (!textarea || textarea.selectionStart === textarea.selectionEnd) {
+      selectedTextRangeRef.current = null;
+      setShowFormattingPopup(false);
+      setShowMoreFormatting(false);
+      return;
+    }
+    selectedTextRangeRef.current = { start: textarea.selectionStart, end: textarea.selectionEnd };
+    setShowFormattingPopup(true);
+  };
+
+  useEffect(() => {
+    const close = (event: PointerEvent) => {
+      if (formattingPopupRef.current?.contains(event.target as Node) || event.target === textareaRef.current) return;
+      setShowFormattingPopup(false);
+      setShowMoreFormatting(false);
+      selectedTextRangeRef.current = null;
+    };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, []);
+
+  useEffect(() => {
+    setShowFormattingPopup(false);
+    setShowMoreFormatting(false);
+    selectedTextRangeRef.current = null;
+  }, [chat.id]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -1408,6 +1450,10 @@ export const ChatArea: React.FC<Props> = ({
 
     if (!inputText.trim() && selectedFiles.length === 0) return;
 
+    setShowFormattingPopup(false);
+    setShowMoreFormatting(false);
+    selectedTextRangeRef.current = null;
+
     const content = inputText.trim();
     const files = selectedFiles;
     const activeMentions = pruneMentionSelections(content, selectedMentions);
@@ -1665,13 +1711,13 @@ export const ChatArea: React.FC<Props> = ({
 
           {/* Name & Subtitle */}
           <div className="flex flex-col min-w-0 flex-1 overflow-hidden mr-1">
-            <h2
-              className={`font-semibold text-sm sm:text-[15px] leading-tight truncate ${
-                isDarkMode ? 'text-[#e9edef]' : 'text-[#111b21]'
-              }`}
-            >
-              {chat.name}
-            </h2>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <h2 className={`min-w-0 truncate text-sm font-semibold leading-tight sm:text-[15px] ${isDarkMode ? 'text-[#e9edef]' : 'text-[#111b21]'}`}>{chat.name}</h2>
+              <div className="hidden min-w-0 items-center gap-1 md:flex">
+                {(conversation?.labels || []).map(title => { const label = managementCatalogs?.labels.find(item => item.title === title); const color = label?.color || '#8696a0'; return <span key={title} title={title} className="flex max-w-24 items-center gap-1 truncate rounded-full border px-1.5 py-0.5 text-[9px] font-semibold" style={{ borderColor: `${color}66`, backgroundColor: `${color}18` }}><span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />{title}</span>; })}
+                {onSetConversationLabels && <button type="button" onClick={() => { setContactPanelTab('attributes'); setIsContactPanelOpen(true); }} title="Adicionar etiqueta" aria-label="Adicionar etiqueta" className="shrink-0 rounded-full px-1 text-xs text-[#8696a0] hover:text-[#00a884]">+</button>}
+              </div>
+            </div>
             <span
               className={`text-[11px] sm:text-xs leading-tight mt-0.5 truncate ${
                 isDarkMode ? 'text-[#8696a0]' : 'text-[#667781]'
@@ -1946,13 +1992,15 @@ export const ChatArea: React.FC<Props> = ({
           const prevMsg = chat.messages[index - 1];
           const isGroupMessage = Boolean(chat.isGroup || conversation?.isGroup || msg.whatsappRemoteJid?.endsWith('@g.us'));
           const hasWideMedia = Boolean(msg.attachments?.some(attachment => attachment.type === 'image' || attachment.type === 'video'));
+          const hasVisualMedia = Boolean(msg.attachments?.some(attachment => attachment.type === 'image' || attachment.type === 'video'));
+          const isVisualMediaBubble = hasVisualMedia && !msg.isPrivate && !msg.replyTo;
           const groupParticipant = msg.senderIdentity ? groupParticipantIdentities[msg.senderIdentity] : undefined;
           const participantAvatar = groupParticipant?.avatarUrl;
           const resolvedSenderName = groupParticipant
-            ? participantLabel(groupParticipant.displayName || groupParticipant.name, groupParticipant.phoneJid || groupParticipant.jid, groupParticipant.phoneNumber || groupParticipant.phone)
-            : msg.senderName;
-          const senderName = resolvedSenderName === chat.name ? 'Participante' : resolvedSenderName;
-          const senderPhone = msg.senderPhone || (groupParticipant ? participantPhone(groupParticipant.jid, groupParticipant.phoneNumber) : undefined);
+            ? participantLabel(groupParticipant.displayName || groupParticipant.name, groupParticipant.phoneJid || groupParticipant.jid, groupParticipant.phoneNumber || groupParticipant.phone, chat.name)
+            : participantLabel(msg.senderName, undefined, msg.senderPhone, chat.name);
+          const senderName = isGroupMessage ? resolvedSenderName || undefined : undefined;
+          const senderPhone = msg.senderPhone || (groupParticipant ? participantPhone(groupParticipant.phoneJid || groupParticipant.jid, groupParticipant.phoneNumber || groupParticipant.phone) : undefined);
           const senderContactId = groupParticipant?.contactId || (msg.senderIdentity?.startsWith('contact:') ? Number(msg.senderIdentity.slice(8)) : undefined);
           const showDatePill =
             msg.dateLabel && (!prevMsg || prevMsg.dateLabel !== msg.dateLabel);
@@ -1991,7 +2039,7 @@ export const ChatArea: React.FC<Props> = ({
                 </button>}
                 <div
                   onContextMenu={(e) => handleMessageContextMenu(e, msg)}
-                  className={`${messageBubbleWidthClassName(hasWideMedia)} rounded-lg px-3 py-1.5 shadow-xs relative group border select-none ${
+                  className={`${messageBubbleWidthClassName(hasWideMedia)} rounded-lg ${isVisualMediaBubble ? 'p-1' : 'px-3 py-1.5'} shadow-xs relative group border select-none ${
                     (msg.audioAuthor || msg.attachments?.some((a) => a.type === 'audio'))
                       ? 'min-w-[270px] sm:min-w-[310px]'
                       : ''
@@ -2020,7 +2068,7 @@ export const ChatArea: React.FC<Props> = ({
                   {msg.isForwarded && <div className="mb-1 flex items-center gap-1 text-[11px] text-[#8696a0]"><CornerUpRight className="h-3.5 w-3.5" />Encaminhada</div>}
 
                   {/* Sender Name in Group Chat (only if not an audio note card, which has its own header) */}
-                  {!isMe && senderName && !(msg.audioAuthor || msg.attachments?.some((a) => a.type === 'audio')) && (
+                  {!isMe && isGroupMessage && senderName && !(msg.audioAuthor || msg.attachments?.some((a) => a.type === 'audio')) && (
                     <button type="button" disabled={!senderContactId || !isGroupMessage} onClick={() => openGroupParticipant(senderContactId, senderName, senderPhone, participantAvatar || msg.senderAvatarUrl)}
                       className={`block text-left text-xs font-semibold mb-1 enabled:cursor-pointer enabled:hover:underline ${
                         msg.senderColor ? '' : isDarkMode ? 'text-[#00a884]' : 'text-[#008069]'
@@ -2040,8 +2088,8 @@ export const ChatArea: React.FC<Props> = ({
                   {/* Audio Note Card */}
                   {(msg.audioAuthor || msg.attachments?.some((a) => a.type === 'audio')) && (
                     <AudioNoteCard
-                      audioAuthor={msg.audioAuthor || (msg.sender === 'them' ? senderName : undefined)}
-                      audioPhone={msg.audioPhone || (msg.sender === 'them' ? senderPhone : undefined)}
+                      audioAuthor={isGroupMessage ? msg.audioAuthor || (msg.sender === 'them' ? senderName : undefined) : undefined}
+                      audioPhone={isGroupMessage ? msg.audioPhone || (msg.sender === 'them' ? senderPhone : undefined) : undefined}
                       audioDuration={msg.audioDuration}
                       audioAvatar={msg.audioAvatar || (msg.sender === 'them' ? participantAvatar || msg.senderAvatarUrl : undefined)}
                       audioUrl={msg.attachments?.find((attachment) => attachment.type === 'audio')?.url}
@@ -2053,7 +2101,7 @@ export const ChatArea: React.FC<Props> = ({
 
                   {/* Image & Document Attachments */}
                   {msg.attachments && msg.attachments.length > 0 && (
-                    <div className="mt-1 space-y-2">
+                    <div className={`${isVisualMediaBubble ? 'mt-0' : 'mt-1'} space-y-1.5`}>
                       {msg.attachments.map((att) => {
                         if (att.type === 'file') {
                           return <DocumentAttachmentCard key={att.id} attachment={att} />;
@@ -2065,55 +2113,21 @@ export const ChatArea: React.FC<Props> = ({
                               onClick={() =>
                                 onImageClick(att.url, att.title, att.subtitle)
                               }
-                              className={`relative rounded-xl overflow-hidden border group/img cursor-pointer transition-all ${
-                                isDarkMode
-                                  ? 'border-[#2a3942] bg-[#111b21] hover:border-[#00a884]'
-                                  : 'border-[#e9edef] bg-[#f0f2f5] hover:border-[#00a884]'
-                              }`}
+                              className={`relative inline-flex max-w-full overflow-hidden rounded-md align-top group/img cursor-pointer ${isDarkMode ? 'bg-black/20' : 'bg-black/5'}`}
                             >
                               <img
                                 src={att.url}
                                 alt={att.title || 'Attachment'}
+                                width={att.width}
+                                height={att.height}
                                 className={`${messageVisualMediaClassName} transition-transform group-hover/img:scale-102 duration-200`}
                                 referrerPolicy="no-referrer"
                               />
-                              {/* Overlay button */}
-                              <div className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/60 hover:bg-black/80 flex items-center justify-center text-white opacity-0 group-hover/img:opacity-100 transition-opacity shadow-xs">
-                                <CornerUpRight className="w-4 h-4" />
-                              </div>
-                              {att.title && (
-                                <div
-                                  className={`p-2 border-t ${
-                                    isDarkMode
-                                      ? 'bg-[#111b21]/95 border-[#202c33]'
-                                      : 'bg-white/95 border-[#f0f2f5]'
-                                  }`}
-                                >
-                                  <p
-                                    className={`text-xs font-medium truncate ${
-                                      isDarkMode ? 'text-[#e9edef]' : 'text-[#111b21]'
-                                    }`}
-                                  >
-                                    {att.title}
-                                  </p>
-                                  {att.subtitle && (
-                                    <p
-                                      className={`text-[11px] truncate ${
-                                        isDarkMode
-                                          ? 'text-[#8696a0]'
-                                          : 'text-[#667781]'
-                                      }`}
-                                    >
-                                      {att.subtitle}
-                                    </p>
-                                  )}
-                                </div>
-                              )}
                             </div>
                           );
                         }
                         if (att.type === 'video') {
-                          return <video key={att.id} controls preload="metadata" className={`${messageVisualMediaClassName} rounded-xl bg-black`} src={att.url}>Seu navegador não suporta vídeo.</video>;
+                          return <video key={att.id} controls preload="metadata" poster={att.previewUrl} width={att.width} height={att.height} className={`${messageVisualMediaClassName} rounded-md bg-black`} src={att.url}>Seu navegador não suporta vídeo.</video>;
                         }
                         return null;
                       })}
@@ -2122,7 +2136,7 @@ export const ChatArea: React.FC<Props> = ({
 
                   {/* Text Message Content */}
                   {msg.text && (
-                    <TextMessageContent text={msg.text} isDarkMode={isDarkMode} />
+                    <div className={hasVisualMedia ? 'px-1.5 pt-1' : ''}><TextMessageContent text={msg.text} isDarkMode={isDarkMode} /></div>
                   )}
                   {msg.whatsappPreviousContent && (
                     <details className="mt-2 select-text text-xs text-[#8696a0]">
@@ -2276,58 +2290,16 @@ export const ChatArea: React.FC<Props> = ({
 
         {/* Chatwoot Style Input Card Container */}
         <div
-          className={`w-full rounded-none border-0 bg-transparent p-0 shadow-none transition-colors duration-200 flex flex-col space-y-1.5 md:rounded-[22px] md:border md:p-2.5 md:shadow-lg ${
+          className={`w-full rounded-none border-0 bg-transparent p-0 shadow-none transition-colors duration-200 flex flex-col space-y-1.5 ${
             messageMode === 'privada'
               ? isDarkMode
-                ? 'bg-[#1a1710] border-amber-600/40'
-                : 'bg-[#fffbeb] border-amber-300'
+                ? 'bg-[#1a1710]'
+                : 'bg-[#fffbeb]'
               : isDarkMode
-              ? 'bg-[#151717] border-[#1e1f1f]'
-              : 'bg-white border-[#d1d7db]'
+              ? 'bg-[#151717]'
+              : 'bg-white'
           }`}
         >
-          {/* Seletor compacto de tipo de mensagem */}
-          <div className="hidden md:flex items-center justify-between shrink-0 px-1 md:px-0">
-            {/* Pill Switcher [Responder | Mensagem Privada] */}
-            <div
-              className={`hidden md:inline-flex items-center p-0.5 rounded-xl transition-colors ${
-                isDarkMode ? 'bg-[#1e1f1f]' : 'bg-[#f0f2f5]'
-              }`}
-            >
-              <button
-                type="button"
-                onClick={() => setMessageMode('responder')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                  messageMode === 'responder'
-                    ? isDarkMode
-                      ? 'bg-[#242525] text-white shadow-xs'
-                      : 'bg-white text-[#111b21] shadow-xs'
-                    : isDarkMode
-                    ? 'text-[#8696a0] hover:text-white'
-                    : 'text-[#54656f] hover:text-[#111b21]'
-                }`}
-              >
-                Responder
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setMessageMode('privada')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center space-x-1 ${
-                  messageMode === 'privada'
-                    ? 'bg-amber-600 text-white shadow-xs'
-                    : isDarkMode
-                    ? 'text-[#8696a0] hover:text-amber-400'
-                    : 'text-[#54656f] hover:text-amber-700'
-                }`}
-              >
-                <Lock className="w-3 h-3" />
-                <span>Mensagem Privada</span>
-              </button>
-            </div>
-
-          </div>
-
           {recordingError && !isRecordingVoice && <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-4 text-amber-300"><span>{recordingError}</span><button type="button" onClick={() => void handleStartRecording()} className="shrink-0 rounded-md bg-[#00a884] px-2.5 py-1.5 text-[11px] font-bold text-[#0b141a] hover:bg-[#25d366]">Permitir microfone</button></div>}
 
           {replyTo && !isRecordingVoice && (
@@ -2492,7 +2464,7 @@ export const ChatArea: React.FC<Props> = ({
               {templateOnly && canUseMetaTemplates && <button type="button" onClick={() => setShowTemplatePicker(true)} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[#00a884] px-3 py-2 font-bold text-white hover:bg-[#008069]"><MessageCircle className="h-4 w-4" />Enviar template</button>}
               {templateOnly && showTemplatePicker && conversation && accountId && <MetaTemplatePicker accountId={accountId} native={conversationInbox?.channelType === 'Channel::Whatsapp'} inboxId={conversation.inboxId} conversationId={conversation.id} onClose={() => setShowTemplatePicker(false)} />}
             </div>}
-            {!templateOnly && <div className={`w-full min-w-0 flex-1 rounded-[28px] px-4 py-1 relative md:rounded-none md:px-0 ${messageMode === 'privada' ? isDarkMode ? 'bg-[#1a1710] md:bg-transparent' : 'bg-[#fffbeb] md:bg-transparent' : isDarkMode ? 'bg-[#202c33] md:bg-transparent' : 'bg-[#f0f2f5] md:bg-transparent'}`}>
+            {!templateOnly && <div className={`w-full min-w-0 flex-1 rounded-[28px] border border-transparent px-4 py-1 relative md:px-3 ${messageMode === 'privada' ? isDarkMode ? 'bg-[#1a1710] md:border-amber-600/40' : 'bg-[#fffbeb] md:border-amber-300' : isDarkMode ? 'bg-[#202c33] md:border-[#2a3942]' : 'bg-[#f0f2f5] md:bg-white md:border-[#d1d7db]'}`}>
               <textarea
                 ref={textareaRef}
                 disabled={externalSendBlocked}
@@ -2526,6 +2498,9 @@ export const ChatArea: React.FC<Props> = ({
                   }
                 }}
                 onPaste={handlePasteFiles}
+                onSelect={updateFormattingSelection}
+                onMouseUp={updateFormattingSelection}
+                onKeyUp={updateFormattingSelection}
                 onKeyDown={(e) => {
                   if ((showQuickResponsesPopup || showMentionsPopup) && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Enter')) {
                     return;
@@ -2535,7 +2510,7 @@ export const ChatArea: React.FC<Props> = ({
                 placeholder={
                   messageMode === 'privada' ? 'Mensagem privada' : 'Mensagem'
                 }
-                className={`w-full relative z-10 bg-transparent pl-8 pr-20 pt-[11px] text-[14px] outline-none resize-none transition-all duration-200 md:px-0 md:pt-0 ${
+                className={`w-full relative z-10 bg-transparent pl-8 pr-20 pt-[11px] text-[14px] outline-none resize-none transition-all duration-200 md:pl-[76px] md:pr-20 md:pt-[11px] ${
                   isExpandedInput ? 'min-h-[180px] max-h-[300px]' : 'min-h-[44px] max-h-[112px]'
                 } overflow-y-auto leading-relaxed ${
                   messageMode === 'privada'
@@ -2556,7 +2531,19 @@ export const ChatArea: React.FC<Props> = ({
               >
                 {messageMode === 'privada' ? <Lock className="h-5 w-5" /> : <Unlock className="h-5 w-5" />}
               </button>
-              <div className="absolute right-3 top-1/2 z-20 flex -translate-y-1/2 items-center gap-1 md:hidden">
+              <div className="absolute left-3 top-1/2 z-20 hidden -translate-y-1/2 items-center gap-0.5 md:flex">
+                <button
+                  type="button"
+                  onClick={() => setMessageMode((current) => current === 'responder' ? 'privada' : 'responder')}
+                  title={messageMode === 'privada' ? 'Mensagem privada — trocar para responder' : 'Responder — trocar para mensagem privada'}
+                  aria-label={messageMode === 'privada' ? 'Mensagem privada' : 'Responder'}
+                  className={`rounded-full p-1.5 ${messageMode === 'privada' ? 'text-amber-500' : isDarkMode ? 'text-[#aebac1]' : 'text-[#54656f]'}`}
+                >
+                  {messageMode === 'privada' ? <Lock className="h-4.5 w-4.5" /> : <MessageCircle className="h-4.5 w-4.5" />}
+                </button>
+                <button type="button" onClick={() => setShowEmojiPicker((current) => !current)} title="Emoji" aria-label="Emoji" className={`rounded-full p-1.5 ${showEmojiPicker ? 'text-[#00a884]' : isDarkMode ? 'text-[#aebac1]' : 'text-[#54656f]'}`}><Smile className="h-4.5 w-4.5" /></button>
+              </div>
+              <div className="absolute right-3 top-1/2 z-20 flex -translate-y-1/2 items-center gap-1">
                 <button
                   type="button"
                   disabled={isSendingMessage || externalSendBlocked}
@@ -2584,185 +2571,25 @@ export const ChatArea: React.FC<Props> = ({
                 else handleSend();
               }}
               title={!inputText.trim() && selectedFiles.length === 0 ? 'Gravar áudio' : 'Enviar mensagem'}
-              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white shadow-md active:scale-95 disabled:opacity-40 md:hidden ${messageMode === 'privada' ? 'bg-amber-600' : 'bg-[#2563eb]'}`}
+              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white shadow-md active:scale-95 disabled:opacity-40 ${messageMode === 'privada' ? 'bg-amber-600 hover:bg-amber-500' : 'bg-[#2563eb] hover:bg-[#1d4ed8] md:bg-[#00a884] md:hover:bg-[#008069]'}`}
             >
-              {!inputText.trim() && selectedFiles.length === 0 ? <Mic className="h-6 w-6" /> : messageMode === 'privada' ? <Lock className="h-5 w-5" /> : <SendHorizontal className="h-5 w-5" />}
+              {!inputText.trim() && selectedFiles.length === 0 ? <Mic className="h-6 w-6" /> : messageMode === 'privada' ? <><Lock className="h-5 w-5 md:hidden" /><SendHorizontal className="hidden h-5 w-5 md:block" /></> : <SendHorizontal className="h-5 w-5" />}
             </button>}
             </div>
           )}
 
-          {/* Bottom Bar: Action Toolbar Icons (Left) & Send Button (Right) */}
-          {!isRecordingVoice && !templateOnly && (
-            <div className="hidden md:flex items-center justify-between border-t border-white/5 pt-1 gap-1">
-              {/* Left Toolbar Icons */}
-              <div className="flex items-center space-x-0.5 sm:space-x-1 overflow-x-auto no-scrollbar shrink min-w-0 pr-1">
-                <button
-                  type="button"
-                  disabled={isSendingMessage || externalSendBlocked}
-                  onClick={() => {
-                    setShowAttachmentMenu((prev) => !prev);
-                    setShowEmojiPicker(false);
-                    setShowQuickResponsesPopup(false);
-                    setShowMentionsPopup(false);
-                  }}
-                  title="Anexar arquivos"
-                  className={`p-1.5 rounded-lg transition-colors cursor-pointer shrink-0 ${
-                    showAttachmentMenu
-                      ? 'text-[#00a884] bg-[#00a884]/10'
-                      : isDarkMode
-                      ? 'text-[#aebac1] hover:text-white hover:bg-white/5'
-                      : 'text-[#54656f] hover:text-[#111b21] hover:bg-black/5'
-                  }`}
-                >
-                  <Paperclip className="w-5 h-5" />
-                </button>
-
-                {canUseMetaTemplates && conversation && <div className="relative shrink-0">
-                  <button
-                    type="button"
-                    disabled={isSendingMessage}
-                    onClick={() => setShowTemplatePicker((current) => !current)}
-                    title="Enviar template Meta"
-                    className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                      showTemplatePicker
-                        ? 'text-[#00a884] bg-[#00a884]/10'
-                        : isDarkMode
-                        ? 'text-[#aebac1] hover:text-white hover:bg-white/5'
-                        : 'text-[#54656f] hover:text-[#111b21] hover:bg-black/5'
-                    }`}
-                  >
-                    <FileText className="w-5 h-5" />
-                  </button>
-                  {showTemplatePicker && accountId && <MetaTemplatePicker accountId={accountId} native={conversationInbox?.channelType === 'Channel::Whatsapp'} inboxId={conversation.inboxId} conversationId={conversation.id} onClose={() => setShowTemplatePicker(false)} />}
-                </div>}
-
-                <button
-                  type="button"
-                  disabled={isSendingMessage || selectedFiles.length > 0 || externalSendBlocked}
-                  onClick={handleStartRecording}
-                  title="Gravar áudio"
-                  className={`hidden md:inline-flex p-1.5 rounded-lg transition-colors cursor-pointer shrink-0 ${
-                    isDarkMode
-                      ? 'text-[#aebac1] hover:text-white hover:bg-white/5'
-                      : 'text-[#54656f] hover:text-[#111b21] hover:bg-black/5'
-                  }`}
-                >
-                  <Mic className="w-5 h-5" />
-                </button>
-
-                {chat.isGroup && <button
-                  type="button"
-                  onClick={() => {
-                    const lastAtIndex = inputText.lastIndexOf('@');
-                    if (lastAtIndex === -1 || lastAtIndex < inputText.length - 1) {
-                      setInputText((prev) => (prev.endsWith(' ') || !prev ? `${prev}@` : `${prev} @`));
-                      setMentionFilterQuery('');
-                    }
-                    setShowMentionsPopup(true);
-                    setShowEmojiPicker(false);
-                    setShowAttachmentMenu(false);
-                    setShowQuickResponsesPopup(false);
-                    if (textareaRef.current) {
-                      textareaRef.current.focus();
-                    }
-                  }}
-                  title="Mencionar membro (@)"
-                  className={`hidden md:inline-flex p-1.5 rounded-lg transition-colors cursor-pointer shrink-0 ${
-                    showMentionsPopup
-                      ? 'text-[#00a884] bg-[#00a884]/10'
-                      : isDarkMode
-                      ? 'text-[#aebac1] hover:text-white hover:bg-white/5'
-                      : 'text-[#54656f] hover:text-[#111b21] hover:bg-black/5'
-                  }`}
-                >
-                  <AtSign className="w-5 h-5" />
-                </button>}
-
-                <div className="h-4 w-[1px] bg-black/10 dark:bg-white/10 mx-0.5 self-center shrink-0 hidden sm:block" />
-
-                <button
-                  type="button"
-                  onClick={() => applyFormattingSymbol('*')}
-                  title="Negrito (*negrito* ou Ctrl+B)"
-                  className={`hidden sm:inline-flex p-1.5 rounded-lg transition-colors cursor-pointer shrink-0 ${
-                    isDarkMode
-                      ? 'text-[#aebac1] hover:text-white hover:bg-white/5'
-                      : 'text-[#54656f] hover:text-[#111b21] hover:bg-black/5'
-                  }`}
-                >
-                  <Bold className="w-4 h-4" />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => applyFormattingSymbol('_')}
-                  title="Itálico (_itálico_ ou Ctrl+I)"
-                  className={`hidden sm:inline-flex p-1.5 rounded-lg transition-colors cursor-pointer shrink-0 ${
-                    isDarkMode
-                      ? 'text-[#aebac1] hover:text-white hover:bg-white/5'
-                      : 'text-[#54656f] hover:text-[#111b21] hover:bg-black/5'
-                  }`}
-                >
-                  <Italic className="w-4 h-4" />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => applyFormattingSymbol('~')}
-                  title="Tachado (~tachado~ ou Ctrl+Shift+X)"
-                  className={`hidden sm:inline-flex p-1.5 rounded-lg transition-colors cursor-pointer shrink-0 ${
-                    isDarkMode
-                      ? 'text-[#aebac1] hover:text-white hover:bg-white/5'
-                      : 'text-[#54656f] hover:text-[#111b21] hover:bg-black/5'
-                  }`}
-                >
-                  <Strikethrough className="w-4 h-4" />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => applyFormattingSymbol('`')}
-                  title="Código (`código` ou Ctrl+Shift+C)"
-                  className={`hidden sm:inline-flex p-1.5 rounded-lg transition-colors cursor-pointer shrink-0 ${
-                    isDarkMode
-                      ? 'text-[#aebac1] hover:text-white hover:bg-white/5'
-                      : 'text-[#54656f] hover:text-[#111b21] hover:bg-black/5'
-                  }`}
-                >
-                  <Code className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Right Send / Note Button */}
-              <div className="shrink-0">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!inputText.trim() && selectedFiles.length === 0) void handleStartRecording();
-                    else handleSend();
-                  }}
-                  disabled={isSendingMessage || externalSendBlocked}
-                  title={!inputText.trim() && selectedFiles.length === 0 ? 'Gravar áudio' : messageMode === 'privada' ? 'Criar nota privada' : 'Enviar mensagem'}
-                  className={`h-11 w-11 rounded-full text-xs font-semibold shadow-md transition-all active:scale-95 flex items-center justify-center cursor-pointer shrink-0 disabled:opacity-40 md:h-auto md:w-auto md:px-4 md:py-2 md:rounded-xl ${
-                    messageMode === 'privada'
-                      ? 'bg-amber-600 hover:bg-amber-500 text-white'
-                      : 'bg-[#2563eb] hover:bg-[#1d4ed8] text-white'
-                  }`}
-                >
-                  {!inputText.trim() && selectedFiles.length === 0 ? <Mic className="h-6 w-6 md:hidden" /> : messageMode === 'privada' ? (
-                    <>
-                      <Lock className="w-3.5 h-3.5 shrink-0" />
-                      <span className="hidden md:inline">{isSendingMessage ? 'Enviando…' : 'Criar Nota (CTRL + ↵)'}</span>
-                      <Lock className="h-4 w-4 md:hidden" />
-                    </>
-                  ) : (
-                    <>
-                      <SendHorizontal className="h-5 w-5 shrink-0 md:hidden" />
-                      <span className="hidden md:inline">{isSendingMessage ? 'Enviando…' : 'Enviar (CTRL + ↵)'}</span>
-                    </>
-                  )}
-                </button>
-              </div>
+          {showFormattingPopup && !isRecordingVoice && !templateOnly && (
+            <div ref={formattingPopupRef} role="toolbar" aria-label="Formatar texto selecionado" className={`absolute bottom-[calc(100%-0.25rem)] left-1/2 z-50 hidden -translate-x-1/2 items-center gap-0.5 rounded-xl border p-1 shadow-xl md:flex ${isDarkMode ? 'border-[#374248] bg-[#202c33] text-[#e9edef]' : 'border-[#d1d7db] bg-white text-[#111b21]'}`}>
+              <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormattingSymbol('*')} title="Negrito" aria-label="Negrito" className="rounded-lg p-2 hover:bg-black/5 dark:hover:bg-white/10"><Bold className="h-4 w-4" /></button>
+              <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormattingSymbol('_')} title="Itálico" aria-label="Itálico" className="rounded-lg p-2 hover:bg-black/5 dark:hover:bg-white/10"><Italic className="h-4 w-4" /></button>
+              <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormattingSymbol('~')} title="Tachado" aria-label="Tachado" className="rounded-lg p-2 hover:bg-black/5 dark:hover:bg-white/10"><Strikethrough className="h-4 w-4" /></button>
+              <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormattingSymbol('`')} title="Código" aria-label="Código" className="rounded-lg p-2 hover:bg-black/5 dark:hover:bg-white/10"><Code className="h-4 w-4" /></button>
+              <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => setShowMoreFormatting((current) => !current)} title="Mais formatação" aria-label="Mais formatação" className="rounded-lg p-2 hover:bg-black/5 dark:hover:bg-white/10"><MoreHorizontal className="h-4 w-4" /></button>
+              {showMoreFormatting && <div className={`absolute bottom-full right-0 mb-1 flex items-center rounded-xl border p-1 shadow-xl ${isDarkMode ? 'border-[#374248] bg-[#202c33]' : 'border-[#d1d7db] bg-white'}`}>
+                <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => applyLineFormatting('list')} title="Lista" aria-label="Lista" className="rounded-lg p-2 hover:bg-black/5 dark:hover:bg-white/10"><List className="h-4 w-4" /></button>
+                <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => applyLineFormatting('ordered')} title="Lista numerada" aria-label="Lista numerada" className="rounded-lg p-2 hover:bg-black/5 dark:hover:bg-white/10"><ListOrdered className="h-4 w-4" /></button>
+                <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => applyLineFormatting('quote')} title="Citação" aria-label="Citação" className="rounded-lg p-2 hover:bg-black/5 dark:hover:bg-white/10"><Quote className="h-4 w-4" /></button>
+              </div>}
             </div>
           )}
         </div>
@@ -2800,6 +2627,8 @@ export const ChatArea: React.FC<Props> = ({
           isSyncingWithWhatsApp={isSyncingContactProfile}
           onSyncWithWhatsApp={syncContactProfile}
           conversation={conversation}
+          accountId={accountId}
+          onSetConversationCustomAttributes={onSetConversationCustomAttributes}
           conversationLabels={managementCatalogs?.labels}
           conversationAgents={managementCatalogs?.agents}
           conversationTeams={managementCatalogs?.teams}

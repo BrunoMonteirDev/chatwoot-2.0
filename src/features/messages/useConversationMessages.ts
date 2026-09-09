@@ -6,6 +6,7 @@ import { parseExternalMessageId } from '../../integrations/whatsapp/provider';
 import { fallbackRemoteJid, nativeMetaReactionService, whatsappReactionService, type WhatsAppReactionTransport } from '../../integrations/whatsapp/reactions';
 import { whatsappMessageMutationService } from '../../integrations/whatsapp/messageMutations';
 import { mergeMessage, messageHistoryCache } from './MessageHistoryCache';
+import type { GroupParticipant } from '../groups/metadata';
 
 export const mergeRealtimeMessage = mergeMessage;
 
@@ -269,6 +270,12 @@ export const useConversationMessages = (accountId: number | null, conversationId
     setStatus('ready');
   }, [accountId, conversationId]);
 
+  const enrichParticipants = useCallback((participants: GroupParticipant[]) => {
+    if (!accountId || !conversationId) return;
+    const enriched = messageHistoryCache.enrichParticipants(accountId, conversationId, participants);
+    if (enriched) setMessages(enriched);
+  }, [accountId, conversationId]);
+
   // Backstop for transient ActionCable/proxy drops: merge the latest page in
   // the background rather than resetting the current view or its scroll.
   const refreshLatest = useCallback(async () => {
@@ -289,5 +296,5 @@ export const useConversationMessages = (accountId: number | null, conversationId
   }, [accountId, conversationId]);
   const cachedScrollTop = accountId && conversationId ? messageHistoryCache.get(accountId, conversationId)?.scrollTop || 0 : 0;
 
-  return { messages, status, error, hasOlderMessages, isLoadingOlder, cachedScrollTop, saveScroll, retry: () => load(), loadOlder, send, retrySend, remove, react, edit: (messageId: number, content: string) => mutate('edit', messageId, content), revoke: (messageId: number) => mutate('revoke', messageId), upsertRealtimeMessage, refreshLatest };
+  return { messages, status, error, hasOlderMessages, isLoadingOlder, cachedScrollTop, saveScroll, retry: () => load(), loadOlder, send, retrySend, remove, react, edit: (messageId: number, content: string) => mutate('edit', messageId, content), revoke: (messageId: number) => mutate('revoke', messageId), upsertRealtimeMessage, enrichParticipants, refreshLatest };
 };

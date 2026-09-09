@@ -87,6 +87,7 @@ export const normalizeConversation = (conversation: ChatwootConversationDto): Co
     teamId: conversation.meta?.team?.id ?? null,
     teamName: conversation.meta?.team?.name || null,
     labels: conversation.labels || [],
+    customAttributes: conversation.custom_attributes || {},
     isGroup: conversation.meta?.sender?.additional_attributes?.whatsapp_chat_type === 'group' || isGroupMessage,
   };
 };
@@ -119,6 +120,8 @@ export const normalizeLabel = (label: ChatwootLabelDto): AccountLabel => ({
   id: label.id,
   title: label.title,
   color: label.color || null,
+  description: label.description || null,
+  showOnSidebar: Boolean(label.show_on_sidebar),
 });
 
 export const normalizeCannedResponse = (response: ChatwootCannedResponseDto): CannedResponse => ({

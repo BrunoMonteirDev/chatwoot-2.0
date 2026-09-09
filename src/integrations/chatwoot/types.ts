@@ -91,6 +91,7 @@ export interface ChatwootConversationDto {
   updated_at?: number;
   last_activity_at: number;
   labels: string[];
+  custom_attributes?: Record<string, unknown> | null;
   participant_ids?: number[];
   messages: ChatwootMessagePreviewDto[];
   meta: { sender?: ChatwootContactSummaryDto; channel?: string | null; assignee?: ChatwootAgentSummaryDto; team?: ChatwootTeamSummaryDto };
@@ -151,7 +152,7 @@ export interface ChatwootAutomationRuleDto { id: number; name: string; descripti
 export interface ChatwootAutomationRulesResponse { payload: ChatwootAutomationRuleDto[]; }
 export interface ChatwootAssignableAgentsResponse { payload: ChatwootAgentDto[]; }
 export interface ChatwootTeamDto { id: number; name: string; }
-export interface ChatwootLabelDto { id: number; title: string; color?: string | null; }
+export interface ChatwootLabelDto { id: number; title: string; color?: string | null; description?: string | null; show_on_sidebar?: boolean | null; }
 export interface ChatwootLabelsResponse { payload: ChatwootLabelDto[]; }
 export interface ChatwootConversationLabelsResponse { payload: string[]; }
 export interface ChatwootContactLabelsResponse { payload: string[]; }

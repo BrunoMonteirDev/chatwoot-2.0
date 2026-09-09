@@ -8,6 +8,8 @@ import type { Message } from '../types';
 import { attachmentsWithinDates, contentGroups, linksMatchingSearch } from '../features/attachments/conversationContent';
 import { documentPresentation, triggerAttachmentDownload } from '../features/attachments/fileUtils';
 import { ConfirmDialog } from './ConfirmDialog';
+import { CustomAttributeFields, coerceCustomAttributeValue } from './CustomAttributeFields';
+import { useCustomAttributes } from '../features/customAttributes/useCustomAttributes';
 
 interface Props {
   contact: ContactProfile | null;
@@ -26,6 +28,8 @@ interface Props {
   initialTab?: 'contact' | 'attributes' | 'content';
   onTabChange?: (tab: 'contact' | 'attributes' | 'content') => void;
   conversation?: ConversationSummary | null;
+  accountId?: number | null;
+  onSetConversationCustomAttributes?: (attributes: Record<string, unknown>) => Promise<void> | void;
   conversationLabels?: AccountLabel[];
   conversationAgents?: AssignableAgent[];
   conversationTeams?: ConversationTeam[];
@@ -62,13 +66,16 @@ const priorityOptions: { value: ConversationPriority; label: string }[] = [
   { value: 'urgent', label: 'Urgente' },
 ];
 
-export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, isCreatingNote, isDarkMode, panelTitle = 'Dados do contato', profileName, profileAvatarUrl, canSyncWithWhatsApp = false, isSyncingWithWhatsApp = false, onSyncWithWhatsApp, initialTab = 'contact', onTabChange, conversation = null, conversationLabels = [], conversationAgents = [], conversationTeams = [], conversationParticipants = [], managementPendingAction = null, onSetConversationPriority, onAssignConversationAgent, onAssignConversationTeam, onSetConversationLabels, onSetConversationParticipants, onClose, onRetry, onUpdate, onCreateNote, contactConversations = [], contactConversationsStatus = 'idle', contactConversationsError = null, inboxes = [], onOpenConversation, onStartConversation, onNewConversation, onDelete, isDeleting = false, attachments = [], attachmentStatus = 'idle', attachmentError = null, hasMoreAttachments = false, onLoadMoreAttachments, onRetryAttachments, messages = [], onOpenImage }: Props) => {
+export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, isCreatingNote, isDarkMode, panelTitle = 'Dados do contato', profileName, profileAvatarUrl, canSyncWithWhatsApp = false, isSyncingWithWhatsApp = false, onSyncWithWhatsApp, initialTab = 'contact', onTabChange, conversation = null, accountId = null, onSetConversationCustomAttributes, conversationLabels = [], conversationAgents = [], conversationTeams = [], conversationParticipants = [], managementPendingAction = null, onSetConversationPriority, onAssignConversationAgent, onAssignConversationTeam, onSetConversationLabels, onSetConversationParticipants, onClose, onRetry, onUpdate, onCreateNote, contactConversations = [], contactConversationsStatus = 'idle', contactConversationsError = null, inboxes = [], onOpenConversation, onStartConversation, onNewConversation, onDelete, isDeleting = false, attachments = [], attachmentStatus = 'idle', attachmentError = null, hasMoreAttachments = false, onLoadMoreAttachments, onRetryAttachments, messages = [], onOpenImage }: Props) => {
   const [tab, setTab] = useState<'contact' | 'attributes' | 'content'>(initialTab);
   const [draft, setDraft] = useState({ name: '', email: '', phoneNumber: '', identifier: '', companyName: '' });
   const [additionalText, setAdditionalText] = useState('{}');
-  const [customText, setCustomText] = useState('{}');
+  const [contactCustom, setContactCustom] = useState<Record<string, unknown>>({});
+  const [conversationCustom, setConversationCustom] = useState<Record<string, unknown>>({});
+  const { items: attributeDefinitions } = useCustomAttributes(accountId);
   const [noteText, setNoteText] = useState('');
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [labelSearch, setLabelSearch] = useState('');
   const [isSyncConfirmationOpen, setIsSyncConfirmationOpen] = useState(false);
   const [isSaveConfirmationOpen, setIsSaveConfirmationOpen] = useState(false);
   const [isDeleteConfirmationOpen, setIsDeleteConfirmationOpen] = useState(false);
@@ -79,8 +86,9 @@ export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, i
     if (!contact) return;
     setDraft({ name: profileName || contact.name, email: contact.email || '', phoneNumber: contact.phoneNumber || '', identifier: contact.identifier || '', companyName: contact.companyName || '' });
     setAdditionalText(stringify(contact.additionalAttributes));
-    setCustomText(stringify(contact.customAttributes));
+    setContactCustom(contact.customAttributes);
   }, [contact, profileName]);
+  useEffect(() => { setConversationCustom(conversation?.customAttributes || {}); }, [conversation?.id, conversation?.customAttributes]);
   // The bridge has already persisted the provider name. Keep the editable
   // field aligned with that confirmed result while Chatwoot propagates its
   // contact.updated event and the contact GET catches up.
@@ -99,7 +107,7 @@ export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, i
     draft.identifier !== (contact.identifier || '') ||
     draft.companyName !== (contact.companyName || '') ||
     additionalText !== stringify(contact.additionalAttributes) ||
-    customText !== stringify(contact.customAttributes)
+    JSON.stringify(contactCustom) !== JSON.stringify(contact.customAttributes)
   ));
   const toggleConversationLabel = (title: string) => {
     if (!onSetConversationLabels) return;
@@ -131,10 +139,10 @@ export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, i
     if (!hasChanges) return;
     try {
       const additionalAttributes = JSON.parse(additionalText) as Record<string, unknown>;
-      const customAttributes = JSON.parse(customText) as Record<string, unknown>;
+      const customAttributes = { ...contact.customAttributes, ...Object.fromEntries(attributeDefinitions.filter(item=>item.model==='contact_attribute').map(item=>[item.key,coerceCustomAttributeValue(item,contactCustom[item.key])])) };
       await onUpdate({ name: draft.name.trim(), email: draft.email.trim() || null, phoneNumber: draft.phoneNumber.trim() || null, identifier: draft.identifier.trim() || null, companyName: draft.companyName.trim() || null, additionalAttributes, customAttributes });
       setFeedback('Contato salvo.');
-    } catch { setFeedback('Não foi possível salvar. Revise os atributos JSON e tente novamente.'); }
+    } catch (cause) { setFeedback(cause instanceof Error ? cause.message : 'Não foi possível salvar os atributos do contato.'); }
   };
   const addNote = async () => {
     try {
@@ -172,6 +180,7 @@ export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, i
             {contact.companyName && <p className="mt-1 text-xs text-[#8696a0]">{contact.companyName}</p>}
             {contact.phoneNumber && <p className="mt-1 text-xs text-[#53bdeb]">{contact.phoneNumber}</p>}
           </section>
+          <section className={`rounded-xl border p-3 ${isDarkMode ? 'border-[#222d34] bg-[#182229]/60' : 'border-gray-200 bg-gray-50'}`}><h4 className="mb-3 text-xs font-bold text-[#00a884]">Atributos personalizados</h4><CustomAttributeFields definitions={attributeDefinitions.filter(item=>item.model==='contact_attribute')} values={contactCustom} onChange={setContactCustom} inputClass={input}/></section>
           {onStartConversation && contact.phoneNumber && <button type="button" onClick={onStartConversation} className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#00a884] px-3 py-2 text-xs font-semibold text-white hover:bg-[#008f72]"><MessageSquare className="h-4 w-4" />Conversar</button>}
           {onNewConversation && contact.phoneNumber && <button type="button" onClick={onNewConversation} className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#00a884]/40 px-3 py-2 text-xs font-semibold text-[#00a884] hover:bg-[#00a884]/10"><MessageSquare className="h-4 w-4" />Nova conversa</button>}
           {canSyncWithWhatsApp && <button type="button" disabled={isSyncingWithWhatsApp} onClick={() => setIsSyncConfirmationOpen(true)} className="flex w-full items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-[#00a884] hover:bg-[#00a884]/10 disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${isSyncingWithWhatsApp ? 'animate-spin' : ''}`} />{isSyncingWithWhatsApp ? 'Sincronizando…' : 'Sincronizar com WhatsApp'}</button>}
@@ -243,9 +252,11 @@ export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, i
             </label>
 
             <div className="mt-3 border-t border-white/10 pt-3">
-              <div className="mb-1.5 flex items-center gap-1 text-[11px] font-semibold text-[#8696a0]"><Tag className="h-3.5 w-3.5" />Labels</div>
+              <div className="mb-1.5 flex flex-wrap items-center gap-1 text-[11px] font-semibold text-[#8696a0]"><Tag className="h-3.5 w-3.5" />Etiquetas</div>
+              <div className="mb-2 flex flex-wrap gap-1">{[...selectedLabels].map(title => { const label = conversationLabels.find(item => item.title === title); const color = label?.color || '#8696a0'; return <button key={title} type="button" disabled={managementBusy || !onSetConversationLabels} onClick={() => toggleConversationLabel(title)} title={`Remover etiqueta ${title}`} className="flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold" style={{ borderColor: `${color}66`, backgroundColor: `${color}18` }}><span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />{title} ×</button>; })}{selectedLabels.size === 0 && <span className="text-[10px] font-normal text-[#8696a0]">Adicionar etiqueta</span>}</div>
+              <input type="search" value={labelSearch} onChange={event => setLabelSearch(event.target.value)} placeholder="Pesquisar etiquetas" className={`${input} mb-2`} />
               <div className="max-h-32 space-y-1 overflow-y-auto">
-                {conversationLabels.length ? conversationLabels.map((label) => <button
+                {conversationLabels.length ? conversationLabels.filter(label => `${label.title} ${label.description || ''}`.toLowerCase().includes(labelSearch.trim().toLowerCase())).map((label) => <button
                   key={label.id}
                   type="button"
                   disabled={managementBusy || !onSetConversationLabels}
@@ -253,11 +264,13 @@ export const ContactDetailsPanel = ({ contact, notes, status, error, isSaving, i
                   className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: label.color || '#8696a0' }} />
-                  <span className="min-w-0 flex-1 truncate">{label.title}</span>
+                  <span className="min-w-0 flex-1"><span className="block truncate">{label.title}</span>{label.description && <span className="block truncate text-[10px] text-[#8696a0]">{label.description}</span>}</span>
                   {selectedLabels.has(label.title) && <Check className="h-3.5 w-3.5 text-[#00a884]" />}
                 </button>) : <p className="px-2 py-1 text-xs text-[#8696a0]">Nenhuma label disponível.</p>}
               </div>
             </div>
+
+            <div className="mt-3 border-t border-white/10 pt-3"><h4 className="mb-3 text-xs font-bold text-[#00a884]">Atributos personalizados da conversa</h4><CustomAttributeFields definitions={attributeDefinitions.filter(item=>item.model==='conversation_attribute')} values={conversationCustom} onChange={setConversationCustom} inputClass={input}/>{onSetConversationCustomAttributes&&<button type="button" disabled={managementBusy} onClick={async()=>{try{const values=Object.fromEntries(attributeDefinitions.filter(item=>item.model==='conversation_attribute').map(item=>[item.key,coerceCustomAttributeValue(item,conversationCustom[item.key])]));await onSetConversationCustomAttributes(values);setFeedback('Atributos da conversa salvos.');}catch(cause){setFeedback(cause instanceof Error?cause.message:'Não foi possível salvar os atributos da conversa.');}}} className="mt-3 rounded-lg bg-[#00a884] px-3 py-2 text-xs font-bold text-white disabled:opacity-50">Salvar atributos</button>}</div>
 
           </section>}
         </div>}

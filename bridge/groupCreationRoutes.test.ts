@@ -42,6 +42,9 @@ describe('group creation routing and idempotency', () => {
     const response = await post('/groups/creation', { accountId: 1, inboxId: 20, creationRequestId: 'routing-b-001', name: 'Equipe B', description: '', mode: 'invite', contactIds: [1] });
     expect(response.status).toBe(201); expect(await response.json()).toMatchObject({ created: true, conversationId: 91, groupJid: '222@g.us', inbox: { id: 20 }, provider: { session: 'session-b' } });
     expect(waha.createGroup).toHaveBeenCalledWith('session-b', 'Equipe B', []); expect(waha.createGroup).not.toHaveBeenCalledWith('session-a', expect.anything(), expect.anything());
+    expect(waha.getGroupInviteLink).toHaveBeenCalledWith('session-b', '222@g.us');
+    expect(waha.sendText).toHaveBeenCalledWith('session-b', '551199999991', expect.stringContaining('https://chat.whatsapp.com/code'));
+    expect(waha.sendText).not.toHaveBeenCalledWith(expect.anything(), '222@g.us', expect.anything());
   });
 
   it('fails when B is unavailable even while A is WORKING', async () => {
@@ -53,7 +56,7 @@ describe('group creation routing and idempotency', () => {
   it('keeps created=true when invite link fails and never creates again on HTTP retry', async () => {
     vi.mocked(waha.getGroupInviteLink).mockRejectedValue(new Error('invalid response'));
     const body = { accountId: 1, inboxId: 20, creationRequestId: 'partial-link-001', name: 'Equipe', description: '', mode: 'invite', contactIds: [1] };
-    const first = await post('/groups/creation', body); const firstBody = await first.json(); expect(first.status).toBe(201); expect(firstBody).toMatchObject({ created: true, conversationId: 91, inviteStatus: 'failed', results: [{ contactId: 1, ok: false, error: 'invite_link_failed' }] });
+    const first = await post('/groups/creation', body); const firstBody = await first.json(); expect(first.status).toBe(201); expect(firstBody).toMatchObject({ created: true, conversationId: 91, inviteStatus: 'failed', results: [{ contactId: 1, ok: false, error: 'invite_code_fetch_failed' }] });
     const retry = await post('/groups/creation', body); expect(retry.status).toBe(201); expect(await retry.json()).toMatchObject({ groupJid: firstBody.groupJid, created: true }); expect(waha.createGroup).toHaveBeenCalledTimes(1);
   });
 
@@ -89,6 +92,7 @@ describe('group creation routing and idempotency', () => {
   it('existing group defaults to invite semantics while direct add requires confirmation', async () => {
     const invited = await post('/groups/participants', { accountId: 1, inboxId: 20, conversationId: 91, transport: 'waha', mode: 'invite', contactIds: [1], directConfirmed: false });
     expect(invited.status).toBe(200); expect(waha.sendText).toHaveBeenCalledWith('session-b', '551199999991', expect.stringContaining('https://chat.whatsapp.com/code')); expect(waha.addGroupParticipant).not.toHaveBeenCalled();
+    expect(waha.getGroupInviteLink).toHaveBeenCalledWith('session-b', '222@g.us'); expect(waha.sendText).not.toHaveBeenCalledWith('session-b', '222@g.us', expect.anything());
     const blocked = await post('/groups/participants', { accountId: 1, inboxId: 20, conversationId: 91, transport: 'waha', mode: 'direct', contactIds: [1], directConfirmed: false }); expect(blocked.status).toBe(422);
     const direct = await post('/groups/participants', { accountId: 1, inboxId: 20, conversationId: 91, transport: 'waha', mode: 'direct', contactIds: [1], directConfirmed: true }); expect(direct.status).toBe(200); expect(waha.addGroupParticipant).toHaveBeenCalledWith('session-b', '222@g.us', '551199999991');
   });
@@ -97,5 +101,19 @@ describe('group creation routing and idempotency', () => {
     vi.mocked(waha.getGroupMetadata).mockResolvedValue({ id: '222@g.us', subject: 'Equipe', participants: [{ jid: '551199999991@c.us', phoneNumber: '551199999991' }] });
     const response = await post('/groups/participants', { accountId: 1, inboxId: 20, conversationId: 91, transport: 'waha', mode: 'invite', contactIds: [1], directConfirmed: false });
     expect(response.status).toBe(200); expect(await response.json()).toMatchObject({ results: [{ contactId: 1, ok: false, error: 'already_member' }] }); expect(waha.sendText).not.toHaveBeenCalled(); expect(waha.addGroupParticipant).not.toHaveBeenCalled();
+  });
+
+  it('sends three private invitations independently and never targets the group JID', async () => {
+    vi.mocked(waha.sendText).mockImplementation(async (_session, phone) => { if (phone === '551199999992') throw new Error('send failed'); return {} as never; });
+    const response = await post('/groups/participants', { accountId: 1, inboxId: 20, conversationId: 91, transport: 'waha', mode: 'invite', contactIds: [1, 2, 3], directConfirmed: false });
+    expect(response.status).toBe(200); expect(await response.json()).toMatchObject({ inviteStatus: 'partial', results: [{ contactId: 1, ok: true }, { contactId: 2, ok: false, error: 'invite_send_failed' }, { contactId: 3, ok: true }] });
+    expect(waha.sendText).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(waha.sendText).mock.calls.map(call => call[1])).toEqual(['551199999991', '551199999992', '551199999993']);
+    expect(waha.sendText).not.toHaveBeenCalledWith('session-b', '222@g.us', expect.anything());
+  });
+
+  it('rejects a cross-account existing-group invitation before fetching or sending', async () => {
+    const response = await post('/groups/participants', { accountId: 2, inboxId: 20, conversationId: 91, transport: 'waha', mode: 'invite', contactIds: [1], directConfirmed: false });
+    expect(response.status).toBe(401); expect(waha.getGroupInviteLink).not.toHaveBeenCalled(); expect(waha.sendText).not.toHaveBeenCalled();
   });
 });

@@ -9,6 +9,8 @@ import { messageHistoryCache } from '../messages/MessageHistoryCache';
 import { groupMetadataClient } from '../groups/metadata';
 import { clearContactDetailsCache } from '../contacts/useContactDetails';
 import { clearWhatsAppCapabilityCache } from '../../integrations/whatsapp/connection';
+import { labelCatalog } from '../labels/labelCatalog';
+import { customAttributeCatalog } from '../customAttributes/customAttributeCatalog';
 
 export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'error';
 
@@ -46,6 +48,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     void groupMetadataClient.clear();
     clearContactDetailsCache();
     clearWhatsAppCapabilityCache();
+    labelCatalog.clear();
+    customAttributeCatalog.clear();
     setUser(null);
     setSelectedAccountId(null);
     setStatus('unauthenticated');

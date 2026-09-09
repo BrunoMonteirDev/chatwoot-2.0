@@ -55,6 +55,8 @@ import { showSystemMessagesFrom, uiSettingsWithSystemMessageVisibility, visibleC
 import { sendMessageShortcutFrom, uiSettingsWithSendMessageShortcut } from './features/messages/sendMessageShortcut';
 import { toChatMessages } from './features/messages/toChatMessages';
 import { useConversationManagement } from './features/conversations/useConversationManagement';
+import { useAccountLabels } from './features/labels/useAccountLabels';
+import { updateConversationLabelsOptimistically } from './features/labels/conversationLabels';
 import { useChatwootRealtime } from './features/realtime/useChatwootRealtime';
 import { useContactDetails } from './features/contacts/useContactDetails';
 import { useContacts } from './features/contacts/useContacts';
@@ -246,7 +248,8 @@ export default function App() {
   const [activeDashboardAppId, setActiveDashboardAppId] = useLauncherRouteState(initialRoute.appId);
   const [conversationServerFilters, setConversationServerFilters] = useState<ConversationServerFilters>({ teamId: null, labels: [] });
   const [directlyLoadedConversation, setDirectlyLoadedConversation] = useState<ConversationSummary | null>(null);
-  const { conversations, status: conversationsStatus, error: conversationsError, hasNextPage, isLoadingMore, isRefreshing: conversationsRefreshing, retry: retryConversations, loadMore, applyOutgoingMessage, applyConversationUpdate, removeConversation, replaceConversation, upsertRealtimeConversation, addCreatedConversation, applyRealtimeMessage, refreshRecentConversations } = useConversations(currentAccount?.id ?? null, selectedInbox, conversationServerFilters);
+  const { conversations, status: conversationsStatus, error: conversationsError, hasNextPage, isLoadingMore, isRefreshing: conversationsRefreshing, retry: retryConversations, loadMore, applyOutgoingMessage, applyConversationUpdate, patchConversationLocally, reconcileLabel, removeConversation, replaceConversation, upsertRealtimeConversation, addCreatedConversation, applyRealtimeMessage, refreshRecentConversations } = useConversations(currentAccount?.id ?? null, selectedInbox, conversationServerFilters);
+  const accountLabels = useAccountLabels(currentAccount?.id ?? null);
   const [activeFilter, setActiveFilter] = useState<FilterCategory>('minhas');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [user, setUser] = useState<UserProfile>(emptyUser);
@@ -405,9 +408,12 @@ export default function App() {
   }, [applyRoute, currentAccount?.id, routeAccountId]);
 
   const openConversation = useCallback((conversationId: string) => {
+    const numericId = Number(conversationId);
+    if (currentAccount?.id && Number.isInteger(numericId)) markConversationOpen(currentAccount.id, numericId);
     navigate({ tab: 'chats', conversationId, ...(selectedInbox !== 'todas' ? { inbox: selectedInbox } : {}) });
-  }, [navigate, selectedInbox]);
+  }, [currentAccount?.id, navigate, selectedInbox]);
   const openConversationDirectly = useCallback((conversationId: number) => {
+    if (currentAccount?.id) markConversationOpen(currentAccount.id, conversationId);
     const accountId = String(currentAccount?.id || routeAccountId);
     const target = urlForAppRoute({ accountId, tab: 'chats', conversationId: String(conversationId) });
     if (`${window.location.pathname}${window.location.search}` !== target) window.history.pushState({}, '', target);
@@ -455,7 +461,7 @@ export default function App() {
   }, [activeChatId, activeDashboardAppId, activeNavTab, authenticatedUser, currentAccount, navigate, routeAccountId, selectAccount, selectedInbox, selectedSettingsInboxId, selectedSettingsTab]);
 
   // Selected Chat Object
-  const listChats = useMemo(() => conversations.map((conversation) => toChatListItem(conversation, inboxes)), [conversations, inboxes]);
+  const listChats = useMemo(() => conversations.map((conversation) => toChatListItem(conversation, inboxes, accountLabels.labels)), [accountLabels.labels, conversations, inboxes]);
   const contactListItems = useMemo(() => contactDirectory.contacts.map(toContactListItem), [contactDirectory.contacts]);
   // O painel principal só pode abrir uma conversa obtida do Chatwoot. Os chats
   // de protótipo continuam restritos às telas ainda não integradas (contatos,
@@ -463,7 +469,7 @@ export default function App() {
   const selectedConversation = useMemo(() => conversationForActiveRoute(conversations, directlyLoadedConversation, activeChatId), [activeChatId, conversations, directlyLoadedConversation]);
   const selectedConversationId = selectedConversation?.id ?? null;
   const activeChat = useMemo(() => listChats.find((chat) => chat.id === activeChatId)
-    || (selectedConversation ? toChatListItem(selectedConversation, inboxes) : undefined), [activeChatId, inboxes, listChats, selectedConversation]);
+    || (selectedConversation ? toChatListItem(selectedConversation, inboxes, accountLabels.labels) : undefined), [accountLabels.labels, activeChatId, inboxes, listChats, selectedConversation]);
 
   useEffect(() => {
     if (!directlyLoadedConversation || String(directlyLoadedConversation.id) !== activeChatId) return;
@@ -870,6 +876,7 @@ export default function App() {
       if (cached?.isFresh) return;
       const page = await messageHistoryCache.request(currentAccount.id, conversationId, (signal) => messageService.list({ accountId: currentAccount.id, conversationId, signal }));
       messageHistoryCache.set(currentAccount.id, conversationId, page, { preserveExisting: Boolean(cached), conversation: conversations.find(item => item.id === conversationId) });
+      markConversationPrefetched(currentAccount.id, conversationId);
     });
   }, [conversations, currentAccount]);
 
@@ -1199,6 +1206,16 @@ export default function App() {
             onCloseInbox={() => navigateToSettings('caixas')}
             accountId={currentAccount?.id ?? null}
             canManageDashboardApps={currentAccount?.permissions.includes('administrator') || currentAccount?.permissions.includes('integrations_manage')}
+            canManageLabels={Boolean(currentAccount?.permissions.includes('administrator') || currentAccount?.permissions.includes('labels_manage'))}
+            canManageCustomAttributes={Boolean(currentAccount?.permissions.includes('administrator'))}
+            onLabelRenamed={(previousTitle, nextTitle) => {
+              reconcileLabel(previousTitle, nextTitle);
+              setConversationServerFilters(current => ({ ...current, labels: (current.labels || []).map(label => label === previousTitle ? nextTitle : label) }));
+            }}
+            onLabelDeleted={(title) => {
+              reconcileLabel(title);
+              setConversationServerFilters(current => ({ ...current, labels: (current.labels || []).filter(label => label !== title) }));
+            }}
             inboxes={inboxes}
             inboxesStatus={inboxesStatus}
             inboxesError={inboxesError}
@@ -1391,6 +1408,12 @@ export default function App() {
                   onEditMessage={(messageId, content) => messageHistory.edit(Number(messageId), content)}
                   onRevokeMessage={(messageId) => messageHistory.revoke(Number(messageId))}
                   conversation={selectedConversation}
+                  accountId={currentAccount?.id ?? null}
+                  onSetConversationCustomAttributes={async attributes => {
+                    if (!currentAccount || !selectedConversationId) return;
+                    const update = await conversationManagement.setCustomAttributes(selectedConversationId, attributes);
+                    applyConversationUpdate(selectedConversationId, update);
+                  }}
                   inboxes={inboxes}
                   whatsappConnection={whatsappConnection}
                   whatsappSendCapability={whatsappSendCapability}
@@ -1403,6 +1426,7 @@ export default function App() {
                   }}
                   onGroupMetadataResolved={(metadata) => {
                     if (!selectedConversationId || !isCurrentHeaderResponse(headerScopeRef.current, headerScopeKey, expectedGroupJid, metadata.id)) return;
+                    messageHistory.enrichParticipants([...(metadata.historicalParticipants || []), ...metadata.participants]);
                     applyConversationUpdate(selectedConversationId, { ...(metadata.subject ? { contactName: metadata.subject } : {}), ...(metadata.avatarUrl ? { contactAvatarUrl: metadata.avatarUrl } : {}) });
                   }}
                   onContactProfileResolved={(profile) => {
@@ -1435,8 +1459,18 @@ export default function App() {
                     void runConversationAction(conversationManagement.assignTeam(selectedConversationId, teamId), (update) => applyConversationUpdate(selectedConversationId, update));
                   }}
                   onSetConversationLabels={(labels) => {
-                    if (!selectedConversationId) return;
-                    void runConversationAction(conversationManagement.setLabels(selectedConversationId, labels), (update) => applyConversationUpdate(selectedConversationId, update));
+                    if (!selectedConversationId || !selectedConversation) return;
+                    const previous = selectedConversation.labels;
+                    const adding = labels.length > previous.length;
+                    void updateConversationLabelsOptimistically(previous, labels,
+                      next => patchConversationLocally(selectedConversationId, { labels: next }),
+                      next => conversationManagement.setLabels(selectedConversationId, next).then(update => {
+                        if (update) applyConversationUpdate(selectedConversationId, update);
+                        return null;
+                      }),
+                    ).catch(() => {
+                      addToast(adding ? 'Não foi possível adicionar a etiqueta à conversa.' : 'Não foi possível remover a etiqueta da conversa.', 'error');
+                    });
                   }}
                   onMarkConversationRead={() => {
                     if (!selectedConversationId) return;
@@ -1458,7 +1492,6 @@ export default function App() {
                   onRetryContact={() => void contactDetails.retry()}
                   onUpdateContact={updateSelectedContact}
                   onCreateContactNote={contactDetails.createNote}
-                  accountId={currentAccount?.id ?? null}
                   isDarkMode={isDarkMode}
                   wallpaperId={wallpaperId}
                   isSidebarCollapsed={isSidebarCollapsed}

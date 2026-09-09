@@ -59,7 +59,20 @@ export interface ConversationSummary {
   teamId: number | null;
   teamName: string | null;
   labels: string[];
+  customAttributes?: Record<string, unknown>;
   isGroup: boolean;
+}
+
+export type CustomAttributeType = 'text' | 'number' | 'link' | 'date' | 'list' | 'checkbox';
+export type CustomAttributeModel = 'contact_attribute' | 'conversation_attribute';
+export interface CustomAttributeDefinition {
+  id: number;
+  name: string;
+  key: string;
+  description: string | null;
+  type: CustomAttributeType;
+  model: CustomAttributeModel;
+  values: string[];
 }
 
 export interface ContactProfile {
@@ -135,6 +148,8 @@ export interface AccountLabel {
   id: number;
   title: string;
   color: string | null;
+  description?: string | null;
+  showOnSidebar?: boolean;
 }
 
 // Modelo interno para respostas rápidas. A UI não recebe o DTO Rails.

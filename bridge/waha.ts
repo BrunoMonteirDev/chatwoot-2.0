@@ -26,6 +26,12 @@ export class WahaApiError extends Error {
   }
 }
 
+export class WahaGroupInviteError extends Error {
+  constructor(readonly code: 'invite_code_fetch_failed' | 'invite_code_invalid', readonly cause?: unknown) {
+    super(code);
+  }
+}
+
 const requireWaha = () => {
   if (!config.wahaBaseUrl || !config.wahaApiKey) throw new WahaApiError('not_configured');
   return { baseUrl: config.wahaBaseUrl, apiKey: config.wahaApiKey };
@@ -75,7 +81,8 @@ const normalizeSession = (payload: unknown): WahaSession => {
   };
 };
 
-const request = async (path: string, init: RequestInit = {}): Promise<unknown> => {
+type WahaRequestContext = { sessionName: string; groupJid: string; operation: 'invite_code' };
+const request = async (path: string, init: RequestInit = {}, context?: WahaRequestContext): Promise<unknown> => {
   const { baseUrl, apiKey } = requireWaha();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), config.wahaRequestTimeoutMs);
@@ -87,8 +94,10 @@ const request = async (path: string, init: RequestInit = {}): Promise<unknown> =
     });
     const text = await response.text();
     let body: unknown = null;
-    try { body = text ? JSON.parse(text) : null; } catch { if (response.ok) throw new WahaApiError('invalid_response'); }
-    if (path.includes('/groups')) console.info('[waha] group provider response', { path: path.replace(/\/api\/[^/]+\//, '/api/:session/'), status: response.status, body: safeResponseShape(body) });
+    let validJson = true;
+    try { body = text ? JSON.parse(text) : null; } catch { validJson = false; }
+    if (path.includes('/groups')) console.info('[waha] group provider response', { path: path.replace(/\/api\/[^/]+\//, '/api/:session/'), ...(context || {}), status: response.status, body: validJson ? safeResponseShape(body) : { type: 'invalid_json' } });
+    if (!validJson && response.ok) throw new WahaApiError('invalid_response');
     if (!response.ok) {
       const root = record(body);
       const detail = typeof root?.message === 'string' ? root.message.slice(0, 240) : response.statusText;
@@ -140,6 +149,24 @@ export const normalizeWahaChatId = (value: string) => {
   const digits = value.replace(/@s\.whatsapp\.net$|@c\.us$/i, '').replace(/\D/g, '');
   if (!/^\d{8,15}$/.test(digits)) throw new Error('Destino WAHA inválido.');
   return `${digits}@c.us`;
+};
+export const canonicalWhatsAppGroupInviteLink = (value: unknown): string => {
+  if (typeof value !== 'string') return '';
+  const candidate = value.trim();
+  if (!candidate) return '';
+  if (/^https?:\/\//i.test(candidate)) {
+    try {
+      const url = new URL(candidate);
+      if (url.hostname.toLowerCase() !== 'chat.whatsapp.com') return '';
+      const code = url.pathname.split('/').filter(Boolean)[0] || '';
+      return /^[a-z0-9_-]+$/i.test(code) ? `https://chat.whatsapp.com/${code}` : '';
+    } catch { return ''; }
+  }
+  return /^[a-z0-9_-]+$/i.test(candidate) ? `https://chat.whatsapp.com/${candidate}` : '';
+};
+export const wahaGroupInviteLinkFromResponse = (raw: unknown): string => {
+  const payload = record(raw);
+  return canonicalWhatsAppGroupInviteLink(typeof raw === 'string' ? raw : payload?.code);
 };
 const sent = (payload: unknown): SentWahaMessage => {
   const root = record(payload); const data = record(root?.id ? root : root?.message || root?.payload);
@@ -222,10 +249,14 @@ export const wahaTransport = {
     return { id };
   },
   async getGroupInviteLink(session: string, groupId: string): Promise<string> {
-    const raw = await request(`/api/${namePath(session)}/groups/${encodeURIComponent(groupId)}/invite-code`); const payload = record(raw);
-    const code = typeof raw === 'string' ? raw : typeof payload?.code === 'string' ? payload.code : typeof payload?.inviteCode === 'string' ? payload.inviteCode : '';
-    const link = typeof payload?.inviteUrl === 'string' ? payload.inviteUrl : typeof payload?.inviteLink === 'string' ? payload.inviteLink : typeof payload?.invite === 'string' ? payload.invite : code.startsWith('http') ? code : code ? `https://chat.whatsapp.com/${code}` : '';
-    if (!link) throw new WahaApiError('invalid_response');
+    let raw: unknown;
+    try {
+      raw = await request(`/api/${namePath(session)}/groups/${encodeURIComponent(groupId)}/invite-code`, {}, { sessionName: session, groupJid: groupId, operation: 'invite_code' });
+    } catch (error) {
+      throw new WahaGroupInviteError(error instanceof WahaApiError && error.kind === 'invalid_response' ? 'invite_code_invalid' : 'invite_code_fetch_failed', error);
+    }
+    const link = wahaGroupInviteLinkFromResponse(raw);
+    if (!link) throw new WahaGroupInviteError('invite_code_invalid');
     return link;
   },
   async updateGroupDescription(session: string, groupId: string, description: string) {

@@ -3,21 +3,26 @@ export const participantPhone = (jid?: string | null, phone?: string | null) => 
   const digits = phone?.replace(/\D/g, '') || jid?.match(/^(\d{8,15})@(c\.us|s\.whatsapp\.net)$/)?.[1];
   return digits ? `+${digits}` : '';
 };
-// Never expose a LID while a human-readable name or a resolved number exists.
-// It is only a last-resort identity when WhatsApp has not supplied either.
-export const participantLabel = (name?: string | null, jid?: string | null, phone?: string | null) => {
+// Provider identifiers are useful for correlation, never as visual labels.
+export const validParticipantName = (name?: string | null, groupName?: string | null) => {
   const displayName = name?.trim();
+  if (!displayName || /^participante$/i.test(displayName) || /@(lid|g\.us|c\.us|s\.whatsapp\.net)$/i.test(displayName) || /^\d+@?lid$/i.test(displayName)) return '';
+  if (groupName?.trim() && displayName.localeCompare(groupName.trim(), undefined, { sensitivity: 'base' }) === 0) return '';
+  return displayName;
+};
+export const participantLabel = (name?: string | null, jid?: string | null, phone?: string | null, groupName?: string | null) => {
+  const displayName = validParticipantName(name, groupName);
   const displayPhone = participantPhone(jid, phone);
   if (displayName) return displayName;
   if (displayPhone) return displayPhone;
-  return jid?.endsWith('@lid') ? 'Participante' : jid?.trim() || 'Participante';
+  return '';
 };
 type ParticipantIdentity = { jid: string; providerId?: string; lid?: string; phoneJid?: string; phone?: string; phoneNumber?: string; contactId?: number };
 export const participantIdentityKeys = (participant: ParticipantIdentity) => {
   const values = [participant.jid, participant.providerId, participant.lid, participant.phoneJid, participant.phone, participant.phoneNumber];
   const keys = new Set(values.filter((value): value is string => Boolean(value)));
   if (participant.contactId) keys.add(`contact:${participant.contactId}`);
-  values.forEach(value => {
+  [participant.phoneJid, participant.phone, participant.phoneNumber, /^\d{8,15}@(c\.us|s\.whatsapp\.net)$/.test(participant.jid) ? participant.jid : undefined].forEach(value => {
     const digits = value?.replace(/\D/g, '');
     if (!digits) return;
     keys.add(digits); keys.add(`${digits}@c.us`); keys.add(`${digits}@s.whatsapp.net`);

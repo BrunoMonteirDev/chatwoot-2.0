@@ -1,7 +1,8 @@
 import type { AccountLabel, AssignableAgent, ConversationPriority, ConversationStatus, ConversationSummary, ConversationTeam } from '../../domain/currentUser';
 import { chatwootApiClient } from './client';
-import { normalizeAssignableAgent, normalizeConversation, normalizeLabel, normalizeTeam } from './normalizers';
-import type { ChatwootAssignableAgentsResponse, ChatwootAgentDto, ChatwootConversationDto, ChatwootConversationLabelsResponse, ChatwootLabelsResponse, ChatwootStatusResponse, ChatwootTeamDto } from './types';
+import { normalizeAssignableAgent, normalizeConversation, normalizeTeam } from './normalizers';
+import type { ChatwootAssignableAgentsResponse, ChatwootAgentDto, ChatwootConversationDto, ChatwootConversationLabelsResponse, ChatwootStatusResponse, ChatwootTeamDto } from './types';
+import { labelCatalog } from '../../features/labels/labelCatalog';
 
 export interface ConversationManagementCatalogs {
   agents: AssignableAgent[];
@@ -20,9 +21,9 @@ export const conversationManagementService = {
         ? chatwootApiClient.get<ChatwootAssignableAgentsResponse>(`${root}/assignable_agents?inbox_ids[]=${inboxId}`)
         : Promise.resolve({ payload: [] } as ChatwootAssignableAgentsResponse),
       chatwootApiClient.get<ChatwootTeamDto[]>(`${root}/teams`),
-      chatwootApiClient.get<ChatwootLabelsResponse>(`${root}/labels`),
+      labelCatalog.list(accountId),
     ]);
-    return { agents: agents.payload.map(normalizeAssignableAgent), teams: teams.map(normalizeTeam), labels: labels.payload.map(normalizeLabel) };
+    return { agents: agents.payload.map(normalizeAssignableAgent), teams: teams.map(normalizeTeam), labels };
   },
 
   async setStatus(accountId: number, conversationId: number, status: ConversationStatus): Promise<Pick<ConversationSummary, 'status'>> {
@@ -63,6 +64,11 @@ export const conversationManagementService = {
   async setLabels(accountId: number, conversationId: number, labels: string[]): Promise<Pick<ConversationSummary, 'labels'>> {
     const response = await chatwootApiClient.post<ChatwootConversationLabelsResponse>(`${conversationPath(accountId, conversationId)}/labels`, { labels });
     return { labels: response.payload };
+  },
+
+  async setCustomAttributes(accountId: number, conversationId: number, customAttributes: Record<string, unknown>): Promise<Pick<ConversationSummary, 'customAttributes'>> {
+    const response = await chatwootApiClient.post<{ custom_attributes: Record<string, unknown> }>(`${conversationPath(accountId, conversationId)}/custom_attributes`, { custom_attributes: customAttributes, merge: true });
+    return { customAttributes: response.custom_attributes };
   },
 
   async markRead(accountId: number, conversationId: number): Promise<ConversationSummary> {

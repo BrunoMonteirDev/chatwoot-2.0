@@ -11,7 +11,9 @@ describe('group participant identity', () => {
   });
 
   it('never exposes a raw LID as fallback', () => {
-    expect(participantLabel(undefined, '12345@lid')).toBe('Participante');
+    expect(participantLabel(undefined, '12345@lid')).toBe('');
+    expect(participantLabel('Participante', '12345@lid')).toBe('');
+    expect(participantLabel('Equipe', '12345@lid', undefined, 'Equipe')).toBe('');
   });
 
   it('indexes equivalent provider identities to the same participant metadata', () => {

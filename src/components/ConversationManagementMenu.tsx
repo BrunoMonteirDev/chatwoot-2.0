@@ -28,6 +28,7 @@ export const ConversationManagementMenu = ({
   onSetPriority, onAssignAgent, onAssignTeam, onSetLabels, onMarkRead, onMarkUnread,
 }: Props) => {
   const [open, setOpen] = useState(false);
+  const [labelSearch, setLabelSearch] = useState('');
   const busy = pendingAction !== null;
   const selectedLabels = new Set(conversation.labels);
   const toggleLabel = (title: string) => {
@@ -68,9 +69,10 @@ export const ConversationManagementMenu = ({
                 {catalogs.teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
               </select>
             </label>
-            <div className="border-t border-white/10 pt-2"><div className="mb-1 flex items-center gap-1 text-[11px] text-[#aebac1]"><Tag className="w-3.5 h-3.5" />Labels</div>
+            <div className="border-t border-white/10 pt-2"><div className="mb-1 flex items-center gap-1 text-[11px] text-[#aebac1]"><Tag className="w-3.5 h-3.5" />Etiquetas</div>
+              <input type="search" value={labelSearch} onChange={event => setLabelSearch(event.target.value)} placeholder="Pesquisar etiquetas" className={`${selectClass} mb-1.5`} />
               <div className="max-h-28 space-y-1 overflow-y-auto">
-                {catalogs.labels.length ? catalogs.labels.map((label) => <button key={label.id} type="button" disabled={busy} onClick={() => toggleLabel(label.title)} className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-xs hover:bg-white/10 disabled:opacity-60">
+                {catalogs.labels.length ? catalogs.labels.filter(label => `${label.title} ${label.description || ''}`.toLowerCase().includes(labelSearch.trim().toLowerCase())).map((label) => <button key={label.id} type="button" disabled={busy} onClick={() => toggleLabel(label.title)} className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-xs hover:bg-white/10 disabled:opacity-60">
                   <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: label.color || '#8696a0' }} />{label.title}
                   {selectedLabels.has(label.title) && <Check className="ml-auto h-3.5 w-3.5 text-[#00a884]" />}
                 </button>) : <span className="text-xs text-[#8696a0]">Nenhuma label disponível.</span>}

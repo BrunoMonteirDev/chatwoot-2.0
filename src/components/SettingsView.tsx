@@ -64,6 +64,8 @@ import { browserNotifications, type BrowserNotificationState } from '../features
 import { AutomationRulesPanel } from './AutomationRulesPanel';
 import { sendMessageShortcutFrom, type SendMessageShortcut } from '../features/messages/sendMessageShortcut';
 import { DashboardAppsSettingsPanel } from './DashboardAppsSettingsPanel';
+import { LabelsSettingsPanel } from './LabelsSettingsPanel';
+import { CustomAttributesSettingsPanel } from './CustomAttributesSettingsPanel';
 
 export type SettingsTab =
   | 'perfil'
@@ -116,6 +118,10 @@ interface Props {
   onOpenInbox?: (inboxId: number) => void;
   onCloseInbox?: () => void;
   canManageDashboardApps?: boolean;
+  canManageLabels?: boolean;
+  canManageCustomAttributes?: boolean;
+  onLabelRenamed?: (previousTitle: string, nextTitle: string) => void;
+  onLabelDeleted?: (title: string) => void;
 }
 
 export const SettingsView: React.FC<Props> = ({
@@ -140,6 +146,10 @@ export const SettingsView: React.FC<Props> = ({
   onOpenInbox,
   onCloseInbox,
   canManageDashboardApps = false,
+  canManageLabels = false,
+  canManageCustomAttributes = false,
+  onLabelRenamed,
+  onLabelDeleted,
 }: Props) => {
   const [internalTab, setInternalTab] = useState<SettingsTab>('conta');
   const activeTab = propActiveTab || internalTab;
@@ -341,58 +351,6 @@ export const SettingsView: React.FC<Props> = ({
     showToast('Time criado com sucesso!');
   };
 
-  // --- STATE FOR ETIQUETAS ---
-  const [tags, setTags] = useState([
-    { id: '1', label: 'VIP', color: '#3b82f6', count: 12 },
-    { id: '2', label: 'Suporte', color: '#00a884', count: 28 },
-    { id: '3', label: 'Pagamento Pendente', color: '#ef4444', count: 8 },
-    { id: '4', label: 'Lead Qualificado', color: '#8b5cf6', count: 15 },
-    { id: '5', label: 'Aguardando Cliente', color: '#f59e0b', count: 9 },
-  ]);
-  const [showTagModal, setShowTagModal] = useState(false);
-  const [newTagLabel, setNewTagLabel] = useState('');
-  const [newTagColor, setNewTagColor] = useState('#00a884');
-
-  const handleAddTag = () => {
-    if (!newTagLabel) return;
-    setTags([...tags, { id: String(Date.now()), label: newTagLabel, color: newTagColor, count: 0 }]);
-    setNewTagLabel('');
-    setShowTagModal(false);
-    showToast('Etiqueta criada!');
-  };
-
-  const handleDeleteTag = (id: string) => {
-    setTags(tags.filter((t) => t.id !== id));
-    showToast('Etiqueta removida.');
-  };
-
-  // --- STATE FOR ATRIBUTOS ---
-  const [attributes, setAttributes] = useState([
-    { id: '1', name: 'CPF_CNPJ', key: 'cpf_cnpj', type: 'Texto', target: 'Contato' },
-    { id: '2', name: 'DATA_NASCIMENTO', key: 'data_nascimento', type: 'Data', target: 'Contato' },
-    { id: '3', name: 'PLANO_CONTRATADO', key: 'plano_contratado', type: 'Opção', target: 'Contato' },
-    { id: '4', name: 'VALOR_FATURA', key: 'valor_fatura', type: 'Número', target: 'Conversa' },
-  ]);
-  const [showAttributeModal, setShowAttributeModal] = useState(false);
-  const [newAttrKey, setNewAttrKey] = useState('');
-  const [newAttrType, setNewAttrType] = useState('Texto');
-
-  const handleAddAttribute = () => {
-    if (!newAttrKey) return;
-    setAttributes([
-      ...attributes,
-      {
-        id: String(Date.now()),
-        name: newAttrKey.toUpperCase().replace(/\s+/g, '_'),
-        key: newAttrKey.toLowerCase().replace(/\s+/g, '_'),
-        type: newAttrType,
-        target: 'Contato',
-      },
-    ]);
-    setNewAttrKey('');
-    setShowAttributeModal(false);
-    showToast('Atributo personalizado criado!');
-  };
 
   // --- STATE FOR AUTOMATION ---
   const [automations, setAutomations] = useState([
@@ -862,204 +820,10 @@ export const SettingsView: React.FC<Props> = ({
           )}
 
           {/* ==================== 5. ETIQUETAS ==================== */}
-          {activeTab === 'etiquetas' && (
-            <div
-              className={`p-6 rounded-2xl border shadow-xl space-y-6 ${
-                isDarkMode ? 'bg-[#111b21] border-[#222d34]' : 'bg-white border-[#d1d7db]'
-              }`}
-            >
-              <div className="flex items-center justify-between border-b pb-4 border-white/10">
-                <div>
-                  <h3 className="text-lg font-bold">Etiquetas de Organização</h3>
-                  <p className="text-xs text-[#8696a0]">Crie tags com cores customizadas para classificar conversas e contatos.</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowTagModal(true)}
-                  className="px-3.5 py-2 bg-[#00a884] hover:bg-[#008069] text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Nova Etiqueta</span>
-                </button>
-              </div>
-
-              <div className="flex flex-wrap gap-2.5">
-                {tags.map((tg) => (
-                  <div
-                    key={tg.id}
-                    className="px-3 py-1.5 rounded-xl border flex items-center space-x-2 text-xs font-semibold shadow-xs"
-                    style={{
-                      backgroundColor: `${tg.color}15`,
-                      borderColor: `${tg.color}40`,
-                      color: tg.color,
-                    }}
-                  >
-                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: tg.color }} />
-                    <span>{tg.label}</span>
-                    <span className="text-[10px] opacity-70">({tg.count})</span>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteTag(tg.id)}
-                      className="ml-1 hover:opacity-100 opacity-60 cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              {showTagModal && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-                  <div
-                    className={`w-full max-w-sm rounded-2xl p-5 border shadow-2xl space-y-4 ${
-                      isDarkMode ? 'bg-[#1f2c34] border-[#2a3942] text-white' : 'bg-white border-gray-200 text-[#111b21]'
-                    }`}
-                  >
-                    <h3 className="text-base font-bold">Nova Etiqueta</h3>
-                    <div className="space-y-3 text-xs">
-                      <div>
-                        <label className="text-[#8696a0] block mb-1 font-semibold">Nome da Etiqueta</label>
-                        <input
-                          type="text"
-                          value={newTagLabel}
-                          onChange={(e) => setNewTagLabel(e.target.value)}
-                          placeholder="Ex: Cliente VIP"
-                          className={`w-full px-3 py-2 rounded-xl border outline-none ${
-                            isDarkMode ? 'bg-[#202c33] border-[#2a3942]' : 'bg-[#f0f2f5] border-[#d1d7db]'
-                          }`}
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[#8696a0] block mb-1 font-semibold">Cor de Identificação</label>
-                        <input
-                          type="color"
-                          value={newTagColor}
-                          onChange={(e) => setNewTagColor(e.target.value)}
-                          className="w-full h-10 rounded-xl cursor-pointer bg-transparent border-none"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex justify-end space-x-2 pt-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowTagModal(false)}
-                        className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-gray-500/20 text-gray-300"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleAddTag}
-                        className="px-4 py-1.5 rounded-xl text-xs font-bold bg-[#00a884] text-white"
-                      >
-                        Salvar
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          {activeTab === 'etiquetas' && <LabelsSettingsPanel accountId={accountId} isDarkMode={isDarkMode} canManage={canManageLabels} onRenamed={onLabelRenamed} onDeleted={onLabelDeleted} />}
 
           {/* ==================== 6. ATRIBUTOS ==================== */}
-          {activeTab === 'atributos' && (
-            <div
-              className={`p-6 rounded-2xl border shadow-xl space-y-6 ${
-                isDarkMode ? 'bg-[#111b21] border-[#222d34]' : 'bg-white border-[#d1d7db]'
-              }`}
-            >
-              <div className="flex items-center justify-between border-b pb-4 border-white/10">
-                <div>
-                  <h3 className="text-lg font-bold">Atributos Customizados</h3>
-                  <p className="text-xs text-[#8696a0]">Campos personalizados para salvar dados específicos de contatos ou conversas.</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowAttributeModal(true)}
-                  className="px-3.5 py-2 bg-[#00a884] hover:bg-[#008069] text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Novo Atributo</span>
-                </button>
-              </div>
-
-              <div className="divide-y divide-white/10">
-                {attributes.map((attr) => (
-                  <div key={attr.id} className="py-3 flex items-center justify-between text-xs">
-                    <div>
-                      <span className="font-mono font-bold text-emerald-400">{attr.name}</span>
-                      <p className="text-[11px] text-[#8696a0]">Chave: {attr.key}</p>
-                    </div>
-                    <div className="flex items-center space-x-3">
-                      <span className="px-2.5 py-1 rounded-lg bg-gray-500/10 border border-gray-500/20 text-gray-300 text-[10px] font-bold">
-                        {attr.type}
-                      </span>
-                      <span className="px-2.5 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-bold">
-                        {attr.target}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {showAttributeModal && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-                  <div
-                    className={`w-full max-w-sm rounded-2xl p-5 border shadow-2xl space-y-4 ${
-                      isDarkMode ? 'bg-[#1f2c34] border-[#2a3942] text-white' : 'bg-white border-gray-200 text-[#111b21]'
-                    }`}
-                  >
-                    <h3 className="text-base font-bold">Novo Atributo Customizado</h3>
-                    <div className="space-y-3 text-xs">
-                      <div>
-                        <label className="text-[#8696a0] block mb-1 font-semibold">Nome / Chave do Campo</label>
-                        <input
-                          type="text"
-                          value={newAttrKey}
-                          onChange={(e) => setNewAttrKey(e.target.value)}
-                          placeholder="Ex: CPF_CNPJ"
-                          className={`w-full px-3 py-2 rounded-xl border outline-none ${
-                            isDarkMode ? 'bg-[#202c33] border-[#2a3942]' : 'bg-[#f0f2f5] border-[#d1d7db]'
-                          }`}
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[#8696a0] block mb-1 font-semibold">Tipo de Dado</label>
-                        <select
-                          value={newAttrType}
-                          onChange={(e) => setNewAttrType(e.target.value)}
-                          className={`w-full px-3 py-2 rounded-xl border outline-none ${
-                            isDarkMode ? 'bg-[#202c33] border-[#2a3942]' : 'bg-[#f0f2f5] border-[#d1d7db]'
-                          }`}
-                        >
-                          <option value="Texto">Texto</option>
-                          <option value="Número">Número</option>
-                          <option value="Data">Data</option>
-                          <option value="Opção">Opção / Booleano</option>
-                        </select>
-                      </div>
-                    </div>
-                    <div className="flex justify-end space-x-2 pt-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowAttributeModal(false)}
-                        className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-gray-500/20 text-gray-300"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleAddAttribute}
-                        className="px-4 py-1.5 rounded-xl text-xs font-bold bg-[#00a884] text-white"
-                      >
-                        Salvar
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          {activeTab === 'atributos' && <CustomAttributesSettingsPanel accountId={accountId} isDarkMode={isDarkMode} canManage={canManageCustomAttributes} />}
 
           {/* ==================== KANBAN ==================== */}
           {activeTab === 'kanban' && (

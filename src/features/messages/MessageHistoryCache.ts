@@ -1,5 +1,7 @@
 import type { ConversationMessage, ConversationSummary } from '../../domain/currentUser';
 import type { MessageHistoryPage } from '../../integrations/chatwoot/messages';
+import { indexGroupParticipants, participantPhone, validParticipantName } from '../groups/participant';
+import type { GroupParticipant } from '../groups/metadata';
 import { messageHistoryPersistence, type MessageHistoryPersistence, type PersistedMessageHistory } from './MessageHistoryPersistence';
 
 export const MESSAGE_HISTORY_TTL_MS = 30_000;
@@ -34,6 +36,34 @@ export const mergeMessage = (current: ConversationMessage[], incoming: Conversat
   return [...current, incoming].sort((a, b) => a.createdAt - b.createdAt || a.id - b.id);
 };
 
+export const enrichGroupParticipantMessages = (messages: ConversationMessage[], participants: GroupParticipant[], groupName?: string | null) => {
+  const identities = indexGroupParticipants(participants);
+  return messages.map(message => {
+    if (message.kind !== 'incoming' || typeof message.contentAttributes.whatsapp_remote_jid !== 'string' || !message.contentAttributes.whatsapp_remote_jid.endsWith('@g.us')) return message;
+    const jid = typeof message.contentAttributes.whatsapp_participant_jid === 'string' ? message.contentAttributes.whatsapp_participant_jid : undefined;
+    const phone = typeof message.contentAttributes.whatsapp_participant_phone === 'string' ? message.contentAttributes.whatsapp_participant_phone : undefined;
+    const participantContactId = Number(message.contentAttributes.whatsapp_participant_contact_id);
+    const participant = (participantContactId && identities[`contact:${participantContactId}`]) || (message.senderId && identities[`contact:${message.senderId}`]) || (jid && identities[jid]) || (phone && (identities[phone] || identities[phone.replace(/\D/g, '')]));
+    if (!participant) return message;
+    const resolvedPhone = participantPhone(participant.phoneJid || participant.jid, participant.phoneNumber || participant.phone) || message.senderPhoneNumber || phone;
+    const resolvedName = validParticipantName(participant.displayName || participant.name, groupName) || validParticipantName(message.senderName, groupName) || resolvedPhone;
+    const candidate: ConversationMessage = {
+      ...message,
+      ...(participant.contactId ? { senderId: participant.contactId } : {}),
+      ...(resolvedName ? { senderName: resolvedName } : {}),
+      ...(resolvedPhone ? { senderPhoneNumber: resolvedPhone } : {}),
+      ...(participant.avatarUrl ? { senderAvatarUrl: participant.avatarUrl } : {}),
+      contentAttributes: {
+        ...message.contentAttributes,
+        ...(participant.displayName || participant.name ? { whatsapp_participant_name: participant.displayName || participant.name } : {}),
+        ...(resolvedPhone ? { whatsapp_participant_phone: resolvedPhone } : {}),
+        ...(participant.contactId ? { whatsapp_participant_contact_id: participant.contactId } : {}),
+      },
+    };
+    return preserveRichSender(message, candidate);
+  });
+};
+
 export interface CachedMessageHistory {
   messages: ConversationMessage[];
   hasOlderMessages: boolean;
@@ -51,6 +81,7 @@ export class MessageHistoryCache {
   private inFlight = new Map<string, { controller: AbortController; promise: Promise<MessageHistoryPage> }>();
   private hydrateInFlight = new Map<string, Promise<(CachedMessageHistory & { isFresh: boolean }) | null>>();
   private generation = 0;
+  private participants = new Map<string, GroupParticipant[]>();
   constructor(private readonly maxEntries = MESSAGE_HISTORY_MAX_CONVERSATIONS, private readonly ttlMs = MESSAGE_HISTORY_TTL_MS, private readonly now = () => Date.now(), private readonly persistence?: MessageHistoryPersistence) {}
 
   key(accountId: number, conversationId: number) { return `${accountId}:${conversationId}`; }
@@ -70,7 +101,9 @@ export class MessageHistoryCache {
     const key = this.key(accountId, conversationId);
     const previous = this.entries.get(key);
     const base = options.prepend || options.preserveExisting ? previous?.messages || [] : [];
-    const messages = page.messages.reduce(mergeMessage, base);
+    const participantMetadata = this.participants.get(key);
+    const incoming = participantMetadata ? enrichGroupParticipantMessages(page.messages, participantMetadata, options.conversation?.contactName || previous?.conversation?.contactName) : page.messages;
+    const messages = incoming.reduce(mergeMessage, base);
     const entry: Entry = { key, messages, hasOlderMessages: options.prepend ? page.hasOlderMessages : (previous?.hasOlderMessages || page.hasOlderMessages), updatedAt: this.now(), scrollTop: previous?.scrollTop || 0, conversation: options.conversation || previous?.conversation };
     this.entries.delete(key);
     this.entries.set(key, entry);
@@ -114,10 +147,24 @@ export class MessageHistoryCache {
     const previous = this.entries.get(key);
     if (!previous) return false;
     this.entries.delete(key);
-    const entry = { ...previous, messages: mergeMessage(previous.messages, message), updatedAt: this.now() };
+    const participants = this.participants.get(key);
+    const enriched = participants ? enrichGroupParticipantMessages([message], participants, previous.conversation?.contactName)[0] : message;
+    const entry = { ...previous, messages: mergeMessage(previous.messages, enriched), updatedAt: this.now() };
     this.entries.set(key, entry);
     void this.persistence?.put(this.persisted(accountId, message.conversationId, entry));
     return true;
+  }
+
+  enrichParticipants(accountId: number, conversationId: number, participants: GroupParticipant[]) {
+    const key = this.key(accountId, conversationId);
+    const previous = this.entries.get(key);
+    if (!previous) return null;
+    this.participants.set(key, participants);
+    const messages = enrichGroupParticipantMessages(previous.messages, participants, previous.conversation?.contactName);
+    const entry = { ...previous, messages };
+    this.install(entry);
+    void this.persistence?.put(this.persisted(accountId, conversationId, entry));
+    return messages;
   }
 
   setScroll(accountId: number, conversationId: number, scrollTop: number) {
@@ -153,7 +200,7 @@ export class MessageHistoryCache {
   abort(accountId: number, conversationId: number, variant = 'latest') { this.inFlight.get(`${this.key(accountId, conversationId)}:${variant}`)?.controller.abort(); }
   isLoading(accountId: number, conversationId: number, variant = 'latest') { return this.inFlight.has(`${this.key(accountId, conversationId)}:${variant}`); }
   size() { return this.entries.size; }
-  async clear() { this.generation += 1; this.entries.clear(); this.hydrateInFlight.clear(); await this.persistence?.clear(); }
+  async clear() { this.generation += 1; this.entries.clear(); this.participants.clear(); this.hydrateInFlight.clear(); await this.persistence?.clear(); }
 
   private install(entry: Entry) {
     this.entries.delete(entry.key);

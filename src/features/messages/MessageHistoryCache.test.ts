@@ -72,6 +72,28 @@ describe('MessageHistoryCache', () => {
     expect(cache.get(1, 1)?.messages[0]).toMatchObject({ id: 99, senderId: 91, senderName: 'Ricardo' });
   });
 
+  it('reconcilia LID com histórico e persiste Contact enriquecido sem alterar conteúdo', async () => {
+    const persistence = new MemoryMessageHistoryPersistence();
+    const cache = new MessageHistoryCache(12, 30_000, () => 100, persistence);
+    cache.set(1, 1, page(message(20, { content: 'conteúdo original', contentAttributes: { whatsapp_remote_jid: '120363@g.us', whatsapp_participant_jid: '123@lid' } })));
+    cache.enrichParticipants(1, 1, [{ jid: '123@lid', lid: '123@lid', phoneJid: '5544988687221@c.us', contactId: 91, displayName: 'Ricardo', avatarUrl: 'ricardo.jpg' }]);
+    await Promise.resolve();
+    expect(cache.get(1, 1)?.messages).toEqual([expect.objectContaining({ id: 20, content: 'conteúdo original', senderId: 91, senderName: 'Ricardo', senderPhoneNumber: '+5544988687221', senderAvatarUrl: 'ricardo.jpg' })]);
+    const reopened = new MessageHistoryCache(12, 30_000, () => 101, persistence);
+    expect((await reopened.hydrate(1, 1))?.messages[0]).toMatchObject({ id: 20, senderId: 91, senderName: 'Ricardo', senderPhoneNumber: '+5544988687221' });
+  });
+
+  it('enriquece mensagens novas com aliases já sincronizados e persiste o telefone', async () => {
+    const persistence = new MemoryMessageHistoryPersistence();
+    const cache = new MessageHistoryCache(12, 30_000, () => 100, persistence);
+    cache.set(1, 1, page(message(1)), { conversation: { ...conversation(), contactName: 'Equipe' } });
+    cache.enrichParticipants(1, 1, [{ jid: '123@lid', lid: '123@lid', phoneJid: '5544999999999@c.us', contactId: 91, name: 'Participante' }]);
+    cache.upsertIfPresent(1, message(2, { contentAttributes: { whatsapp_remote_jid: '120363@g.us', whatsapp_participant_jid: '123@lid' } }));
+    await Promise.resolve();
+    expect(cache.get(1, 1)?.messages.find(item => item.id === 2)).toMatchObject({ senderId: 91, senderName: '+5544999999999', senderPhoneNumber: '+5544999999999' });
+    expect((await new MessageHistoryCache(12, 30_000, () => 101, persistence).hydrate(1, 1))?.messages.find(item => item.id === 2)).toMatchObject({ senderName: '+5544999999999' });
+  });
+
   it('reconcilia pelo source_id quando REST e realtime têm ids locais diferentes', () => {
     const cache = new MessageHistoryCache();
     cache.set(1, 1, page(message(20, { sourceId: 'wamid.same', content: 'realtime' })));

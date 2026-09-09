@@ -34,14 +34,20 @@ describe('conversationManagementService', () => {
     ]);
   });
 
+  it('persiste atributos reais da conversa com merge', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ custom_attributes: { contrato: 'CTR-1', ativo: true } }), { status: 200 }));
+    await expect(conversationManagementService.setCustomAttributes(2, 31, { contrato: 'CTR-1', ativo: true })).resolves.toEqual({ customAttributes: { contrato: 'CTR-1', ativo: true } });
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/v1/accounts/2/conversations/31/custom_attributes'), expect.objectContaining({ method: 'POST', body: JSON.stringify({ custom_attributes: { contrato: 'CTR-1', ativo: true }, merge: true }) }));
+  });
+
   it('consulta e atualiza responsáveis compartilhados pela API nativa de participantes', async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 8, available_name: 'Ana' }]), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 8, available_name: 'Ana' }, { id: 9, available_name: 'Bruno' }]), { status: 200 }));
 
-    await expect(conversationManagementService.listParticipants(2, 31)).resolves.toEqual([{ id: 8, name: 'Ana', avatarUrl: null }]);
+    await expect(conversationManagementService.listParticipants(2, 31)).resolves.toEqual([expect.objectContaining({ id: 8, name: 'Ana', avatarUrl: null })]);
     await expect(conversationManagementService.setParticipants(2, 31, [8, 9])).resolves.toEqual([
-      { id: 8, name: 'Ana', avatarUrl: null }, { id: 9, name: 'Bruno', avatarUrl: null },
+      expect.objectContaining({ id: 8, name: 'Ana', avatarUrl: null }), expect.objectContaining({ id: 9, name: 'Bruno', avatarUrl: null }),
     ]);
 
     expect(vi.mocked(fetch).mock.calls.map(([url, init]) => [url, init?.method, init?.body && JSON.parse(init.body as string)])).toEqual([

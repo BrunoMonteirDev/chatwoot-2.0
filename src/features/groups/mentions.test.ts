@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mentionReplacements, mentionTargetFor, pruneMentionSelections, uniqueMentionTargets } from './mentions';
+import { mentionReplacements, mentionTargetFor, participantMentionLabel, pruneMentionSelections, uniqueMentionTargets } from './mentions';
 
 describe('group mentions', () => {
   it('keeps a provider identity separate from the friendly token and uses its supplied phone JID', () => {
@@ -10,10 +10,15 @@ describe('group mentions', () => {
   });
 
   it('never turns a LID into a phone mention', () => {
-    const selection = { providerId: '19696904601705@lid', token: '@Participante' };
+    const selection = { providerId: '19696904601705@lid', token: '' };
     expect(mentionTargetFor(selection)).toBeUndefined();
     expect(uniqueMentionTargets([selection])).toEqual([]);
     expect(mentionReplacements([selection])).toEqual([]);
+  });
+
+  it('usa telefone no autocomplete quando o nome não é válido', () => {
+    expect(participantMentionLabel({ providerId: '123@lid', displayName: 'Participante', phoneJid: '5544999999999@c.us' })).toBe('+5544999999999');
+    expect(participantMentionLabel({ providerId: '123@lid', displayName: '123@lid' })).toBe('');
   });
 
   it('keeps multiple distinct targets and removes IDs whose token was deleted', () => {

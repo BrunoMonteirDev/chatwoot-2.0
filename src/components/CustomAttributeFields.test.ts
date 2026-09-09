@@ -1,0 +1,5 @@
+import { describe, expect, it } from 'vitest';
+import type { CustomAttributeDefinition } from '../domain/currentUser';
+import { coerceCustomAttributeValue } from './CustomAttributeFields';
+const definition=(type:CustomAttributeDefinition['type'],values:string[]=[]):CustomAttributeDefinition=>({id:1,name:'Campo',key:'campo',description:null,type,model:'contact_attribute',values});
+describe('valores tipados',()=>{it('mantém texto e converte número/checkbox',()=>{expect(coerceCustomAttributeValue(definition('text'),'abc')).toBe('abc');expect(coerceCustomAttributeValue(definition('number'),'12.5')).toBe(12.5);expect(coerceCustomAttributeValue(definition('checkbox'),true)).toBe(true);});it('valida link, data e lista',()=>{expect(coerceCustomAttributeValue(definition('link'),'https://example.com')).toBe('https://example.com');expect(()=>coerceCustomAttributeValue(definition('link'),'javascript:alert(1)')).toThrow();expect(coerceCustomAttributeValue(definition('date'),'2026-09-09')).toBe('2026-09-09');expect(()=>coerceCustomAttributeValue(definition('list',['A']),'B')).toThrow();});});

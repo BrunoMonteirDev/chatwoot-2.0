@@ -178,6 +178,16 @@ export const useConversations = (accountId: number | null, selectedInbox: string
     });
   }, [filterKey, selectedInbox]);
 
+  const patchConversationLocally = useCallback((conversationId: number, update: Partial<ConversationSummary>) => {
+    setConversations(current => current.map(conversation => conversation.id === conversationId ? { ...conversation, ...update } : conversation));
+  }, []);
+
+  const reconcileLabel = useCallback((previousTitle: string, nextTitle?: string) => {
+    setConversations(current => current.map(conversation => conversation.labels.includes(previousTitle)
+      ? { ...conversation, labels: nextTitle ? [...new Set(conversation.labels.map(label => label === previousTitle ? nextTitle : label))] : conversation.labels.filter(label => label !== previousTitle) }
+      : conversation));
+  }, []);
+
   const removeConversation = useCallback((conversationId: number) => {
     setConversations(current => current.filter(conversation => conversation.id !== conversationId));
   }, []);
@@ -231,5 +241,5 @@ export const useConversations = (accountId: number | null, selectedInbox: string
     );
   }, []);
 
-  return { conversations, status, error, hasNextPage, isLoadingMore, isRefreshing, retry: () => load(1, false), loadMore, applyOutgoingMessage, applyConversationUpdate, removeConversation, replaceConversation, upsertRealtimeConversation, addCreatedConversation, applyRealtimeMessage, refreshRecentConversations };
+  return { conversations, status, error, hasNextPage, isLoadingMore, isRefreshing, retry: () => load(1, false), loadMore, applyOutgoingMessage, applyConversationUpdate, patchConversationLocally, reconcileLabel, removeConversation, replaceConversation, upsertRealtimeConversation, addCreatedConversation, applyRealtimeMessage, refreshRecentConversations };
 };
