@@ -70,6 +70,7 @@ import { finiteAudioDuration, recordingFile, recordingMimeType, releaseRecording
 import { documentPresentation, filesFromTransfer, hasFilesInTransfer, triggerAttachmentDownload } from '../features/attachments/fileUtils';
 import { shouldSendMessageOnEnter, type SendMessageShortcut } from '../features/messages/sendMessageShortcut';
 import { audioDurationLabel, isAtConversationBottom, preservedScrollTopAfterPrepend } from '../features/messages/scroll';
+import { APP_VIEWPORT_CHANGE_EVENT } from '../features/mobile/visualViewport';
 import { useContactConversations } from '../features/contacts/useContactConversations';
 import { useConversationAttachments } from '../features/attachments/useConversationAttachments';
 import { groupMetadataClient, persistedGroupMetadata, type GroupMetadata, type GroupParticipant } from '../features/groups/metadata';
@@ -1097,6 +1098,18 @@ export const ChatArea: React.FC<Props> = ({
   const previousScrollHeight = useRef<number | null>(null);
   const initialScrollCompletedFor = useRef<string | null>(null);
 
+  useEffect(() => {
+    let frame = 0;
+    const preserveBottom = () => {
+      const element = scrollContainerRef.current;
+      if (!element || !isAtConversationBottom(element.scrollHeight, element.scrollTop, element.clientHeight)) return;
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => { const current = scrollContainerRef.current; if (current) current.scrollTop = current.scrollHeight; });
+    };
+    window.addEventListener(APP_VIEWPORT_CHANGE_EVENT, preserveBottom);
+    return () => { window.removeEventListener(APP_VIEWPORT_CHANGE_EVENT, preserveBottom); window.cancelAnimationFrame(frame); };
+  }, []);
+
   const focusMessage = (messageId: string) => {
     const element = document.getElementById(`msg-${messageId}`);
     if (!element) return;
@@ -1512,9 +1525,9 @@ export const ChatArea: React.FC<Props> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-row h-full relative overflow-hidden">
+    <div className="flex-1 min-h-0 flex flex-row h-full relative overflow-hidden">
       {/* Main Active Chat Area */}
-      <div className="flex-1 flex flex-col h-full relative overflow-hidden" onDragEnter={handleDragEnter} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDropFiles}>
+      <div className="flex-1 min-h-0 flex flex-col h-full relative overflow-hidden" onDragEnter={handleDragEnter} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDropFiles}>
         {isDraggingFiles && (
           <div className="pointer-events-none absolute inset-0 z-[80] grid place-items-center border-2 border-dashed border-[#00a884] bg-[#00a884]/15 p-6 text-center backdrop-blur-[1px]">
             <div className="rounded-2xl bg-[#111b21] px-5 py-4 text-sm font-bold text-white shadow-2xl">Solte os arquivos para anexar</div>
@@ -2183,7 +2196,7 @@ export const ChatArea: React.FC<Props> = ({
       )}
 
       {/* Bottom Message Input Bar - Floating Capsule */}
-      <div className="px-3 pb-3 pt-1 z-20 flex-shrink-0 relative">
+      <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-1 z-20 flex-shrink-0 relative md:pb-3">
         {/* Attachment Options Popup */}
         {showAttachmentMenu && (
           <AttachmentMenu

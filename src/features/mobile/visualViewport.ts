@@ -1,0 +1,4 @@
+export interface ViewportMeasurement { height: number; offsetTop: number; width: number; }
+export const measureVisualViewport = (viewport: Pick<VisualViewport, 'height' | 'offsetTop' | 'width'> | null | undefined, fallback: Pick<Window, 'innerHeight' | 'innerWidth'>): ViewportMeasurement => ({ height: Math.max(1, Math.round(viewport?.height || fallback.innerHeight)), offsetTop: Math.max(0, Math.round(viewport?.offsetTop || 0)), width: Math.max(1, Math.round(viewport?.width || fallback.innerWidth)) });
+export const applyVisualViewport = (style: CSSStyleDeclaration, value: ViewportMeasurement) => { style.setProperty('--app-viewport-height', `${value.height}px`); style.setProperty('--app-viewport-offset-top', `${value.offsetTop}px`); style.setProperty('--app-viewport-width', `${value.width}px`); };
+export const APP_VIEWPORT_CHANGE_EVENT = 'kopla:visual-viewport-change';

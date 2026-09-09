@@ -29,6 +29,7 @@ import { enabledDashboardAppForId, useDashboardApps } from './features/apps/useD
 import { useLauncherRouteState } from './features/apps/useLauncherRouteState';
 import { NewConversationModal } from './components/NewConversationModal';
 import { NewGroupModal } from './components/NewGroupModal';
+import { APP_VIEWPORT_CHANGE_EVENT, applyVisualViewport, measureVisualViewport } from './features/mobile/visualViewport';
 import { WallpaperId } from './components/WhatsAppDoodleBg';
 import { FloatingMobileNav } from './components/FloatingMobileNav';
 import { QuickNotesView } from './components/QuickNotesView';
@@ -106,17 +107,25 @@ export default function App() {
   // measurements are equivalent, so its standalone layout is unchanged.
   useEffect(() => {
     const viewport = window.visualViewport;
+    let frame = 0;
     const syncViewportHeight = () => {
-      document.documentElement.style.setProperty('--app-viewport-height', `${Math.round(viewport?.height || window.innerHeight)}px`);
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        applyVisualViewport(document.documentElement.style, measureVisualViewport(viewport, window));
+        window.dispatchEvent(new CustomEvent(APP_VIEWPORT_CHANGE_EVENT));
+      });
     };
     syncViewportHeight();
     viewport?.addEventListener('resize', syncViewportHeight);
+    viewport?.addEventListener('scroll', syncViewportHeight);
     window.addEventListener('resize', syncViewportHeight);
     window.addEventListener('orientationchange', syncViewportHeight);
     return () => {
       viewport?.removeEventListener('resize', syncViewportHeight);
+      viewport?.removeEventListener('scroll', syncViewportHeight);
       window.removeEventListener('resize', syncViewportHeight);
       window.removeEventListener('orientationchange', syncViewportHeight);
+      window.cancelAnimationFrame(frame);
     };
   }, []);
 
@@ -1043,8 +1052,8 @@ export default function App() {
 
   return (
     <div
-      style={{ height: 'var(--app-viewport-height, 100dvh)' }}
-      className={`w-screen flex flex-col font-sans antialiased overflow-hidden select-none transition-colors ${
+      style={{ height: 'var(--app-viewport-height, 100dvh)', top: 'var(--app-viewport-offset-top, 0px)', width: 'var(--app-viewport-width, 100vw)' }}
+      className={`fixed left-0 flex flex-col font-sans antialiased overflow-hidden select-none transition-colors ${
         isDarkMode ? 'bg-[#0e0c0c]' : 'bg-[#f0f2f5]'
       }`}
     >
