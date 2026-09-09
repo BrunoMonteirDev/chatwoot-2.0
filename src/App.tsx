@@ -46,6 +46,7 @@ import { useConversations } from './features/conversations/useConversations';
 import { copyConversationLink } from './features/conversations/copyConversationLink';
 import { toChatListItem } from './features/conversations/toChatListItem';
 import { conversationForActiveRoute } from './features/conversations/directConversation';
+import { contactForConversation, conversationVisualKey, isCurrentHeaderResponse, messagesForConversation } from './features/conversations/conversationVisualState';
 import { cacheRealtimeMessage, useConversationMessages } from './features/messages/useConversationMessages';
 import { composerNotice } from './features/messages/composerCapability';
 import { messageHistoryCache, messageHistoryPrefetcher } from './features/messages/MessageHistoryCache';
@@ -505,16 +506,24 @@ export default function App() {
     return () => window.removeEventListener('open-whatsapp-manager', openManager);
   }, [navigateToSettingsInbox, selectedConversation?.inboxId]);
   const contactDetails = useContactDetails(currentAccount?.id ?? null, selectedConversation?.contactId ?? null);
-  const messageHistory = useConversationMessages(currentAccount?.id ?? null, selectedConversationId, selectedConversation?.inboxId ?? null, contactDetails.contact?.phoneNumber,
+  const selectedContact = contactForConversation(contactDetails.contact, selectedConversation);
+  const messageHistory = useConversationMessages(currentAccount?.id ?? null, selectedConversationId, selectedConversation?.inboxId ?? null, selectedContact?.phoneNumber,
     inboxes.find((inbox) => inbox.id === selectedConversation?.inboxId)?.channelType);
   const showSystemMessages = showSystemMessagesFrom(authenticatedUser?.uiSettings);
   const sendMessageShortcut = sendMessageShortcutFrom(authenticatedUser?.uiSettings);
-  const visibleHistoryMessages = useMemo(() => visibleConversationMessages(messageHistory.messages, showSystemMessages), [messageHistory.messages, showSystemMessages]);
+  const scopedHistoryMessages = useMemo(() => messagesForConversation(messageHistory.messages, selectedConversationId), [messageHistory.messages, selectedConversationId]);
+  const visibleHistoryMessages = useMemo(() => visibleConversationMessages(scopedHistoryMessages, showSystemMessages), [scopedHistoryMessages, showSystemMessages]);
   const hasOnlyHiddenSystemMessages = messageHistory.messages.length > 0 && visibleHistoryMessages.length === 0;
   const activeChatWithHistory = useMemo(() => selectedConversationId
     ? activeChat && { ...activeChat, messages: toChatMessages(visibleHistoryMessages) }
     : activeChat,
   [activeChat, selectedConversationId, visibleHistoryMessages]);
+  const persistedGroupJid = selectedContact?.additionalAttributes.whatsapp_group_jid;
+  const messageGroupJid = visibleHistoryMessages.find(message => typeof message.contentAttributes.whatsapp_remote_jid === 'string' && message.contentAttributes.whatsapp_remote_jid.endsWith('@g.us'))?.contentAttributes.whatsapp_remote_jid;
+  const expectedGroupJid = typeof persistedGroupJid === 'string' ? persistedGroupJid : typeof messageGroupJid === 'string' ? messageGroupJid : null;
+  const headerScopeKey = conversationVisualKey(currentAccount?.id ?? null, selectedConversation, expectedGroupJid);
+  const headerScopeRef = useRef(headerScopeKey);
+  headerScopeRef.current = headerScopeKey;
   const conversationManagement = useConversationManagement(currentAccount?.id ?? null, selectedConversation?.inboxId ?? null);
   const updateSelectedContact = async (update: Parameters<typeof contactDetails.update>[0]) => {
     const updated = await contactDetails.update(update);
@@ -1363,17 +1372,17 @@ export default function App() {
                   onOpenDirectConversation={openConversationDirectly}
                   onStartGroupParticipantConversation={(contactId, inboxId) => { void startContactConversation({ contactId, inboxId, private: false }); }}
                   onGroupSubjectResolved={(subject) => {
-                    if (selectedConversationId) applyConversationUpdate(selectedConversationId, { contactName: subject });
+                    if (selectedConversationId && isCurrentHeaderResponse(headerScopeRef.current, headerScopeKey)) applyConversationUpdate(selectedConversationId, { contactName: subject });
                   }}
                   onGroupMetadataResolved={(metadata) => {
-                    if (!selectedConversationId) return;
+                    if (!selectedConversationId || !isCurrentHeaderResponse(headerScopeRef.current, headerScopeKey, expectedGroupJid, metadata.id)) return;
                     applyConversationUpdate(selectedConversationId, { ...(metadata.subject ? { contactName: metadata.subject } : {}), ...(metadata.avatarUrl ? { contactAvatarUrl: metadata.avatarUrl } : {}) });
                   }}
                   onContactProfileResolved={(profile) => {
-                    if (!selectedConversationId) return;
+                    if (!selectedConversationId || !isCurrentHeaderResponse(headerScopeRef.current, headerScopeKey)) return;
                     applyConversationUpdate(selectedConversationId, { ...(profile.name ? { contactName: profile.name } : {}), ...(profile.avatarUrl ? { contactAvatarUrl: profile.avatarUrl } : {}) });
-                    if (contactDetails.contact && selectedConversation?.contactId === contactDetails.contact.id) {
-                      contactDetails.applyRealtimeUpdate({ ...contactDetails.contact, ...(profile.name ? { name: profile.name } : {}), ...(profile.avatarUrl ? { avatarUrl: profile.avatarUrl } : {}) });
+                    if (selectedContact) {
+                      contactDetails.applyRealtimeUpdate({ ...selectedContact, ...(profile.name ? { name: profile.name } : {}), ...(profile.avatarUrl ? { avatarUrl: profile.avatarUrl } : {}) });
                     }
                     void contactDetails.retry();
                   }}
@@ -1413,7 +1422,7 @@ export default function App() {
                   onReachLatestMessage={markSelectedConversationRead}
                   realtimeConnectionStatus={realtimeConnectionStatus}
                   typingName={typing?.name ?? null}
-                  contact={contactDetails.contact}
+                  contact={selectedContact}
                   contactNotes={contactDetails.notes}
                   contactStatus={selectedConversation ? contactDetails.status : 'idle'}
                   contactError={contactDetails.error}

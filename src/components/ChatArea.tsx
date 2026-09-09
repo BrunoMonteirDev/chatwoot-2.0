@@ -630,7 +630,7 @@ interface Props {
   onCopyConversationLink?: () => void;
   onOpenDirectConversation?: (conversationId: number) => void;
   onGroupSubjectResolved?: (subject: string) => void;
-  onGroupMetadataResolved?: (metadata: Pick<GroupMetadata, 'subject' | 'avatarUrl'>) => void;
+  onGroupMetadataResolved?: (metadata: Pick<GroupMetadata, 'id' | 'subject' | 'avatarUrl'>) => void;
   onContactProfileResolved?: (profile: { name?: string; avatarUrl?: string }) => void;
   onStartGroupParticipantConversation?: (contactId: number, inboxId: number) => void;
 }

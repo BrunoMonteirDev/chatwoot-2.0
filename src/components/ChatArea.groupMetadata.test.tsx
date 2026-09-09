@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatArea } from './ChatArea';
 import { groupMetadataClient, type GroupMetadata } from '../features/groups/metadata';
-import type { ConversationSummary } from '../domain/currentUser';
+import type { ContactProfile, ConversationSummary } from '../domain/currentUser';
 import type { Chat } from '../types';
 
 const get = vi.spyOn(groupMetadataClient, 'get');
@@ -12,7 +12,10 @@ let container: HTMLDivElement;
 let root: Root;
 const conversation: ConversationSummary = { id: 81, inboxId: 5, channelType: 'Channel::Api', contactName: 'Equipe', contactId: 65, contactAvatarUrl: null, lastMessage: 'Olá', lastMessageByCurrentUser: false, lastActivityAt: 1, updatedAt: 1, unreadCount: 0, status: 'open', priority: null, assigneeId: null, assigneeName: null, participantIds: [], teamId: null, teamName: null, labels: [], isGroup: false };
 const chat = (messages: Chat['messages'] = []): Chat => ({ id: '81', name: 'Equipe', avatar: '', lastMessage: 'Olá', time: '', messages, isGroup: false });
-const render = async (value: Chat, selected: ConversationSummary = conversation) => act(async () => { root.render(<ChatArea chat={value} conversation={selected} accountId={1} onSendMessage={() => undefined} onImageClick={() => undefined} onSearchInChat={() => undefined} />); });
+const render = async (value: Chat, selected: ConversationSummary = conversation, contact?: ContactProfile | null) => act(async () => { root.render(<ChatArea chat={value} conversation={selected} contact={contact} accountId={1} onSendMessage={() => undefined} onImageClick={() => undefined} onSearchInChat={() => undefined} />); });
+const profile = (id: number, name: string, avatarUrl: string, groupJid?: string): ContactProfile => ({ id, name, avatarUrl, phoneNumber: null, email: null, identifier: null, companyName: null, city: null, country: null, blocked: false, lastActivityAt: null, createdAt: null, additionalAttributes: groupJid ? { whatsapp_chat_type: 'group', whatsapp_group_jid: groupJid, whatsapp_group_participants: [{ jid: `${id}@lid` }], whatsapp_group_avatar_url: avatarUrl } : {}, customAttributes: {} });
+const groupSelection = (id: number, name: string, avatar: string): [Chat, ConversationSummary, ContactProfile] => [{ ...chat([{ id: String(id), sender: 'them', senderName: name, senderIdentity: `${id}@lid`, text: name, time: '10:00', whatsappTransport: 'waha', whatsappRemoteJid: `${id}@g.us` }]), id: String(id), name, avatar, avatarType: 'image', isGroup: true }, { ...conversation, id, contactId: id, contactName: name, contactAvatarUrl: avatar, isGroup: true }, profile(id, name, avatar, `${id}@g.us`)];
+const privateSelection = (id: number, name: string, avatar: string): [Chat, ConversationSummary, ContactProfile] => [{ ...chat(), id: String(id), name, avatar, avatarType: 'image', isGroup: false }, { ...conversation, id, contactId: id, contactName: name, contactAvatarUrl: avatar, isGroup: false }, profile(id, name, avatar)];
 
 describe('ChatArea group metadata loading', () => {
   beforeEach(() => {
@@ -61,6 +64,59 @@ describe('ChatArea group metadata loading', () => {
     await act(async () => resolveA({ group: { id: 'a@g.us', subject: 'Grupo A', transport: 'waha', canEditDescription: true, participants: [{ jid: '1@lid', displayName: 'Alice' }] } }));
     expect(container.textContent).toContain('Bruna');
     expect(container.textContent).not.toContain('Alice');
+  });
+
+  it('renders B name and avatar on the first render after group A → group B', async () => {
+    const [chatA, conversationA, contactA] = groupSelection(81, 'Grupo A', 'a.jpg');
+    const [chatB, conversationB, contactB] = groupSelection(82, 'Grupo B', 'b.jpg');
+    get.mockImplementation(() => new Promise(() => undefined));
+    await render(chatA, conversationA, contactA);
+    await render(chatB, conversationB, contactB);
+    expect(container.querySelector('h2')?.textContent).toBe('Grupo B');
+    expect(container.querySelector<HTMLImageElement>('img[alt="Grupo B"]')?.src).toContain('b.jpg');
+    expect(container.textContent).not.toContain('Grupo A');
+  });
+
+  it('drops all group visuals immediately on group → private and ignores late group metadata', async () => {
+    let resolveA!: (value: { group: GroupMetadata }) => void;
+    get.mockImplementation(() => new Promise(resolve => { resolveA = resolve; }));
+    const [chatA, conversationA, contactA] = groupSelection(81, 'Grupo A', 'a.jpg');
+    const [chatC, conversationC, contactC] = privateSelection(83, 'Contato C', 'c.jpg');
+    await render(chatA, conversationA, contactA);
+    await render(chatC, conversationC, contactC);
+    expect(container.querySelector('h2')?.textContent).toBe('Contato C');
+    expect(container.querySelector<HTMLImageElement>('img[alt="Contato C"]')?.src).toContain('c.jpg');
+    expect(container.textContent).not.toContain('dados do grupo');
+    await act(async () => resolveA({ group: { id: '81@g.us', subject: 'Grupo A atrasado', avatarUrl: 'late-a.jpg', transport: 'waha', canEditDescription: true, participants: [] } }));
+    expect(container.querySelector('h2')?.textContent).toBe('Contato C');
+  });
+
+  it('uses persisted group B visuals immediately on private → group and accepts only B metadata', async () => {
+    let resolveB!: (value: { group: GroupMetadata }) => void;
+    get.mockImplementation(() => new Promise(resolve => { resolveB = resolve; }));
+    const [chatC, conversationC, contactC] = privateSelection(83, 'Contato C', 'c.jpg');
+    const [chatB, conversationB, contactB] = groupSelection(82, 'Grupo B', 'b.jpg');
+    await render(chatC, conversationC, contactC);
+    await render(chatB, conversationB, contactB);
+    expect(container.querySelector('h2')?.textContent).toBe('Grupo B');
+    expect(container.querySelector<HTMLImageElement>('img[alt="Grupo B"]')?.src).toContain('b.jpg');
+    await act(async () => resolveB({ group: { id: '82@g.us', subject: 'Grupo B atualizado', avatarUrl: 'new-b.jpg', transport: 'waha', canEditDescription: true, participants: [] } }));
+    expect(container.querySelector('h2')?.textContent).toBe('Grupo B');
+  });
+
+  it('keeps private C after rapid A → B → C when B and A resolve out of order', async () => {
+    const resolvers = new Map<number, (value: { group: GroupMetadata }) => void>();
+    get.mockImplementation((_account, _inbox, id) => new Promise(resolve => { resolvers.set(id, resolve); }));
+    const [chatA, conversationA, contactA] = groupSelection(81, 'Grupo A', 'a.jpg');
+    const [chatB, conversationB, contactB] = groupSelection(82, 'Grupo B', 'b.jpg');
+    const [chatC, conversationC, contactC] = privateSelection(83, 'Contato C', 'c.jpg');
+    await render(chatA, conversationA, contactA);
+    await render(chatB, conversationB, contactB);
+    await render(chatC, conversationC, contactC);
+    await act(async () => resolvers.get(82)?.({ group: { id: '82@g.us', subject: 'B atrasado', transport: 'waha', canEditDescription: true, participants: [] } }));
+    await act(async () => resolvers.get(81)?.({ group: { id: '81@g.us', subject: 'A atrasado', transport: 'waha', canEditDescription: true, participants: [] } }));
+    expect(container.querySelector('h2')?.textContent).toBe('Contato C');
+    expect(container.querySelector<HTMLImageElement>('img[alt="Contato C"]')?.src).toContain('c.jpg');
   });
 
   it('never loads group metadata for a private conversation', async () => {
