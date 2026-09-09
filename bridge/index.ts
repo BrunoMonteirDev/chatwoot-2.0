@@ -880,7 +880,11 @@ const importWahaHistoricalMessage = async (job: WahaHistoryJob, raw: unknown, co
   const { contact, conversation } = await conversationForWahaIdentity(inbox, message, profiles.syncedContacts);
   const historyConversationId = conversation.internal_id || conversation.id;
   conversations.add(historyConversationId);
-  if (message.chatType === 'group') await chatwootBridge.saveEvolutionGroup(contact.id, message.remoteJid, message.name);
+  let participantContact = null;
+  if (message.chatType === 'group') {
+    await chatwootBridge.saveEvolutionGroup(contact.id, message.remoteJid, message.name);
+    participantContact = await syncGroupParticipantContact({ id: job.inboxId }, { participant: message.participantJid, pushName: message.participantName }, 'waha');
+  }
   let existingMessage: Awaited<ReturnType<typeof chatwootBridge.messageTargetBySourceId>> | undefined;
   try { existingMessage = await chatwootBridge.messageTargetBySourceId(key); } catch { /* The historical message does not exist yet. */ }
   // The first import may have inserted the text shell while WAHA was still
@@ -917,7 +921,7 @@ const importWahaHistoricalMessage = async (job: WahaHistoryJob, raw: unknown, co
       sourceId: key, threadId: message.chatId, timestamp: Math.floor(new Date(message.timestamp).getTime() / 1000),
       content: message.content, transport: 'waha', direction: message.fromMe ? 'outgoing' : 'incoming', remoteJid: message.remoteJid,
       quotedMessageId: message.quotedMessageId, status: wahaStatusForAck(message.ack), mediaType: message.media?.kind,
-      mediaUnavailable, media, context: { chatType: message.chatType, participantJid: message.participantJid, participantName: message.participantName, isForwarded: message.isForwarded, forwardingScore: message.forwardingScore },
+      mediaUnavailable, media, context: { chatType: message.chatType, participantJid: message.participantJid, participantName: message.participantName, participantContactId: participantContact?.contactId, isForwarded: message.isForwarded, forwardingScore: message.forwardingScore },
     }));
     if (needsMediaBackfill && !media) {
       // Keep this retryable: WAHA may make a historical attachment available
@@ -1844,15 +1848,16 @@ app.post('/webhooks/waha', (request, response) => {
         await chatwootBridge.withAccount(inbox.accountId, async () => {
           const { contact, conversation } = await conversationForWahaIdentity(inbox, message);
           conversationId = conversation.id;
+          let participantContact = null;
           if (message.chatType === 'group') {
             await chatwootBridge.saveEvolutionGroup(contact.id, message.remoteJid, message.name);
-            await syncGroupParticipantContact(inbox, { participant: message.participantJid, pushName: message.participantName, avatarUrl: message.avatarUrl }, 'waha');
+            participantContact = await syncGroupParticipantContact(inbox, { participant: message.participantJid, pushName: message.participantName, avatarUrl: message.avatarUrl }, 'waha');
           }
           // The public API message endpoint does not infer a Chatwoot internal
           // reply id from provider metadata reliably. Resolve the namespaced
           // WAHA key first and send both the internal and external identity.
           const inReplyTo = await replyTargetId(conversation.id, 'waha', message.quotedMessageId);
-          const context = { chatType: message.chatType, participantJid: message.participantJid, participantName: message.participantName, isForwarded: message.isForwarded, forwardingScore: message.forwardingScore, providerMessageKey: message.providerMessageKey };
+          const context = { chatType: message.chatType, participantJid: message.participantJid, participantName: message.participantName, participantContactId: participantContact?.contactId, isForwarded: message.isForwarded, forwardingScore: message.forwardingScore, providerMessageKey: message.providerMessageKey };
           if (message.media) {
             const media = await wahaTransport.downloadMedia(message.media);
             if (message.fromMe) await chatwootBridge.createMobileOutgoingTransportMediaMessage(conversation.id, 'waha', message.content, message.externalId, media, message.quotedMessageId, message.remoteJid, inReplyTo, context);
@@ -2006,7 +2011,8 @@ app.post('/webhooks/evolution', async (request, response) => {
     console.info('[evolution-bridge] inbox found', { instance: event.instance, inboxId: inbox.id });
     console.info('[evolution-bridge] contact found or created', { sourceId: contact.source_id });
     console.info('[evolution-bridge] conversation found or created', { conversationId: conversation.id });
-    if (event.chatType === 'group') await syncGroupParticipantContact(inbox, { participant: event.participantJid, pushName: event.participantName }, 'evolution');
+    const participantContact = event.chatType === 'group' ? await syncGroupParticipantContact(inbox, { participant: event.participantJid, pushName: event.participantName }, 'evolution') : null;
+    const messageContext = participantContact ? { ...event, participantContactId: participantContact.contactId } : event;
     const inReplyTo = await replyTargetId(conversation.id, 'evolution', event.quotedMessageId);
     const downloadedMedia = event.media ? await evolutionBridge.downloadMedia(event.instance, event.media) : undefined;
     if (event.fromMe && downloadedMedia) {
@@ -2014,9 +2020,9 @@ app.post('/webhooks/evolution', async (request, response) => {
     } else if (event.fromMe) {
       await chatwootBridge.createMobileOutgoingMessage(conversation.id, event.content, event.messageId, event.quotedMessageId, event.remoteJid, event, inReplyTo);
     } else if (downloadedMedia) {
-      await chatwootBridge.createIncomingMediaMessage(conversation.id, event.content, event.messageId, downloadedMedia, event.quotedMessageId, event.remoteJid, event, inReplyTo);
+      await chatwootBridge.createIncomingMediaMessage(conversation.id, event.content, event.messageId, downloadedMedia, event.quotedMessageId, event.remoteJid, messageContext, inReplyTo);
     } else {
-      await chatwootBridge.createIncomingMessage(inbox.identifier, contact.source_id, conversation.id, event.content, event.messageId, event.quotedMessageId, event.remoteJid, event, inReplyTo);
+      await chatwootBridge.createIncomingMessage(inbox.identifier, contact.source_id, conversation.id, event.content, event.messageId, event.quotedMessageId, event.remoteJid, messageContext, inReplyTo);
     }
     await dedup.commit(dedupId);
     bridgeMetrics.increment('whatsapp_messages_received_total', { transport: 'evolution', media: Boolean(event.media) });

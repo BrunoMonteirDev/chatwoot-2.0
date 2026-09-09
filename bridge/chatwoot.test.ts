@@ -64,7 +64,9 @@ describe('chatwootBridge media messages', () => {
     await expect(chatwootBridge.withAccount(2, () => chatwootBridge.findOrCreateGroupParticipantContact(7, { phoneNumber: '+5544888888888', name: 'Maria' })))
       .resolves.toMatchObject({ id: 45, name: 'Maria', existing: false });
     expect(fetchMock.mock.calls.every(call => String(call[0]).includes('/accounts/2/'))).toBe(true);
-    expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toMatchObject({ inbox_id: 7, phone_number: '+5544888888888' });
+    const createCall = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'POST');
+    expect(createCall).toBeDefined();
+    expect(JSON.parse((createCall?.[1] as RequestInit).body as string)).toMatchObject({ inbox_id: 7, phone_number: '+5544888888888' });
   });
 
   it('reutiliza a conversa da mesma inbox quando o contato foi criado manualmente', async () => {
@@ -150,6 +152,14 @@ describe('chatwootBridge media messages', () => {
     });
   });
 
+  it('envia o Contact participante como sender sem alterar o conteúdo do grupo', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 1 }), { status: 200 })));
+    await chatwootBridge.withAccount(1, () => chatwootBridge.createIncomingTransportMessage('inbox', 'group', 31, 'waha', 'Mensagem original', 'message-1', undefined, '120363@g.us', undefined, { chatType: 'group', participantJid: '123@lid', participantContactId: 91 }));
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body).toMatchObject({ content: 'Mensagem original', message_type: 'incoming', sender_type: 'Contact', sender_id: 91 });
+    expect(body.content).not.toContain('Ricardo');
+  });
+
   it('preserva reply fromMe como outgoing mobile', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 2 }), { status: 200 })));
     await chatwootBridge.createMobileOutgoingMessage(31, 'Resposta pelo aparelho', 'mobile-reply', 'original-41', undefined, undefined, 19);
@@ -233,11 +243,11 @@ describe('chatwootBridge media messages', () => {
 
   it('encaminha uma mensagem histórica WAHA ao endpoint silencioso com timestamp e autor do grupo', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 42, created: true }), { status: 201 })));
-    await chatwootBridge.importHistoricalWhatsAppMessage(31, {
+    await chatwootBridge.withAccount(1, () => chatwootBridge.importHistoricalWhatsAppMessage(31, {
       sourceId: 'waha:3EB0', transport: 'waha', threadId: '120@g.us', timestamp: 1727745026, content: 'histórico',
       direction: 'incoming', remoteJid: '120@g.us', quotedMessageId: '3EB0Q', status: 'read', mediaType: 'image',
       context: { chatType: 'group', participantJid: '5511999999999@c.us', participantName: 'Ana' },
-    });
+    }));
     const form = (vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as FormData;
     expect(vi.mocked(fetch).mock.calls[0][0]).toContain('/whatsapp/conversations/31/history_messages');
     expect(form.get('source_id')).toBe('waha:3EB0');

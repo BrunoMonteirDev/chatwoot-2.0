@@ -30,8 +30,8 @@ export const toChatMessages = (items: ConversationMessage[]): Message[] => items
   // Chatwoot correctly identifies the group as the conversation contact. The
   // real author of an incoming group message is carried separately by the
   // bridge so a group does not look like a direct conversation with itself.
-  senderName: message.kind === 'outgoing' ? 'Você' : jid || phone ? participantLabel(name, jid, phone) : isGroupMessage ? 'Participante' : message.senderName || undefined,
-  ...(jid || phone ? { senderPhone: participantPhone(jid, phone), senderIdentity: identity, senderColor: participantColor(identity) } : {}),
+  senderName: message.kind === 'outgoing' ? 'Você' : isGroupMessage && message.senderId ? message.senderName || message.senderPhoneNumber || 'Participante' : jid || phone ? participantLabel(name, jid, phone) : isGroupMessage ? 'Participante' : message.senderName || undefined,
+  ...(isGroupMessage && message.senderId ? { senderPhone: message.senderPhoneNumber || undefined, senderIdentity: `contact:${message.senderId}`, senderColor: participantColor(`contact:${message.senderId}`) } : jid || phone ? { senderPhone: participantPhone(jid, phone), senderIdentity: identity, senderColor: participantColor(identity) } : {}),
   senderEmail: message.senderEmail || undefined,
   senderAvatarUrl: message.senderAvatarUrl || undefined,
   origin: message.origin || undefined,

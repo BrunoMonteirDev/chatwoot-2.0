@@ -194,14 +194,16 @@ export const wahaTransport = {
     return groupMetadata(await request(`/api/${namePath(session)}/groups/${encodeURIComponent(groupId)}`), groupId);
   },
   async createGroup(session: string, name: string, participants: string[] = []): Promise<CreatedWahaGroup> {
-    const payload = record(await request(`/api/${namePath(session)}/groups`, { method: 'POST', body: JSON.stringify({ name, participants: participants.map(id => ({ id: normalizeWahaChatId(id) })) }) }));
-    const id = typeof payload?.id === 'string' ? payload.id : typeof payload?.gid === 'string' ? payload.gid : '';
+    const raw = await request(`/api/${namePath(session)}/groups`, { method: 'POST', body: JSON.stringify({ name, participants: participants.map(id => ({ id: normalizeWahaChatId(id) })) }) });
+    const payload = record(raw); const group = record(payload?.group);
+    const id = typeof payload?.id === 'string' ? payload.id : typeof payload?.JID === 'string' ? payload.JID : typeof payload?.gid === 'string' ? payload.gid : typeof group?.id === 'string' ? group.id : typeof group?.JID === 'string' ? group.JID : '';
     if (!id) throw new WahaApiError('invalid_response');
     return { id };
   },
   async getGroupInviteLink(session: string, groupId: string): Promise<string> {
-    const payload = record(await request(`/api/${namePath(session)}/groups/${encodeURIComponent(groupId)}/invite-code`));
-    const link = typeof payload?.inviteUrl === 'string' ? payload.inviteUrl : typeof payload?.inviteLink === 'string' ? payload.inviteLink : typeof payload?.code === 'string' ? `https://chat.whatsapp.com/${payload.code}` : '';
+    const raw = await request(`/api/${namePath(session)}/groups/${encodeURIComponent(groupId)}/invite-code`); const payload = record(raw);
+    const code = typeof raw === 'string' ? raw : typeof payload?.code === 'string' ? payload.code : typeof payload?.inviteCode === 'string' ? payload.inviteCode : '';
+    const link = typeof payload?.inviteUrl === 'string' ? payload.inviteUrl : typeof payload?.inviteLink === 'string' ? payload.inviteLink : typeof payload?.invite === 'string' ? payload.invite : code.startsWith('http') ? code : code ? `https://chat.whatsapp.com/${code}` : '';
     if (!link) throw new WahaApiError('invalid_response');
     return link;
   },

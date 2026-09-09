@@ -185,6 +185,8 @@ export interface ConversationMessage {
   sourceId?: string | null;
   error?: string | null;
   senderName: string | null;
+  senderId?: number | null;
+  senderPhoneNumber?: string | null;
   senderEmail?: string | null;
   senderAvatarUrl: string | null;
   origin: 'platform' | 'mobile' | null;

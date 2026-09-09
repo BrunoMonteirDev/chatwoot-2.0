@@ -58,6 +58,11 @@ describe('toChatMessages reactions', () => {
     expect(messages.map(message => message.senderName)).not.toContain('Equipe Marketing');
   });
 
+  it('prioriza o Contact sender atual em grupo e mantém o conteúdo original', () => {
+    const [message] = toChatMessages([baseMessage({ senderId: 91, senderName: 'Ricardo editado', senderPhoneNumber: '+5544988687221', senderAvatarUrl: 'https://example.test/avatar.jpg', content: 'Mensagem sem prefixo', contentAttributes: { whatsapp_remote_jid: '120363@g.us', whatsapp_participant_jid: '123@lid', whatsapp_participant_name: 'Nome antigo' } })]);
+    expect(message).toMatchObject({ senderName: 'Ricardo editado', senderPhone: '+5544988687221', senderIdentity: 'contact:91', senderAvatarUrl: 'https://example.test/avatar.jpg', text: 'Mensagem sem prefixo' });
+  });
+
   it('expõe o marcador normalizado de mensagem encaminhada', () => {
     expect(toChatMessages([baseMessage({ contentAttributes: { whatsapp_is_forwarded: true } })])[0].isForwarded).toBe(true);
     expect(toChatMessages([baseMessage({ contentAttributes: {} })])[0].isForwarded).toBe(false);

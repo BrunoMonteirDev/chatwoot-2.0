@@ -197,7 +197,7 @@ export interface ChatwootMessageDto {
   created_at: number;
   updated_at?: number | null;
   content_attributes?: Record<string, unknown> | null;
-  sender?: { name?: string; available_name?: string; email?: string | null; thumbnail?: string | null } | null;
+  sender?: { id?: number; name?: string; available_name?: string; email?: string | null; phone_number?: string | null; thumbnail?: string | null; type?: string } | null;
   attachments?: ChatwootAttachmentDto[] | null;
   echo_id?: string;
   source_id?: string | null;

@@ -76,6 +76,12 @@ describe('WAHA session transport', () => {
     expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({ name: 'Equipe', participants: [{ id: '5511999999999@c.us' }] });
   });
 
+  it('aceita a resposta GOWS real de criação e invite-code sem objeto', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ JID: '2@g.us', Name: 'Equipe' }))).mockResolvedValueOnce(new Response(JSON.stringify('invite-code'))));
+    await expect(wahaTransport.createGroup('empresa', 'Equipe')).resolves.toEqual({ id: '2@g.us' });
+    await expect(wahaTransport.getGroupInviteLink('empresa', '2@g.us')).resolves.toBe('https://chat.whatsapp.com/invite-code');
+  });
+
   it('normaliza o contrato GOWS atual com campos em maiúsculas', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ JID: '1@g.us', Name: 'Equipe', Topic: 'Descrição', Participants: [{ JID: '5511999999999@c.us', PhoneNumber: '5511999999999', DisplayName: 'Ana', IsAdmin: true }] }))));
     await expect(wahaTransport.getGroupMetadata('empresa', '1@g.us')).resolves.toMatchObject({ id: '1@g.us', subject: 'Equipe', description: 'Descrição', participants: [{ jid: '5511999999999@c.us', name: 'Ana', phoneNumber: '5511999999999', admin: 'admin' }] });
