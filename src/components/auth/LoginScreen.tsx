@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react';
 import { LoaderCircle } from 'lucide-react';
 import { errorMessageForUser } from '../../integrations/chatwoot/errors';
 import { useAuth } from '../../features/auth/AuthContext';
+import type { ChatwootLoginSessionDto } from '../../integrations/chatwoot/types';
 
 export const LoginScreen = () => {
   const { login, verifyMfa } = useAuth();
@@ -11,13 +12,19 @@ export const LoginScreen = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [mfaToken, setMfaToken] = useState<string | null>(null);
   const [mfaCode, setMfaCode] = useState('');
-  const attemptLogin = async () => {
+  const [limitedSessions, setLimitedSessions] = useState<ChatwootLoginSessionDto[] | null>(null);
+  const attemptLogin = async (revokeSessionId?: number | 'all') => {
     if (isSubmitting) return;
     setError(null);
     setMfaToken(null);
     setIsSubmitting(true);
     try {
-      const result = await login({ email, password });
+      const result = await login({ email, password }, revokeSessionId);
+      if (result && 'sessions_limit_reached' in result) {
+        setLimitedSessions(result.sessions);
+        return;
+      }
+      setLimitedSessions(null);
       setMfaToken(result?.mfa_token ?? null);
     } catch (cause) {
       setError(errorMessageForUser(cause));
@@ -52,7 +59,21 @@ export const LoginScreen = () => {
           <img src="/icons/Captura%20de%20tela%20de%202026-08-28%2013-59-03.svg" alt="Kopla" className="h-14 w-14 rounded-xl object-cover" />
           <div><h1 className="text-xl font-semibold">Kopla Chat</h1><p className="text-sm text-slate-400">Entre com sua conta Kopla</p></div>
         </div>
-        {!mfaToken ? <form onSubmit={onSubmit} className="space-y-4">
+        {limitedSessions ? <div className="space-y-4">
+          <p className="rounded-lg bg-amber-500/15 px-3 py-2 text-sm text-amber-100">O limite de sessões foi atingido. Encerre uma sessão para continuar.</p>
+          <div className="max-h-64 space-y-2 overflow-y-auto">
+            {limitedSessions.map((session) => <button key={session.id} type="button" disabled={isSubmitting} onClick={() => void attemptLogin(session.id)}
+              className="w-full rounded-lg border border-white/10 bg-[#202c33] px-3 py-2 text-left text-sm hover:border-[#25d366] disabled:opacity-60">
+              <span className="block font-medium text-white">{session.device_name || session.browser_name || 'Sessão ativa'}</span>
+              <span className="block text-xs text-slate-400">{[session.browser_name, session.browser_version, session.platform_name].filter(Boolean).join(' · ') || 'Dispositivo não identificado'}</span>
+            </button>)}
+          </div>
+          {error && <p role="alert" className="rounded-lg bg-red-500/15 px-3 py-2 text-sm text-red-200">{error}</p>}
+          <button type="button" disabled={isSubmitting} onClick={() => void attemptLogin('all')} className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#25d366] px-4 py-2.5 font-medium text-[#0b141a] disabled:opacity-60">
+            {isSubmitting && <LoaderCircle className="animate-spin" size={18} />}Encerrar todas e entrar
+          </button>
+          <button type="button" disabled={isSubmitting} onClick={() => { setLimitedSessions(null); setPassword(''); setError(null); }} className="w-full text-sm text-slate-400 hover:text-white">Usar outra conta</button>
+        </div> : !mfaToken ? <form onSubmit={onSubmit} className="space-y-4">
           <label className="block text-sm text-slate-300">E-mail
             <input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)}
               className="mt-1.5 w-full rounded-lg border border-white/10 bg-[#202c33] px-3 py-2.5 text-white outline-none focus:border-[#25d366]" />

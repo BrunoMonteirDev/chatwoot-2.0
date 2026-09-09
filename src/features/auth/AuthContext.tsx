@@ -4,7 +4,7 @@ import { authSession } from '../../integrations/chatwoot/authSession';
 import { ChatwootApiError } from '../../integrations/chatwoot/errors';
 import { authService } from '../../integrations/chatwoot/auth';
 import { normalizeProfile } from '../../integrations/chatwoot/normalizers';
-import type { AuthCredentials, MfaRequiredResponse, MfaVerificationCredentials } from '../../integrations/chatwoot/types';
+import type { AuthCredentials, MfaRequiredResponse, MfaVerificationCredentials, SessionsLimitReachedResponse } from '../../integrations/chatwoot/types';
 import { messageHistoryCache } from '../messages/MessageHistoryCache';
 import { groupMetadataClient } from '../groups/metadata';
 import { clearContactDetailsCache } from '../contacts/useContactDetails';
@@ -20,7 +20,7 @@ interface AuthContextValue {
   currentAccount: CurrentAccount | null;
   selectAccount(accountId: number): Promise<void>;
   error: string | null;
-  login(credentials: AuthCredentials, revokeSessionId?: number | 'all'): Promise<MfaRequiredResponse | null>;
+  login(credentials: AuthCredentials, revokeSessionId?: number | 'all'): Promise<MfaRequiredResponse | SessionsLimitReachedResponse | null>;
   verifyMfa(credentials: MfaVerificationCredentials): Promise<void>;
   logout(): Promise<void>;
   retryBootstrap(): Promise<void>;
@@ -80,13 +80,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => { void bootstrap(true); }, [bootstrap]);
 
-  const login = useCallback(async (credentials: AuthCredentials): Promise<MfaRequiredResponse | null> => {
+  const login = useCallback(async (credentials: AuthCredentials, revokeSessionId?: number | 'all'): Promise<MfaRequiredResponse | SessionsLimitReachedResponse | null> => {
     setError(null);
     try {
       // A stale token must not be sent with a new sign-in attempt.
       authSession.clear();
-      const result = await authService.login(credentials);
+      const result = await authService.login(credentials, revokeSessionId);
       if ('mfa_required' in result) {
+        setStatus('unauthenticated');
+        return result;
+      }
+      if ('sessions_limit_reached' in result) {
         setStatus('unauthenticated');
         return result;
       }

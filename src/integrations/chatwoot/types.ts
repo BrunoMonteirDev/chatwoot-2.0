@@ -52,6 +52,21 @@ export interface MfaRequiredResponse {
   mfa_token: string;
 }
 
+export interface ChatwootLoginSessionDto {
+  id: number;
+  browser_name?: string | null;
+  browser_version?: string | null;
+  device_name?: string | null;
+  platform_name?: string | null;
+  platform_version?: string | null;
+  last_activity_at?: string | null;
+}
+
+export interface SessionsLimitReachedResponse {
+  sessions_limit_reached: true;
+  sessions: ChatwootLoginSessionDto[];
+}
+
 export interface MfaVerificationCredentials {
   mfaToken: string;
   otpCode?: string;
