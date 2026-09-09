@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { authSession } from '../chatwoot/authSession';
-import { canSendWhatsAppMessage, clearWhatsAppCapabilityCache, whatsappConnectionService, whatsappSendCapabilityService } from './connection';
+import { canSendWhatsAppMessage, clearWhatsAppCapabilityCache, persistedWhatsAppConnection, whatsappConnectionService, whatsappSendCapabilityService } from './connection';
 import { chatwootApiClient } from '../chatwoot/client';
 
 describe('operational WhatsApp connection', () => {
@@ -24,6 +24,12 @@ describe('operational WhatsApp connection', () => {
     expect(canSendWhatsAppMessage(offline, false)).toBe(false);
     expect(canSendWhatsAppMessage(offline, true)).toBe(true);
     expect(canSendWhatsAppMessage({ applicable: false, sendAllowed: true }, false)).toBe(true);
+  });
+
+  it('usa o status persistido da inbox ao abrir grupo sem consultar WAHA', () => {
+    const inbox = { id: 7, name: 'WAHA', avatarUrl: null, channelType: 'Channel::Api', channelId: null, webhookUrl: null, inboxIdentifier: null, additionalAttributes: { whatsapp_transports: ['waha'], waha_session_name: 'main', waha_connection_status: 'connected' } };
+    expect(persistedWhatsAppConnection(inbox, 'group')).toMatchObject({ transport: 'waha', status: 'connected', sendAllowed: true });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('deduplica e reutiliza capability dentro do TTL', async () => {

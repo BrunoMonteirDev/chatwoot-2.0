@@ -42,7 +42,7 @@ import { getChatContextMenuItems } from './utils/contextMenuActions';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import { useAuth } from './features/auth/AuthContext';
 import { useInboxes } from './features/inboxes/useInboxes';
-import { ChatwootApiError, errorMessageForUser } from './integrations/chatwoot/errors';
+import { errorMessageForUser } from './integrations/chatwoot/errors';
 import { useConversations } from './features/conversations/useConversations';
 import { copyConversationLink } from './features/conversations/copyConversationLink';
 import { toChatListItem } from './features/conversations/toChatListItem';
@@ -51,6 +51,7 @@ import { contactForConversation, conversationVisualKey, isCurrentHeaderResponse,
 import { cacheRealtimeMessage, useConversationMessages } from './features/messages/useConversationMessages';
 import { composerNotice } from './features/messages/composerCapability';
 import { messageHistoryCache, messageHistoryPrefetcher } from './features/messages/MessageHistoryCache';
+import { conversationOpeningMetrics } from './features/messages/conversationOpeningMetrics';
 import { showSystemMessagesFrom, uiSettingsWithSystemMessageVisibility, visibleConversationMessages } from './features/messages/systemMessageVisibility';
 import { sendMessageShortcutFrom, uiSettingsWithSendMessageShortcut } from './features/messages/sendMessageShortcut';
 import { toChatMessages } from './features/messages/toChatMessages';
@@ -63,7 +64,7 @@ import { useContacts } from './features/contacts/useContacts';
 import { toContactListItem } from './features/contacts/toContactListItem';
 import { conversationService, type ConversationServerFilters } from './integrations/chatwoot/conversations';
 import { messageService } from './integrations/chatwoot/messages';
-import { usesLegacyWhatsAppConnection, whatsappConnectionService, whatsappSendCapabilityService, type OperationalWhatsAppConnection, type WhatsAppSendCapability } from './integrations/whatsapp/connection';
+import { persistedWhatsAppConnection, usesLegacyWhatsAppConnection, whatsappSendCapabilityService, type OperationalWhatsAppConnection, type WhatsAppSendCapability } from './integrations/whatsapp/connection';
 import { authService } from './integrations/chatwoot/auth';
 import { browserNotifications } from './features/notifications/browserNotifications';
 import type { ConversationMessage, ConversationSummary } from './domain/currentUser';
@@ -83,6 +84,8 @@ export default function App() {
   const { inboxes, status: inboxesStatus, error: inboxesError, retry: retryInboxes, upsertRealtimeInbox } = useInboxes(currentAccount?.id ?? null);
   const [whatsappConnection, setWhatsappConnection] = useState<OperationalWhatsAppConnection | null>(null);
   const [whatsappSendCapability, setWhatsappSendCapability] = useState<WhatsAppSendCapability | null>(null);
+  const [contactPanelState, setContactPanelState] = useState<{ open: boolean; tab: 'contact' | 'attributes' | 'content' }>({ open: false, tab: 'contact' });
+  const [managementCatalogInboxId, setManagementCatalogInboxId] = useState<number | null>(null);
   const contactDirectory = useContacts(currentAccount?.id ?? null);
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeChatId, setActiveChatId] = useState<string>(() => initialRoute.conversationId || '');
@@ -408,9 +411,12 @@ export default function App() {
   }, [applyRoute, currentAccount?.id, routeAccountId]);
 
   const openConversation = useCallback((conversationId: string) => {
+    const numericId = Number(conversationId);
+    if (currentAccount && Number.isInteger(numericId)) conversationOpeningMetrics.click(currentAccount.id, numericId);
     navigate({ tab: 'chats', conversationId, ...(selectedInbox !== 'todas' ? { inbox: selectedInbox } : {}) });
-  }, [navigate, selectedInbox]);
+  }, [currentAccount, navigate, selectedInbox]);
   const openConversationDirectly = useCallback((conversationId: number) => {
+    if (currentAccount) conversationOpeningMetrics.click(currentAccount.id, conversationId);
     const accountId = String(currentAccount?.id || routeAccountId);
     const target = urlForAppRoute({ accountId, tab: 'chats', conversationId: String(conversationId) });
     if (`${window.location.pathname}${window.location.search}` !== target) window.history.pushState({}, '', target);
@@ -473,62 +479,36 @@ export default function App() {
     if (conversations.some((conversation) => conversation.id === directlyLoadedConversation.id)) setDirectlyLoadedConversation(null);
   }, [activeChatId, conversations, directlyLoadedConversation]);
   useEffect(() => {
-    const inboxId = selectedConversation?.inboxId;
-    const channelType = inboxes.find((inbox) => inbox.id === inboxId)?.channelType;
-    if (!currentAccount || !inboxId || !usesLegacyWhatsAppConnection(channelType)) { setWhatsappConnection(null); return; }
-    let active = true;
-    const refresh = () => whatsappConnectionService.get(currentAccount.id, inboxId, selectedConversation.isGroup ? 'group' : 'private')
-      .then((status) => { if (active) setWhatsappConnection(status); })
-      .catch(() => { if (active) setWhatsappConnection(null); });
-    void refresh();
-    // Inbox updates arrive over ActionCable. This is only a slow recovery
-    // check for proxies/providers that drop a callback while reconnecting.
-    const interval = window.setInterval(() => void refresh(), 120_000);
-    return () => { active = false; window.clearInterval(interval); };
-  }, [currentAccount?.id, inboxes, selectedConversation?.id, selectedConversation?.inboxId, selectedConversation?.isGroup]);
-  useEffect(() => {
-    const inboxId = selectedConversation?.inboxId;
-    const inbox = inboxes.find((item) => item.id === inboxId);
-    if (!currentAccount || !selectedConversation || !inboxId || inbox?.channelType !== 'Channel::Whatsapp') { setWhatsappSendCapability(null); return; }
-    let active = true;
-    const refresh = () => whatsappSendCapabilityService.get(currentAccount.id, selectedConversation.id)
-      .then((capability) => {
-        if (!active) return;
-        console.info('[KOPLA_COMPOSER_CAPABILITY]', {
-          conversationId: selectedConversation.id,
-          inboxId,
-          applicable: capability.applicable,
-          canSendMessage: capability.can_send_message,
-          canSendFreeform: capability.can_send_freeform,
-          requiresTemplate: capability.requires_template,
-          reason: capability.send_block_reason,
-          connectionState: capability.connection_state,
-        });
-        setWhatsappSendCapability(capability);
-      })
-      .catch((error: unknown) => {
-        if (!active) return;
-        console.warn('[KOPLA_SEND_CAPABILITY_ERROR]', {
-          accountId: currentAccount.id,
-          conversationId: selectedConversation.id,
-          status: error instanceof ChatwootApiError ? error.status : undefined,
-          error: error instanceof Error ? error.name : 'unknown',
-        });
-        setWhatsappSendCapability(null);
-      });
-    void refresh();
-    const interval = window.setInterval(() => void refresh(), 60_000);
-    return () => { active = false; window.clearInterval(interval); };
-  }, [currentAccount?.id, inboxes, selectedConversation?.id, selectedConversation?.inboxId]);
-  useEffect(() => {
     const openManager = () => { if (selectedConversation?.inboxId) navigateToSettingsInbox(selectedConversation.inboxId); };
     window.addEventListener('open-whatsapp-manager', openManager);
     return () => window.removeEventListener('open-whatsapp-manager', openManager);
   }, [navigateToSettingsInbox, selectedConversation?.inboxId]);
-  const contactDetails = useContactDetails(currentAccount?.id ?? null, selectedConversation?.contactId ?? null, 500);
+  const contactDetails = useContactDetails(
+    currentAccount?.id ?? null,
+    selectedConversation?.contactId ?? null,
+    contactPanelState.open,
+    contactPanelState.open && contactPanelState.tab === 'contact' && !selectedConversation?.isGroup,
+  );
   const selectedContact = contactForConversation(contactDetails.contact, selectedConversation);
-  const messageHistory = useConversationMessages(currentAccount?.id ?? null, selectedConversationId, selectedConversation?.inboxId ?? null, selectedContact?.phoneNumber,
-    inboxes.find((inbox) => inbox.id === selectedConversation?.inboxId)?.channelType);
+  const messageHistory = useConversationMessages(currentAccount?.id ?? null, selectedConversationId, selectedConversation?.inboxId ?? null, selectedContact?.phoneNumber);
+  useEffect(() => {
+    const inboxId = selectedConversation?.inboxId;
+    const inbox = inboxes.find((item) => item.id === inboxId);
+    if (messageHistory.status !== 'ready' || !selectedConversation || !inbox || !usesLegacyWhatsAppConnection(inbox.channelType)) { setWhatsappConnection(null); return; }
+    setWhatsappConnection(persistedWhatsAppConnection(inbox, selectedConversation.isGroup ? 'group' : 'private'));
+  }, [inboxes, messageHistory.status, selectedConversation?.id, selectedConversation?.inboxId, selectedConversation?.isGroup]);
+  useEffect(() => {
+    const inboxId = selectedConversation?.inboxId;
+    const inbox = inboxes.find((item) => item.id === inboxId);
+    if (messageHistory.status !== 'ready' || !currentAccount || !selectedConversation || !inboxId || inbox?.channelType !== 'Channel::Whatsapp') { setWhatsappSendCapability(null); return; }
+    let active = true;
+    const refresh = () => whatsappSendCapabilityService.get(currentAccount.id, selectedConversation.id)
+      .then((capability) => { if (active) setWhatsappSendCapability(capability); })
+      .catch(() => { if (active) setWhatsappSendCapability(null); });
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), 60_000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [currentAccount?.id, inboxes, messageHistory.status, selectedConversation?.id, selectedConversation?.inboxId]);
   useEffect(() => {
     if (currentAccount && selectedConversation && messageHistory.status === 'ready') messageHistoryCache.setConversation(currentAccount.id, selectedConversation);
   }, [currentAccount, messageHistory.status, selectedConversation]);
@@ -547,7 +527,7 @@ export default function App() {
   const headerScopeKey = conversationVisualKey(currentAccount?.id ?? null, selectedConversation, expectedGroupJid);
   const headerScopeRef = useRef(headerScopeKey);
   headerScopeRef.current = headerScopeKey;
-  const conversationManagement = useConversationManagement(currentAccount?.id ?? null, selectedConversation?.inboxId ?? null);
+  const conversationManagement = useConversationManagement(currentAccount?.id ?? null, selectedConversation?.inboxId ?? null, managementCatalogInboxId === selectedConversation?.inboxId);
   const updateSelectedContact = async (update: Parameters<typeof contactDetails.update>[0]) => {
     const updated = await contactDetails.update(update);
     if (updated && selectedConversationId) applyConversationUpdate(selectedConversationId, { contactName: updated.name, contactAvatarUrl: updated.avatarUrl, contactId: updated.id });
@@ -661,10 +641,10 @@ export default function App() {
   }, [activeChatId, conversationsStatus, currentAccount, selectedConversation]);
 
   useEffect(() => {
-    if (!selectedConversationId || !selectedConversation || openedReadConversationRef.current === selectedConversationId) return;
+    if (messageHistory.status !== 'ready' || !selectedConversationId || !selectedConversation || openedReadConversationRef.current === selectedConversationId) return;
     openedReadConversationRef.current = selectedConversationId;
     markSelectedConversationRead();
-  }, [markSelectedConversationRead, selectedConversation, selectedConversationId]);
+  }, [markSelectedConversationRead, messageHistory.status, selectedConversation, selectedConversationId]);
 
   const runConversationAction = async <T,>(operation: Promise<T | null>, onSuccess: (result: T) => void) => {
     try {
@@ -875,12 +855,6 @@ export default function App() {
       messageHistoryCache.set(currentAccount.id, conversationId, page, { preserveExisting: Boolean(cached), conversation: conversations.find(item => item.id === conversationId) });
     });
   }, [conversations, currentAccount]);
-
-  // Warm the next visible conversations while idle. Pointer intent can enqueue
-  // any other row; the queue adapts concurrency to observed server latency.
-  useEffect(() => {
-    filteredAndSortedChats.slice(0, 8).forEach(prefetchConversation);
-  }, [filteredAndSortedChats, prefetchConversation]);
 
   // Handle sending message
   const handleSendMessage = (chatId: string, text: string, attachments?: File[], isPrivate?: boolean, replyTo?: import('./types').ReplyTo | null) => {
@@ -1438,6 +1412,7 @@ export default function App() {
                   managementCatalogError={conversationManagement.catalogError}
                   managementPendingAction={conversationManagement.pendingAction}
                   onRetryManagementCatalogs={() => void conversationManagement.retryCatalogs()}
+                  onManagementCatalogsNeeded={() => setManagementCatalogInboxId(selectedConversation?.inboxId ?? null)}
                   onSetConversationStatus={(status) => {
                     if (!selectedConversationId) return;
                     void runConversationAction(conversationManagement.setStatus(selectedConversationId, status), (update) => applyConversationUpdate(selectedConversationId, update));
@@ -1493,6 +1468,7 @@ export default function App() {
                   isSidebarCollapsed={isSidebarCollapsed}
                   onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
                   onMobileBack={() => navigateToTab('chats')}
+                  onContactPanelStateChange={(open, tab) => setContactPanelState({ open, tab })}
                 /></ConversationErrorBoundary> : (
                   <div className={`h-full flex items-center justify-center text-center p-8 ${isDarkMode ? 'bg-[#0b141a] text-[#8696a0]' : 'bg-[#f0f2f5] text-[#667781]'}`}>
                     <div>

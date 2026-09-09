@@ -7,6 +7,7 @@ import { fallbackRemoteJid, nativeMetaReactionService, whatsappReactionService, 
 import { whatsappMessageMutationService } from '../../integrations/whatsapp/messageMutations';
 import { mergeMessage, messageHistoryCache } from './MessageHistoryCache';
 import type { GroupParticipant } from '../groups/metadata';
+import { conversationOpeningMetrics } from './conversationOpeningMetrics';
 
 export const mergeRealtimeMessage = mergeMessage;
 
@@ -61,6 +62,8 @@ export const useConversationMessages = (accountId: number | null, conversationId
   const inFlightEchoIds = useRef(new Set<string>());
   const pendingMessageFiles = useRef(new PendingMessageFiles());
   const reactionInFlight = useRef(new Set<string>());
+  const hasRenderableHistoryRef = useRef(false);
+  const renderedConversationKeyRef = useRef<string | null>(null);
 
   const load = useCallback(async (before?: number, prepend = false, silent = false) => {
     if (!accountId || !conversationId) return;
@@ -75,12 +78,15 @@ export const useConversationMessages = (accountId: number | null, conversationId
       // A completed response always warms its own keyed cache, even if the user
       // has already moved elsewhere. Only the active hook state is guarded.
       if (controller.signal.aborted || requestId !== requestIdRef.current) return;
+      if (!hasRenderableHistoryRef.current) conversationOpeningMetrics.cacheSource(accountId, conversationId, 'network');
+      hasRenderableHistoryRef.current = true;
+      renderedConversationKeyRef.current = `${accountId}:${conversationId}`;
       setMessages(cached.messages);
       setHasOlderMessages(cached.hasOlderMessages);
       setStatus('ready');
     } catch (cause) {
       if (controller.signal.aborted || requestId !== requestIdRef.current) return;
-      if (!silent) {
+      if (!silent || !hasRenderableHistoryRef.current) {
         setError(errorMessageForUser(cause));
         setStatus('error');
       }
@@ -91,31 +97,41 @@ export const useConversationMessages = (accountId: number | null, conversationId
 
   useLayoutEffect(() => {
     pendingMessageFiles.current.clear();
+    hasRenderableHistoryRef.current = false;
     setHasOlderMessages(false);
     if (!accountId || !conversationId) { setStatus('idle'); return; }
     let cancelled = false;
     const cached = messageHistoryCache.get(accountId, conversationId);
     if (cached) {
+      hasRenderableHistoryRef.current = true;
+      renderedConversationKeyRef.current = `${accountId}:${conversationId}`;
+      conversationOpeningMetrics.cacheSource(accountId, conversationId, 'ram');
       setMessages(cached.messages);
       setHasOlderMessages(cached.hasOlderMessages);
       setStatus('ready');
-      if (!cached.isFresh) void load(undefined, false, true);
+      void load(undefined, false, true);
     } else {
       setMessages([]);
       setStatus('loading');
+      // IndexedDB hydration and the only timeline request start together. A
+      // cold IDB miss therefore never postpones the first /messages page.
+      void load(undefined, false, true);
       void messageHistoryCache.hydrate(accountId, conversationId).then((persisted) => {
-        if (cancelled) return;
-        if (persisted) {
-          setMessages(persisted.messages);
-          setHasOlderMessages(persisted.hasOlderMessages);
-          setStatus('ready');
-          if (persisted.isFresh) return;
-        }
-        void load(undefined, false, Boolean(persisted));
+        if (cancelled || !persisted || hasRenderableHistoryRef.current) return;
+        hasRenderableHistoryRef.current = true;
+        renderedConversationKeyRef.current = `${accountId}:${conversationId}`;
+        conversationOpeningMetrics.cacheSource(accountId, conversationId, 'indexeddb');
+        setMessages(persisted.messages);
+        setHasOlderMessages(persisted.hasOlderMessages);
+        setStatus('ready');
       });
     }
     return () => { cancelled = true; abortRef.current?.abort(); };
   }, [accountId, conversationId, load]);
+
+  useLayoutEffect(() => {
+    if (status === 'ready' && renderedConversationKeyRef.current === `${accountId}:${conversationId}` && accountId && conversationId) conversationOpeningMetrics.messagesRendered(accountId, conversationId);
+  }, [accountId, conversationId, messages, status]);
 
   const loadOlder = useCallback(() => {
     const first = messages[0];
@@ -266,6 +282,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
   const upsertRealtimeMessage = useCallback((message: ConversationMessage) => {
     if (message.conversationId !== conversationId) return;
     cacheRealtimeMessage(accountId, message);
+    renderedConversationKeyRef.current = `${accountId}:${conversationId}`;
     setMessages(current => mergeRealtimeMessage(current, message));
     setStatus('ready');
   }, [accountId, conversationId]);
@@ -295,6 +312,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
     if (accountId && conversationId) messageHistoryCache.setScroll(accountId, conversationId, scrollTop);
   }, [accountId, conversationId]);
   const cachedScrollTop = accountId && conversationId ? messageHistoryCache.get(accountId, conversationId)?.scrollTop || 0 : 0;
+  const activeStatus = renderedConversationKeyRef.current === `${accountId}:${conversationId}` ? status : conversationId ? 'loading' : 'idle';
 
-  return { messages, status, error, hasOlderMessages, isLoadingOlder, cachedScrollTop, saveScroll, retry: () => load(), loadOlder, send, retrySend, remove, react, edit: (messageId: number, content: string) => mutate('edit', messageId, content), revoke: (messageId: number) => mutate('revoke', messageId), upsertRealtimeMessage, enrichParticipants, refreshLatest };
+  return { messages, status: activeStatus, error, hasOlderMessages, isLoadingOlder, cachedScrollTop, saveScroll, retry: () => load(), loadOlder, send, retrySend, remove, react, edit: (messageId: number, content: string) => mutate('edit', messageId, content), revoke: (messageId: number) => mutate('revoke', messageId), upsertRealtimeMessage, enrichParticipants, refreshLatest };
 };

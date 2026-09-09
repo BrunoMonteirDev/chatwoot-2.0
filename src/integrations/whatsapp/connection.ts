@@ -1,5 +1,7 @@
 import { authenticatedBridgeHeaders } from '../bridge/auth';
 import { chatwootApiClient } from '../chatwoot/client';
+import type { Inbox } from '../../domain/currentUser';
+import { transportStatusesForInbox, whatsappConfigurationForInbox } from './provider';
 
 export type OperationalWhatsAppConnection = {
   applicable: boolean;
@@ -31,6 +33,17 @@ export const canSendCapabilityMessage = (capability: WhatsAppSendCapability | nu
 // Official Channel::Whatsapp inboxes, including Hybrid and Meta-only inboxes,
 // are governed by their Rails-provided operational state and server routing.
 export const usesLegacyWhatsAppConnection = (channelType: string | null | undefined) => channelType === 'Channel::Api';
+
+export const persistedWhatsAppConnection = (inbox: Inbox, chatType: 'private' | 'group'): OperationalWhatsAppConnection => {
+  const configuration = whatsappConfigurationForInbox(inbox);
+  if (!configuration) return { applicable: false, sendAllowed: true };
+  const transport = chatType === 'private'
+    ? (configuration.transports.includes('meta_cloud') ? 'meta_cloud' : configuration.transports[0])
+    : configuration.transports.find(item => item !== 'meta_cloud');
+  if (!transport) return { applicable: true, transport: null, status: 'disconnected', sendAllowed: false };
+  const status = transportStatusesForInbox(inbox)[transport] || 'pending';
+  return { applicable: true, transport, status, sendAllowed: status === 'connected' };
+};
 
 const bridgeUrl = () => (import.meta.env.VITE_BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
 

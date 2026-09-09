@@ -11,15 +11,17 @@ export const useContactConversations = (accountId: number | null, contactId: num
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const requestRef = useRef(0);
+  const loadedTargetRef = useRef<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     abortRef.current?.abort();
     if (!enabled || !accountId || !contactId) {
-      setConversations([]);
       setStatus('idle');
       setError(null);
       return;
     }
+    const target = `${accountId}:${contactId}`;
+    if (!force && loadedTargetRef.current === target) { setStatus('ready'); return; }
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -29,6 +31,7 @@ export const useContactConversations = (accountId: number | null, contactId: num
     try {
       const result = await conversationService.listByContact(accountId, contactId, controller.signal);
       if (controller.signal.aborted || request !== requestRef.current) return;
+      loadedTargetRef.current = target;
       setConversations(result);
       setStatus('ready');
     } catch (cause) {
@@ -44,5 +47,5 @@ export const useContactConversations = (accountId: number | null, contactId: num
     return () => abortRef.current?.abort();
   }, [load]);
 
-  return { conversations, status, error, retry: load };
+  return { conversations, status, error, retry: () => load(true) };
 };

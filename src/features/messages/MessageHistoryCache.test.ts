@@ -150,6 +150,21 @@ describe('MessageHistoryCache', () => {
     expect(await reopened.hydrate(1, 1)).toMatchObject({ messages: [{ id: 1 }], isFresh: false });
   });
 
+  it('não deixa uma leitura lenta do IndexedDB sobrescrever a primeira página da rede', async () => {
+    let resolveStored!: (entry: import('./MessageHistoryPersistence').PersistedMessageHistory | null) => void;
+    const persistence = {
+      get: () => new Promise<import('./MessageHistoryPersistence').PersistedMessageHistory | null>(resolve => { resolveStored = resolve; }),
+      put: async () => undefined,
+      clear: async () => undefined,
+    };
+    const cache = new MessageHistoryCache(12, 30_000, () => 100, persistence);
+    const hydration = cache.hydrate(1, 1);
+    cache.set(1, 1, page(message(2)));
+    resolveStored({ key: '1:1', accountId: 1, conversationId: 1, messages: [message(1)], hasOlderMessages: false, updatedAt: 90, scrollTop: 0 });
+    expect((await hydration)?.messages.map(item => item.id)).toEqual([2]);
+    expect(cache.get(1, 1)?.messages.map(item => item.id)).toEqual([2]);
+  });
+
   it('persiste prefetch e atualizações realtime, isoladas por account', async () => {
     const persistence = new MemoryMessageHistoryPersistence();
     const cache = new MessageHistoryCache(12, 30_000, () => 100, persistence);

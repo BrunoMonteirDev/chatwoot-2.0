@@ -3,7 +3,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ContactAttributesPanel } from './ContactAttributesPanel';
-import { groupMetadataClient } from '../features/groups/metadata';
+import { groupMetadataClient, type GroupMetadata } from '../features/groups/metadata';
 import type { Chat } from '../types';
 import type { WhatsAppTransport } from '../integrations/whatsapp/provider';
 import { contactService } from '../integrations/chatwoot/contacts';
@@ -12,9 +12,9 @@ import { groupCreationClient } from '../features/groups/creation';
 const get = vi.spyOn(groupMetadataClient, 'get');
 let container: HTMLDivElement;
 let root: Root;
-const render = async (isGroup: boolean, transport: WhatsAppTransport = 'waha', conversationId = 91) => {
+const render = async (isGroup: boolean, transport: WhatsAppTransport = 'waha', conversationId = 91, initialGroupMetadata: GroupMetadata | null = null) => {
   const chat: Chat = { id: String(conversationId), name: 'Contact', avatar: '', lastMessage: '', time: '', messages: [], isGroup };
-  await act(async () => { root.render(<ContactAttributesPanel chat={chat} accountId={1} inboxId={5} conversationId={conversationId} groupTransport={transport} isDarkMode onClose={() => {}} />); });
+  await act(async () => { root.render(<ContactAttributesPanel chat={chat} accountId={1} inboxId={5} conversationId={conversationId} groupTransport={transport} initialGroupMetadata={initialGroupMetadata} isDarkMode onClose={() => {}} />); });
 };
 
 describe('group metadata requests', () => {
@@ -29,23 +29,23 @@ describe('group metadata requests', () => {
     await render(false, transport); await render(false, transport);
     expect(get).not.toHaveBeenCalled();
   });
-  it('loads a real group normally and clears group data when switching to private', async () => {
-    await render(true);
-    expect(get).toHaveBeenCalledTimes(1);
-    expect(get.mock.calls[0].slice(0, 4)).toEqual([1, 5, 91, 'waha']);
+  it('uses only persisted group data and clears it when switching to private', async () => {
+    const persisted = { id: '123@g.us', subject: 'Real group', transport: 'waha' as const, participants: [], canEditDescription: true };
+    await render(true, 'waha', 91, persisted);
+    expect(get).not.toHaveBeenCalled();
     expect(container.textContent).toContain('Real group');
     await render(false, 'meta_cloud', 92);
-    expect(get).toHaveBeenCalledTimes(1);
+    expect(get).not.toHaveBeenCalled();
     expect(container.textContent).not.toContain('Real group');
   });
-  it('does not retry failed group metadata on rerender', async () => {
+  it('does not request provider metadata on rerender', async () => {
     get.mockRejectedValue(new Error('Provider unavailable'));
     await render(true); await render(true); await render(true);
-    expect(get).toHaveBeenCalledTimes(1);
+    expect(get).not.toHaveBeenCalled();
   });
   it('renders group identity, description and the canonical participant count from one metadata response', async () => {
-    get.mockResolvedValue({ group: { id: '123@g.us', subject: 'Nome atualizado', avatarUrl: 'https://example.test/group.jpg', description: 'Descrição atualizada', memberCount: 5, transport: 'waha', canEditDescription: true, participants: [{ jid: '1@lid', displayName: 'Maria', avatarUrl: 'https://example.test/maria.jpg', admin: 'superadmin' }] } });
-    await render(true);
+    const persisted = { id: '123@g.us', subject: 'Nome atualizado', avatarUrl: 'https://example.test/group.jpg', description: 'Descrição atualizada', memberCount: 5, transport: 'waha' as const, canEditDescription: true, participants: [{ jid: '1@lid', displayName: 'Maria', avatarUrl: 'https://example.test/maria.jpg', admin: 'superadmin' }] };
+    await render(true, 'waha', 91, persisted);
     expect(container.textContent).toContain('Nome atualizado');
     expect(container.textContent).toContain('Descrição atualizada');
     expect(container.textContent).toContain('5 membros');
@@ -72,9 +72,8 @@ describe('group metadata requests', () => {
   });
   it('abre Adicionar em Convidar, bloqueia membro existente e exige confirmação no direto', async () => {
     vi.useFakeTimers();
-    get.mockResolvedValue({ group: { id: '123@g.us', subject: 'Equipe', transport: 'waha', canEditDescription: true, participants: [{ jid: '5544999999999@c.us', phoneNumber: '+5544999999999', name: 'Ana', contactId: 8 }] } });
     vi.spyOn(groupCreationClient, 'searchContacts').mockResolvedValue({ contacts: [{ id: 8, name: 'Ana', phoneNumber: '+5544999999999', avatarUrl: null }] });
-    await render(true);
+    await render(true, 'waha', 91, { id: '123@g.us', subject: 'Equipe', transport: 'waha', canEditDescription: true, participants: [{ jid: '5544999999999@c.us', phoneNumber: '+5544999999999', name: 'Ana', contactId: 8 }] });
     await act(async () => { Array.from(container.querySelectorAll('button')).find(item => item.textContent?.trim() === 'Adicionar')?.click(); });
     expect(container.textContent).toContain('Enviar convite');
     const search = container.querySelector<HTMLInputElement>('input[placeholder="Nome ou telefone"]')!;

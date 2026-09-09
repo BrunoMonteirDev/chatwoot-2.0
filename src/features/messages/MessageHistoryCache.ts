@@ -119,6 +119,8 @@ export class MessageHistoryCache {
     let pending = this.hydrateInFlight.get(key);
     if (!pending) {
       pending = this.persistence?.get(accountId, conversationId).then((stored) => {
+        const installedWhileReading = this.entries.get(key);
+        if (installedWhileReading) return { ...installedWhileReading, isFresh: this.now() - installedWhileReading.updatedAt < this.ttlMs };
         if (!stored) return null;
         const entry: Entry = { key, messages: stored.messages, hasOlderMessages: stored.hasOlderMessages, updatedAt: stored.updatedAt, scrollTop: stored.scrollTop, conversation: stored.conversation };
         this.install(entry);

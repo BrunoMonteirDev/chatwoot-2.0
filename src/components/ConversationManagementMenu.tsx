@@ -16,6 +16,7 @@ interface Props {
   onSetLabels: (labels: string[]) => void;
   onMarkRead: () => void;
   onMarkUnread: () => void;
+  onOpen?: () => void;
 }
 
 const priorityOptions: { value: ConversationPriority; label: string }[] = [
@@ -25,7 +26,7 @@ const priorityOptions: { value: ConversationPriority; label: string }[] = [
 
 export const ConversationManagementMenu = ({
   conversation, catalogs, catalogStatus, catalogError, pendingAction, onRetryCatalogs,
-  onSetPriority, onAssignAgent, onAssignTeam, onSetLabels, onMarkRead, onMarkUnread,
+  onSetPriority, onAssignAgent, onAssignTeam, onSetLabels, onMarkRead, onMarkUnread, onOpen,
 }: Props) => {
   const [open, setOpen] = useState(false);
   const [labelSearch, setLabelSearch] = useState('');
@@ -41,7 +42,7 @@ export const ConversationManagementMenu = ({
   return (
     <div className="relative">
       <button type="button" title="Gerenciar conversa" aria-label="Gerenciar conversa" disabled={busy}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => setOpen((current) => { const next = !current; if (next) onOpen?.(); return next; })}
         className="w-10 h-10 flex items-center justify-center rounded-full transition-colors disabled:opacity-50 hover:bg-[#2a3942]">
         {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <MoreVertical className="w-5 h-5" />}
       </button>

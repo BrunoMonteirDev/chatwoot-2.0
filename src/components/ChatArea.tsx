@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import {
   ArrowLeft,
   Search,
@@ -77,11 +77,12 @@ import { audioDurationLabel, isAtConversationBottom, preservedScrollTopAfterPrep
 import { APP_VIEWPORT_CHANGE_EVENT } from '../features/mobile/visualViewport';
 import { useContactConversations } from '../features/contacts/useContactConversations';
 import { useConversationAttachments } from '../features/attachments/useConversationAttachments';
-import { groupMetadataClient, persistedGroupMetadata, type GroupMetadata, type GroupParticipant } from '../features/groups/metadata';
+import { persistedGroupMetadata, type GroupMetadata, type GroupParticipant } from '../features/groups/metadata';
 import { indexGroupParticipants, participantColor, participantLabel, participantPhone } from '../features/groups/participant';
 import { mentionReplacements, mentionTargetFor, participantMentionLabel, pruneMentionSelections, type MentionSelection } from '../features/groups/mentions';
-import { isPhoneDefaultContactName, providerProfileClient } from '../features/contacts/providerProfile';
+import { providerProfileClient } from '../features/contacts/providerProfile';
 import { messageBubbleWidthClassName, messageTimelineClassName, messageVisualMediaClassName } from '../features/messages/messageLayout';
+import { conversationOpeningMetrics } from '../features/messages/conversationOpeningMetrics';
 
 const updateParticipantIndex = (index: Record<string, GroupParticipant>, updated: ContactProfile) => Object.fromEntries(
   Object.entries(index).map(([key, participant]) => [key, participant.contactId === updated.id
@@ -595,6 +596,7 @@ interface Props {
   managementCatalogError?: string | null;
   managementPendingAction?: string | null;
   onRetryManagementCatalogs?: () => void;
+  onManagementCatalogsNeeded?: () => void;
   onSetConversationStatus?: (status: ConversationStatus) => void;
   onSetConversationPriority?: (priority: ConversationPriority) => void;
   onAssignConversationAgent?: (agentId: number | null) => void;
@@ -628,6 +630,7 @@ interface Props {
   onGroupMetadataResolved?: (metadata: GroupMetadata) => void;
   onContactProfileResolved?: (profile: { name?: string; avatarUrl?: string }) => void;
   onStartGroupParticipantConversation?: (contactId: number, inboxId: number) => void;
+  onContactPanelStateChange?: (open: boolean, tab: 'contact' | 'attributes' | 'content') => void;
 }
 
 export const ChatArea: React.FC<Props> = ({
@@ -661,6 +664,7 @@ export const ChatArea: React.FC<Props> = ({
   managementCatalogError = null,
   managementPendingAction = null,
   onRetryManagementCatalogs,
+  onManagementCatalogsNeeded,
   onSetConversationStatus,
   onSetConversationPriority,
   onAssignConversationAgent,
@@ -694,18 +698,32 @@ export const ChatArea: React.FC<Props> = ({
   onGroupMetadataResolved,
   onContactProfileResolved,
   onStartGroupParticipantConversation,
+  onContactPanelStateChange,
 }) => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [failedAvatarChatId, setFailedAvatarChatId] = useState<string | null>(null);
+  useEffect(() => setFailedAvatarChatId(null), [chat.avatar]);
   const [isContactPanelOpen, setIsContactPanelOpen] = useState(false);
   const [selectedGroupParticipant, setSelectedGroupParticipant] = useState<{ id: string; name: string; phone: string; avatar?: string; contactId?: number } | null>(null);
   const [contactPanelTab, setContactPanelTab] = useState<'contact' | 'attributes' | 'content'>('contact');
   const [conversationParticipants, setConversationParticipants] = useState<AssignableAgent[]>([]);
   const [inputText, setInputText] = useState('');
   const [messageMode, setMessageMode] = useState<'responder' | 'privada'>('responder');
-  const contactConversations = useContactConversations(accountId, conversation?.contactId ?? null, isContactPanelOpen);
+  const contactConversations = useContactConversations(accountId, conversation?.contactId ?? null, isContactPanelOpen && contactPanelTab === 'contact' && !(chat.isGroup || conversation?.isGroup));
   const conversationAttachments = useConversationAttachments(accountId, conversation?.id ?? null, isContactPanelOpen && contactPanelTab === 'content');
   const [ticketStatus, setTicketStatus] = useState<'resolver' | 'resolvido' | 'adiado' | 'pendente'>('resolver');
   const [showResolverMenu, setShowResolverMenu] = useState(false);
+
+  useLayoutEffect(() => {
+    if (accountId && conversation) conversationOpeningMetrics.headerRendered(accountId, conversation.id);
+  }, [accountId, conversation?.id]);
+  useEffect(() => {
+    onContactPanelStateChange?.(isContactPanelOpen, contactPanelTab);
+    return () => onContactPanelStateChange?.(false, contactPanelTab);
+  }, [contactPanelTab, isContactPanelOpen, onContactPanelStateChange]);
+  useEffect(() => {
+    if (isContactPanelOpen && contactPanelTab === 'attributes') onManagementCatalogsNeeded?.();
+  }, [contactPanelTab, isContactPanelOpen, onManagementCatalogsNeeded]);
 
   useEffect(() => {
     if (!isContactPanelOpen || contactPanelTab !== 'attributes' || !accountId || !conversation) {
@@ -807,58 +825,15 @@ export const ChatArea: React.FC<Props> = ({
     setContactPanelTab('contact');
     setIsContactPanelOpen(true);
   };
-  const activeGroupRequest = useRef(groupRequestKey);
-  activeGroupRequest.current = groupRequestKey;
   const applyGroupMetadata = (group: GroupMetadata) => {
     setGroupParticipantState({ key: groupRequestKey, current: indexGroupParticipants(group.participants), all: indexGroupParticipants([...(group.historicalParticipants || []), ...group.participants]) });
     onGroupMetadataResolved?.(group);
   };
   const [providerContactProfile, setProviderContactProfile] = useState<{ name?: string; avatarUrl?: string }>({});
   const [isSyncingContactProfile, setIsSyncingContactProfile] = useState(false);
-  const automaticallySyncedContactProfiles = useRef(new Set<string>());
-  useEffect(() => {
-    if (!isGroupConversation || !conversation || !groupMetadataTransport) return;
-    if (!accountId) return;
-    const controller = new AbortController();
-    const capturedKey = groupRequestKey;
-    const expectedGroupJid = initialGroupMetadata?.id || chat.messages.find(message => message.whatsappRemoteJid?.endsWith('@g.us'))?.whatsappRemoteJid;
-    void groupMetadataClient.cached(accountId, conversation.inboxId, conversation.id, groupMetadataTransport).then((cached) => {
-      if (controller.signal.aborted || activeGroupRequest.current !== capturedKey) return;
-      if (cached && (!expectedGroupJid || cached.group.id === expectedGroupJid)) applyGroupMetadata(cached.group);
-      // Provider/bridge metadata is secondary: never compete with the first
-      // message page. Fresh persisted metadata needs no network request.
-      if (historyStatus !== 'ready' || cached?.isFresh) return;
-      return groupMetadataClient.get(accountId, conversation.inboxId, conversation.id, groupMetadataTransport, controller.signal).then(({ group }) => {
-        if (controller.signal.aborted || activeGroupRequest.current !== capturedKey || (expectedGroupJid && group.id !== expectedGroupJid)) return;
-        applyGroupMetadata(group);
-      });
-    }).catch(() => undefined);
-    return () => controller.abort();
-  }, [accountId, conversation?.id, conversation?.inboxId, groupMetadataTransport, groupRequestKey, historyStatus, isGroupConversation]);
   useEffect(() => {
     if (initialGroupMetadata) applyGroupMetadata(initialGroupMetadata);
   }, [groupRequestKey, contact?.additionalAttributes.whatsapp_group_metadata_synced_at]);
-  useEffect(() => {
-    const isGroup = chat.isGroup || conversation?.isGroup || chat.messages.some(message => message.whatsappRemoteJid?.endsWith('@g.us'));
-    const transport = chat.messages.slice().reverse().find(message => message.whatsappTransport && message.whatsappTransport !== 'meta_cloud')?.whatsappTransport;
-    if (isGroup || !conversation || transport !== 'waha' || !contact || !accountId) return;
-    const needsName = !contact.name.trim() || isPhoneDefaultContactName(contact.name, contact.phoneNumber);
-    const needsAvatar = !contact.avatarUrl;
-    if (!needsName && !needsAvatar) return;
-    const syncKey = `${conversation.id}:${contact.id}`;
-    // AvatarFromUrlJob is asynchronous in Chatwoot. Its first reload can
-    // legitimately still contain a null thumbnail, so one opening must never
-    // turn that transient state into a provider polling loop.
-    if (automaticallySyncedContactProfiles.current.has(syncKey)) return;
-    automaticallySyncedContactProfiles.current.add(syncKey);
-    let active = true;
-    void providerProfileClient.get(accountId, conversation.inboxId, conversation.id, transport).then((profile) => {
-      if (!active) return;
-      setProviderContactProfile(profile);
-      if (profile.name || profile.avatarUrl) onContactProfileResolved?.(profile);
-    }).catch(() => undefined);
-    return () => { active = false; };
-  }, [accountId, chat.id, chat.isGroup, contact?.avatarUrl, contact?.name, contact?.phoneNumber, contactStatus, conversation?.id, conversation?.inboxId]);
   const contactProfileTransport = chat.messages.slice().reverse().find(message => message.whatsappTransport)?.whatsappTransport;
   const canSyncContactProfile = !(chat.isGroup || conversation?.isGroup) && contactProfileTransport === 'waha';
   const syncContactProfile = async () => {
@@ -1678,12 +1653,13 @@ export const ChatArea: React.FC<Props> = ({
 
           {/* Avatar */}
           <div className="h-9 w-9 md:h-10 md:w-10 rounded-full overflow-hidden flex-shrink-0 flex items-center justify-center bg-[#2563eb]">
-            {chat.avatarType === 'image' && chat.avatar ? (
+            {chat.avatarType === 'image' && chat.avatar && failedAvatarChatId !== chat.id ? (
               <img
                 src={chat.avatar}
                 alt={chat.name}
                 className="w-full h-full object-cover"
                 referrerPolicy="no-referrer"
+                onError={() => setFailedAvatarChatId(chat.id)}
               />
             ) : chat.avatarType === 'logo' ? (
               <div
@@ -1704,7 +1680,7 @@ export const ChatArea: React.FC<Props> = ({
                 className="w-full h-full flex items-center justify-center text-white text-base"
                 style={{ backgroundColor: chat.avatarBg || '#4f46e5' }}
               >
-                {chat.avatar || '👥'}
+                {chat.avatarType === 'image' ? chat.name.substring(0, 2).toUpperCase() : chat.avatar || '👥'}
               </div>
             )}
           </div>
@@ -1908,6 +1884,7 @@ export const ChatArea: React.FC<Props> = ({
               onRetryCatalogs={onRetryManagementCatalogs} onSetPriority={onSetConversationPriority}
               onAssignAgent={onAssignConversationAgent} onAssignTeam={onAssignConversationTeam}
               onSetLabels={onSetConversationLabels} onMarkRead={onMarkConversationRead} onMarkUnread={onMarkConversationUnread}
+              onOpen={onManagementCatalogsNeeded}
             />
           )}
           <span title={realtimeConnectionStatus === 'connected' ? 'Realtime conectado' : 'Realtime desconectado'} className={`hidden h-2 w-2 rounded-full md:block ${realtimeConnectionStatus === 'connected' ? 'bg-[#00a884]' : realtimeConnectionStatus === 'connecting' || realtimeConnectionStatus === 'reconnecting' ? 'bg-amber-400 animate-pulse' : 'bg-[#8696a0]'}`} />
@@ -2609,7 +2586,7 @@ export const ChatArea: React.FC<Props> = ({
       )}
 
       {/* Contact Attributes Side Panel */}
-      {isContactPanelOpen && (!(chat.isGroup || conversation?.isGroup || contact?.additionalAttributes.whatsapp_chat_type === 'group' || chat.messages.some((message) => message.whatsappRemoteJid?.endsWith('@g.us'))) || contactPanelTab !== 'contact') && contactStatus !== 'idle' && onRetryContact && onUpdateContact && onCreateContactNote ? (
+      {isContactPanelOpen && (!(chat.isGroup || conversation?.isGroup || contact?.additionalAttributes.whatsapp_chat_type === 'group' || chat.messages.some((message) => message.whatsappRemoteJid?.endsWith('@g.us'))) || contactPanelTab !== 'contact') && onRetryContact && onUpdateContact && onCreateContactNote ? (
         <ContactDetailsPanel
           contact={contact || null}
           notes={contactNotes}

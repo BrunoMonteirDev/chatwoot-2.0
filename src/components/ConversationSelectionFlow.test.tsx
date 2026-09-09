@@ -30,4 +30,20 @@ describe('conversation selection hotfix', () => {
     expect(appSource).not.toContain('markConversationOpen');
     expect(appSource).not.toContain('markConversationPrefetched');
   });
+  it('prefetch exige hover de mouse sustentado e ignora touch', async () => {
+    vi.useFakeTimers();
+    const prefetch = vi.fn();
+    await act(async () => root.render(<ChatListItem chat={conversations[0]} isSelected={false} onSelect={() => undefined} onPrefetch={prefetch} />));
+    const row = container.firstElementChild as HTMLElement;
+    const pointer = (type: string, pointerType: string) => { const event = new Event(type, { bubbles: true }); Object.defineProperty(event, 'pointerType', { value: pointerType }); return event; };
+    await act(async () => { row.dispatchEvent(pointer('pointerover', 'mouse')); vi.advanceTimersByTime(399); });
+    expect(prefetch).not.toHaveBeenCalled();
+    await act(async () => { row.dispatchEvent(pointer('pointerout', 'mouse')); vi.advanceTimersByTime(1); });
+    expect(prefetch).not.toHaveBeenCalled();
+    await act(async () => { row.dispatchEvent(pointer('pointerover', 'touch')); vi.advanceTimersByTime(500); });
+    expect(prefetch).not.toHaveBeenCalled();
+    await act(async () => { row.dispatchEvent(pointer('pointerover', 'mouse')); vi.advanceTimersByTime(400); });
+    expect(prefetch).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
 });

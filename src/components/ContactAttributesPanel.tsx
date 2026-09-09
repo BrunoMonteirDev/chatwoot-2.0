@@ -164,20 +164,8 @@ export const ContactAttributesPanel: React.FC<Props> = ({
     setGroupMembers(initialGroupMetadata ? membersFor(initialGroupMetadata) : []);
     setGroupError(null);
     setDescriptionDraft('');
-    // A transport identifies the provider, not whether this is a group.
-    // Private Meta/WAHA conversations must never query group metadata.
-    if (!chat.isGroup || !accountId || !conversationId || !inboxId) return;
-    const controller = new AbortController();
-    const captured = { accountId, inboxId, conversationId, groupJid: initialGroupMetadata?.id };
-    void groupMetadataClient.get(accountId, inboxId, conversationId, groupTransport, controller.signal).then(({ group }) => {
-      if (controller.signal.aborted || captured.accountId !== accountId || captured.inboxId !== inboxId || captured.conversationId !== conversationId || (captured.groupJid && captured.groupJid !== group.id)) return;
-      setGroupMetadata(group); setDescriptionDraft(group.description || '');
-      if (group.subject?.trim()) onGroupSubjectResolved?.(group.subject.trim());
-      onGroupMetadataResolved?.(group);
-      setGroupMembers(membersFor(group));
-    }).catch(error => { if (!controller.signal.aborted) setGroupError(error instanceof Error ? error.message : 'Não foi possível carregar o grupo.'); });
-    return () => controller.abort();
-  }, [chat.isGroup, accountId, conversationId, inboxId, groupTransport]);
+    if (initialGroupMetadata) setDescriptionDraft(initialGroupMetadata.description || '');
+  }, [chat.isGroup, conversationId, initialGroupMetadata]);
 
   const saveDescription = async () => {
     if (!accountId || !conversationId || !inboxId || !groupMetadata?.transport) return;

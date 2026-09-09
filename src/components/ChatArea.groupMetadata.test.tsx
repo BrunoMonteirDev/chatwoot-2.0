@@ -3,22 +3,18 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatArea } from './ChatArea';
-import { groupMetadataClient, type GroupMetadata } from '../features/groups/metadata';
+import { groupMetadataClient } from '../features/groups/metadata';
 import type { ContactProfile, ConversationSummary } from '../domain/currentUser';
 import type { Chat } from '../types';
-import { contactService } from '../integrations/chatwoot/contacts';
 
 const get = vi.spyOn(groupMetadataClient, 'get');
 let container: HTMLDivElement;
 let root: Root;
-const conversation: ConversationSummary = { id: 81, inboxId: 5, channelType: 'Channel::Api', contactName: 'Equipe', contactId: 65, contactAvatarUrl: null, lastMessage: 'Olá', lastMessageByCurrentUser: false, lastActivityAt: 1, updatedAt: 1, unreadCount: 0, status: 'open', priority: null, assigneeId: null, assigneeName: null, participantIds: [], teamId: null, teamName: null, labels: [], isGroup: false };
-const chat = (messages: Chat['messages'] = []): Chat => ({ id: '81', name: 'Equipe', avatar: '', lastMessage: 'Olá', time: '', messages, isGroup: false });
-const render = async (value: Chat, selected: ConversationSummary = conversation, contact?: ContactProfile | null) => act(async () => { root.render(<ChatArea chat={value} conversation={selected} contact={contact} accountId={1} onSendMessage={() => undefined} onImageClick={() => undefined} onSearchInChat={() => undefined} />); });
-const profile = (id: number, name: string, avatarUrl: string, groupJid?: string): ContactProfile => ({ id, name, avatarUrl, phoneNumber: null, email: null, identifier: null, companyName: null, city: null, country: null, blocked: false, lastActivityAt: null, createdAt: null, additionalAttributes: groupJid ? { whatsapp_chat_type: 'group', whatsapp_group_jid: groupJid, whatsapp_group_participants: [{ jid: `${id}@lid` }], whatsapp_group_avatar_url: avatarUrl } : {}, customAttributes: {} });
-const groupSelection = (id: number, name: string, avatar: string): [Chat, ConversationSummary, ContactProfile] => [{ ...chat([{ id: String(id), sender: 'them', senderName: name, senderIdentity: `${id}@lid`, text: name, time: '10:00', whatsappTransport: 'waha', whatsappRemoteJid: `${id}@g.us` }]), id: String(id), name, avatar, avatarType: 'image', isGroup: true }, { ...conversation, id, contactId: id, contactName: name, contactAvatarUrl: avatar, isGroup: true }, profile(id, name, avatar, `${id}@g.us`)];
-const privateSelection = (id: number, name: string, avatar: string): [Chat, ConversationSummary, ContactProfile] => [{ ...chat(), id: String(id), name, avatar, avatarType: 'image', isGroup: false }, { ...conversation, id, contactId: id, contactName: name, contactAvatarUrl: avatar, isGroup: false }, profile(id, name, avatar)];
+const conversation: ConversationSummary = { id: 81, inboxId: 5, channelType: 'Channel::Api', contactName: 'Equipe', contactId: 65, contactAvatarUrl: null, lastMessage: 'Olá', lastMessageByCurrentUser: false, lastActivityAt: 1, updatedAt: 1, unreadCount: 0, status: 'open', priority: null, assigneeId: null, assigneeName: null, participantIds: [], teamId: null, teamName: null, labels: [], isGroup: true };
+const chat: Chat = { id: '81', name: 'Equipe', avatar: '', lastMessage: 'Olá', time: '', messages: [{ id: '1', sender: 'them', senderIdentity: '123@lid', text: 'Olá', time: '10:00', whatsappTransport: 'waha', whatsappRemoteJid: '120@g.us' }], isGroup: true };
+const contact: ContactProfile = { id: 65, name: 'Equipe', avatarUrl: 'group.jpg', phoneNumber: null, email: null, identifier: null, companyName: null, city: null, country: null, blocked: false, lastActivityAt: null, createdAt: null, additionalAttributes: { whatsapp_chat_type: 'group', whatsapp_group_jid: '120@g.us', whatsapp_group_transport: 'waha', whatsapp_group_participants: [{ jid: '123@lid', display_name: 'Maria', contact_id: 44 }] }, customAttributes: {} };
 
-describe('ChatArea group metadata loading', () => {
+describe('ChatArea group metadata opening', () => {
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     Element.prototype.scrollIntoView = vi.fn();
@@ -27,119 +23,26 @@ describe('ChatArea group metadata loading', () => {
   });
   afterEach(() => { act(() => root.unmount()); container.remove(); });
 
-  it('loads metadata once when late message data identifies a real group and reactively resolves its LID author', async () => {
-    let resolveMetadata!: (value: { group: GroupMetadata }) => void;
-    get.mockReturnValue(new Promise(resolve => { resolveMetadata = resolve; }));
-    await render(chat());
-    expect(get).not.toHaveBeenCalled();
-
-    const groupChat = chat([{ id: '1', sender: 'them', senderIdentity: '19696904601705@lid', text: 'Olá', time: '10:00', whatsappTransport: 'waha', whatsappRemoteJid: '123@g.us' }]);
-    await render(groupChat);
-    expect(get).toHaveBeenCalledTimes(1);
-    expect(get.mock.calls[0].slice(0, 4)).toEqual([1, 5, 81, 'waha']);
-    expect(container.textContent).not.toContain('Participante');
-
-    await act(async () => resolveMetadata({ group: { id: '123@g.us', subject: 'Equipe', memberCount: 5, transport: 'waha', canEditDescription: true, participants: [
-      { jid: '19696904601705@lid', lid: '19696904601705@lid', phoneJid: '554497755329@c.us', phoneNumber: '554497755329', name: 'Maria' },
-      { jid: '2@lid' }, { jid: '3@lid' }, { jid: '4@lid' }, { jid: '5@lid' },
-    ] } }));
+  it('renders persisted group identity and participants without querying the provider', async () => {
+    await act(async () => { root.render(<ChatArea chat={chat} conversation={conversation} contact={contact} accountId={1} historyStatus="ready" onSendMessage={() => undefined} onImageClick={() => undefined} onSearchInChat={() => undefined} />); });
+    expect(container.querySelector('h2')?.textContent).toBe('Equipe');
     expect(container.textContent).toContain('Maria');
-    expect(container.textContent).not.toContain('19696904601705@lid');
-
-    await render(groupChat);
-    expect(get).toHaveBeenCalledTimes(1);
+    expect(get).not.toHaveBeenCalled();
   });
 
-  it('abre o mesmo Contact real pelo avatar e pelo nome do autor', async () => {
-    get.mockReturnValue(new Promise(() => {}));
-    const contactGet = vi.spyOn(contactService, 'get').mockResolvedValue({ id: 44, name: 'Ricardo', avatarUrl: null, phoneNumber: '+5544988687221', email: null, identifier: null, companyName: null, city: null, country: null, blocked: false, lastActivityAt: null, createdAt: null, additionalAttributes: {}, customAttributes: {} });
-    vi.spyOn(contactService, 'listNotes').mockResolvedValue([]);
-    const groupChat = { ...chat([{ id: '1', sender: 'them' as const, senderName: 'Ricardo', senderPhone: '+5544988687221', senderIdentity: 'contact:44', text: 'Olá', time: '10:00', whatsappTransport: 'waha' as const, whatsappRemoteJid: '123@g.us' }]), isGroup: true };
-    await render(groupChat, { ...conversation, isGroup: true });
-    await act(async () => { container.querySelector<HTMLButtonElement>('button[aria-label="Abrir contato de Ricardo"]')?.click(); });
-    expect(contactGet).toHaveBeenCalledWith(1, 44);
-    await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Fechar painel"]')?.click(); });
-    const nameButton = Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'Ricardo' && button.className.includes('hover:underline'));
-    expect(nameButton).toBeTruthy();
-    await act(async () => { nameButton?.click(); });
-    expect(container.textContent).toContain('Dados do contato');
+  it('does not query group metadata before or after the first message render', async () => {
+    await act(async () => { root.render(<ChatArea chat={chat} conversation={conversation} accountId={1} historyStatus="loading" onSendMessage={() => undefined} onImageClick={() => undefined} onSearchInChat={() => undefined} />); });
+    await act(async () => { root.render(<ChatArea chat={chat} conversation={conversation} accountId={1} historyStatus="ready" onSendMessage={() => undefined} onImageClick={() => undefined} onSearchInChat={() => undefined} />); });
+    expect(get).not.toHaveBeenCalled();
   });
 
-  it('discards metadata from A when it returns after navigating to B', async () => {
-    let resolveA!: (value: { group: GroupMetadata }) => void;
-    let resolveB!: (value: { group: GroupMetadata }) => void;
-    get.mockImplementation((_account, _inbox, id) => new Promise(resolve => { if (id === 81) resolveA = resolve; else resolveB = resolve; }));
-    const chatA = chat([{ id: 'a', sender: 'them', senderIdentity: '1@lid', text: 'A', time: '10:00', whatsappTransport: 'waha', whatsappRemoteJid: 'a@g.us' }]);
-    const conversationB = { ...conversation, id: 82, contactName: 'Grupo B' };
-    const chatB = { ...chat([{ id: 'b', sender: 'them', senderIdentity: '2@lid', text: 'B', time: '10:01', whatsappTransport: 'waha', whatsappRemoteJid: 'b@g.us' }]), id: '82', name: 'Grupo B' };
-
-    await render(chatA);
-    await render(chatB, conversationB);
-    await act(async () => resolveB({ group: { id: 'b@g.us', subject: 'Grupo B', transport: 'waha', canEditDescription: true, participants: [{ jid: '2@lid', displayName: 'Bruna' }] } }));
-    expect(container.textContent).toContain('Bruna');
-    await act(async () => resolveA({ group: { id: 'a@g.us', subject: 'Grupo A', transport: 'waha', canEditDescription: true, participants: [{ jid: '1@lid', displayName: 'Alice' }] } }));
-    expect(container.textContent).toContain('Bruna');
-    expect(container.textContent).not.toContain('Alice');
-  });
-
-  it('renders B name and avatar on the first render after group A → group B', async () => {
-    const [chatA, conversationA, contactA] = groupSelection(81, 'Grupo A', 'a.jpg');
-    const [chatB, conversationB, contactB] = groupSelection(82, 'Grupo B', 'b.jpg');
-    get.mockImplementation(() => new Promise(() => undefined));
-    await render(chatA, conversationA, contactA);
-    await render(chatB, conversationB, contactB);
-    expect(container.querySelector('h2')?.textContent).toBe('Grupo B');
-    expect(container.querySelector<HTMLImageElement>('img[alt="Grupo B"]')?.src).toContain('b.jpg');
-    expect(container.textContent).not.toContain('Grupo A');
-  });
-
-  it('drops all group visuals immediately on group → private and ignores late group metadata', async () => {
-    let resolveA!: (value: { group: GroupMetadata }) => void;
-    get.mockImplementation(() => new Promise(resolve => { resolveA = resolve; }));
-    const [chatA, conversationA, contactA] = groupSelection(81, 'Grupo A', 'a.jpg');
-    const [privateChat, conversationC, contactC] = privateSelection(83, 'Contato C', 'c.jpg');
-    const chatC = { ...privateChat, messages: [{ id: 'private-1', sender: 'them' as const, senderName: 'Autor indevido', text: 'Mensagem privada', time: '10:02' }] };
-    await render(chatA, conversationA, contactA);
-    await render(chatC, conversationC, contactC);
-    expect(container.querySelector('h2')?.textContent).toBe('Contato C');
-    expect(container.querySelector<HTMLImageElement>('img[alt="Contato C"]')?.src).toContain('c.jpg');
-    expect(container.textContent).not.toContain('dados do grupo');
-    expect(container.textContent).not.toContain('Autor indevido');
-    await act(async () => resolveA({ group: { id: '81@g.us', subject: 'Grupo A atrasado', avatarUrl: 'late-a.jpg', transport: 'waha', canEditDescription: true, participants: [] } }));
-    expect(container.querySelector('h2')?.textContent).toBe('Contato C');
-  });
-
-  it('uses persisted group B visuals immediately on private → group and accepts only B metadata', async () => {
-    let resolveB!: (value: { group: GroupMetadata }) => void;
-    get.mockImplementation(() => new Promise(resolve => { resolveB = resolve; }));
-    const [chatC, conversationC, contactC] = privateSelection(83, 'Contato C', 'c.jpg');
-    const [chatB, conversationB, contactB] = groupSelection(82, 'Grupo B', 'b.jpg');
-    await render(chatC, conversationC, contactC);
-    await render(chatB, conversationB, contactB);
-    expect(container.querySelector('h2')?.textContent).toBe('Grupo B');
-    expect(container.querySelector<HTMLImageElement>('img[alt="Grupo B"]')?.src).toContain('b.jpg');
-    await act(async () => resolveB({ group: { id: '82@g.us', subject: 'Grupo B atualizado', avatarUrl: 'new-b.jpg', transport: 'waha', canEditDescription: true, participants: [] } }));
-    expect(container.querySelector('h2')?.textContent).toBe('Grupo B');
-  });
-
-  it('keeps private C after rapid A → B → C when B and A resolve out of order', async () => {
-    const resolvers = new Map<number, (value: { group: GroupMetadata }) => void>();
-    get.mockImplementation((_account, _inbox, id) => new Promise(resolve => { resolvers.set(id, resolve); }));
-    const [chatA, conversationA, contactA] = groupSelection(81, 'Grupo A', 'a.jpg');
-    const [chatB, conversationB, contactB] = groupSelection(82, 'Grupo B', 'b.jpg');
-    const [chatC, conversationC, contactC] = privateSelection(83, 'Contato C', 'c.jpg');
-    await render(chatA, conversationA, contactA);
-    await render(chatB, conversationB, contactB);
-    await render(chatC, conversationC, contactC);
-    await act(async () => resolvers.get(82)?.({ group: { id: '82@g.us', subject: 'B atrasado', transport: 'waha', canEditDescription: true, participants: [] } }));
-    await act(async () => resolvers.get(81)?.({ group: { id: '81@g.us', subject: 'A atrasado', transport: 'waha', canEditDescription: true, participants: [] } }));
-    expect(container.querySelector('h2')?.textContent).toBe('Contato C');
-    expect(container.querySelector<HTMLImageElement>('img[alt="Contato C"]')?.src).toContain('c.jpg');
-  });
-
-  it('never loads group metadata for a private conversation', async () => {
-    await render(chat([{ id: '1', sender: 'them', senderName: 'Contato', text: 'Olá', time: '10:00', whatsappTransport: 'waha', whatsappRemoteJid: '554499999999@c.us' }]));
-    await render(chat([{ id: '2', sender: 'them', senderName: 'Contato', text: 'Outra', time: '10:01', whatsappTransport: 'waha', whatsappRemoteJid: '554499999999@c.us' }]));
+  it('switches A → B → C from selected conversation data without stale provider responses', async () => {
+    for (const [id, name] of [[81, 'Grupo A'], [82, 'Grupo B'], [83, 'Contato C']] as const) {
+      const selected = { ...conversation, id, contactName: name, contactId: id, isGroup: id !== 83 };
+      const selectedChat = { ...chat, id: String(id), name, isGroup: id !== 83, messages: [] };
+      await act(async () => { root.render(<ChatArea chat={selectedChat} conversation={selected} accountId={1} onSendMessage={() => undefined} onImageClick={() => undefined} onSearchInChat={() => undefined} />); });
+      expect(container.querySelector('h2')?.textContent).toBe(name);
+    }
     expect(get).not.toHaveBeenCalled();
   });
 });

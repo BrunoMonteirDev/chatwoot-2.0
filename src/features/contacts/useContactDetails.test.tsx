@@ -6,8 +6,8 @@ import { contactService } from '../../integrations/chatwoot/contacts';
 import { clearContactDetailsCache, useContactDetails } from './useContactDetails';
 
 const profile = { id: 3, name: 'Ana', avatarUrl: null, phoneNumber: '+5511999999999', email: null, identifier: null, companyName: null, city: null, country: null, blocked: false, lastActivityAt: null, createdAt: null, additionalAttributes: {}, customAttributes: {} };
-const Probe = ({ accountId = 1, contactId = 3 }: { accountId?: number; contactId?: number }) => {
-  const details = useContactDetails(accountId, contactId);
+const Probe = ({ accountId = 1, contactId = 3, enabled = true, notesEnabled = enabled }: { accountId?: number; contactId?: number; enabled?: boolean; notesEnabled?: boolean }) => {
+  const details = useContactDetails(accountId, contactId, enabled, notesEnabled);
   return <span>{details.contact?.name || details.status}</span>;
 };
 
@@ -37,5 +37,21 @@ describe('useContactDetails secondary cache', () => {
     await act(async () => { root.render(<><Probe accountId={1}/><Probe accountId={2}/></>); });
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
     expect(contactService.get).toHaveBeenCalledTimes(2);
+  });
+
+  it('não busca profile nem notes enquanto o painel está fechado', async () => {
+    await act(async () => { root.render(<Probe enabled={false}/>); });
+    expect(container.textContent).toBe('idle');
+    expect(contactService.get).not.toHaveBeenCalled();
+    expect(contactService.listNotes).not.toHaveBeenCalled();
+    await act(async () => { root.render(<Probe enabled/>); await Promise.resolve(); });
+    expect(contactService.get).toHaveBeenCalledTimes(1);
+    expect(contactService.listNotes).toHaveBeenCalledTimes(1);
+  });
+
+  it('carrega o profile sem antecipar notes em outra aba do painel', async () => {
+    await act(async () => { root.render(<Probe notesEnabled={false}/>); await Promise.resolve(); });
+    expect(contactService.get).toHaveBeenCalledTimes(1);
+    expect(contactService.listNotes).not.toHaveBeenCalled();
   });
 });

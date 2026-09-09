@@ -4,9 +4,11 @@ import { contactService, type ContactUpdate } from '../../integrations/chatwoot/
 import { errorMessageForUser } from '../../integrations/chatwoot/errors';
 
 const CONTACT_DETAILS_TTL_MS = 5 * 60_000;
-type ContactDetailsEntry = { contact: ContactProfile; notes: ContactNote[]; updatedAt: number };
+type ContactDetailsEntry = { contact: ContactProfile; updatedAt: number };
 const contactDetailsCache = new Map<string, ContactDetailsEntry>();
+const contactNotesCache = new Map<string, { notes: ContactNote[]; updatedAt: number }>();
 const contactDetailsRequests = new Map<string, Promise<ContactDetailsEntry>>();
+const contactNotesRequests = new Map<string, Promise<ContactNote[]>>();
 let contactCacheGeneration = 0;
 const contactKey = (accountId: number, contactId: number) => `${accountId}:${contactId}`;
 const cachedContactDetails = (accountId: number, contactId: number) => contactDetailsCache.get(contactKey(accountId, contactId));
@@ -17,9 +19,8 @@ const requestContactDetails = (accountId: number, contactId: number) => {
   let pending = contactDetailsRequests.get(key);
   if (!pending) {
     const generation = contactCacheGeneration;
-    pending = contactService.get(accountId, contactId).then(async contact => {
-      const notes = await contactService.listNotes(accountId, contactId);
-      const entry = { contact, notes, updatedAt: Date.now() };
+    pending = contactService.get(accountId, contactId).then(contact => {
+      const entry = { ...contactDetailsCache.get(key), contact, updatedAt: Date.now() };
       if (generation === contactCacheGeneration) contactDetailsCache.set(key, entry);
       return entry;
     }).finally(() => contactDetailsRequests.delete(key));
@@ -27,9 +28,24 @@ const requestContactDetails = (accountId: number, contactId: number) => {
   }
   return pending;
 };
-export const clearContactDetailsCache = () => { contactCacheGeneration += 1; contactDetailsCache.clear(); contactDetailsRequests.clear(); };
+const requestContactNotes = (accountId: number, contactId: number) => {
+  const key = contactKey(accountId, contactId);
+  const cached = contactNotesCache.get(key);
+  if (cached && Date.now() - cached.updatedAt < CONTACT_DETAILS_TTL_MS) return Promise.resolve(cached.notes);
+  let pending = contactNotesRequests.get(key);
+  if (!pending) {
+    const generation = contactCacheGeneration;
+    pending = contactService.listNotes(accountId, contactId).then(notes => {
+      if (generation === contactCacheGeneration) contactNotesCache.set(key, { notes, updatedAt: Date.now() });
+      return notes;
+    }).finally(() => contactNotesRequests.delete(key));
+    contactNotesRequests.set(key, pending);
+  }
+  return pending;
+};
+export const clearContactDetailsCache = () => { contactCacheGeneration += 1; contactDetailsCache.clear(); contactNotesCache.clear(); contactDetailsRequests.clear(); contactNotesRequests.clear(); };
 
-export const useContactDetails = (accountId: number | null, contactId: number | null, deferMs = 0) => {
+export const useContactDetails = (accountId: number | null, contactId: number | null, enabled = true, notesEnabled = enabled) => {
   const [contact, setContact] = useState<ContactProfile | null>(null);
   const [notes, setNotes] = useState<ContactNote[]>([]);
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
@@ -43,7 +59,7 @@ export const useContactDetails = (accountId: number | null, contactId: number | 
 
   const load = useCallback(async () => {
     abortRef.current?.abort();
-    if (!accountId || !contactId) {
+    if (!enabled || !accountId || !contactId) {
       setContact(null); setNotes([]); setStatus('idle'); setError(null);
       return;
     }
@@ -53,26 +69,35 @@ export const useContactDetails = (accountId: number | null, contactId: number | 
     activeTargetRef.current = target;
     setStatus('loading'); setError(null);
     try {
-      const { contact: nextContact, notes: nextNotes } = await requestContactDetails(accountId, contactId);
+      const { contact: nextContact } = await requestContactDetails(accountId, contactId);
       if (controller.signal.aborted || request !== requestRef.current || activeTargetRef.current !== target) return;
-      setContact(nextContact); setNotes(nextNotes); setStatus('ready');
+      setContact(nextContact); setStatus('ready');
     } catch (cause) {
       if (controller.signal.aborted || request !== requestRef.current || activeTargetRef.current !== target) return;
       setError(errorMessageForUser(cause)); setStatus('error');
     }
-  }, [accountId, contactId]);
+  }, [accountId, contactId, enabled]);
 
   useEffect(() => {
     setContact(null); setNotes([]);
-    if (!accountId || !contactId) { setStatus('idle'); return; }
+    if (!enabled || !accountId || !contactId) { setStatus('idle'); return; }
     const cached = cachedContactDetails(accountId, contactId);
     if (cached) {
-      setContact(cached.contact); setNotes(cached.notes); setStatus('ready');
+      setContact(cached.contact); setNotes(contactNotesCache.get(contactKey(accountId, contactId))?.notes || []); setStatus('ready');
       if (Date.now() - cached.updatedAt < CONTACT_DETAILS_TTL_MS) return;
     }
-    const timer = window.setTimeout(() => void load(), deferMs);
-    return () => { window.clearTimeout(timer); abortRef.current?.abort(); };
-  }, [accountId, contactId, deferMs, load]);
+    void load();
+    return () => abortRef.current?.abort();
+  }, [accountId, contactId, enabled, load]);
+
+  useEffect(() => {
+    if (!enabled || !notesEnabled || !accountId || !contactId) return;
+    let active = true;
+    const cached = contactNotesCache.get(contactKey(accountId, contactId));
+    if (cached) setNotes(cached.notes);
+    void requestContactNotes(accountId, contactId).then(next => { if (active) setNotes(next); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [accountId, contactId, enabled, notesEnabled]);
 
   const update = useCallback(async (updateData: ContactUpdate) => {
     if (!accountId || !contact || isSaving) return null;
@@ -92,8 +117,8 @@ export const useContactDetails = (accountId: number | null, contactId: number | 
     setIsCreatingNote(true);
     try {
       const note = await contactService.createNote(accountId, contactId, content.trim());
-      const key = contactKey(accountId, contactId); const cached = contactDetailsCache.get(key);
-      if (cached) contactDetailsCache.set(key, { ...cached, notes: [note, ...cached.notes], updatedAt: Date.now() });
+      const key = contactKey(accountId, contactId); const cached = contactNotesCache.get(key);
+      contactNotesCache.set(key, { notes: [note, ...(cached?.notes || [])], updatedAt: Date.now() });
       if (activeTargetRef.current === target) setNotes(current => [note, ...current]);
       return note;
     } finally { setIsCreatingNote(false); }

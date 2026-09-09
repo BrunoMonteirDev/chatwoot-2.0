@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { MessageSquare, User, Users, Lock, CornerDownLeft, Pin, Star, VolumeX } from 'lucide-react';
 import { Chat } from '../types';
 import { getChannelIcon } from './ChannelIcons';
@@ -21,6 +21,14 @@ export const ChatListItem: React.FC<Props> = ({
   isDarkMode = false,
 }) => {
   const [showTooltip, setShowTooltip] = useState(false);
+  const [avatarFailed, setAvatarFailed] = useState(false);
+  useEffect(() => setAvatarFailed(false), [chat.avatar]);
+  const prefetchTimer = useRef<number | null>(null);
+  const cancelPrefetch = () => {
+    if (prefetchTimer.current !== null) window.clearTimeout(prefetchTimer.current);
+    prefetchTimer.current = null;
+  };
+  useEffect(() => cancelPrefetch, []);
 
   const isPinned = chat.pinned || chat.isPinned;
   const isFavorite = chat.favorite || chat.isFavorite;
@@ -36,8 +44,15 @@ export const ChatListItem: React.FC<Props> = ({
   return (
     <div
       onClick={() => onSelect(chat)}
-      onPointerEnter={() => onPrefetch?.(chat)}
-      onPointerDown={() => onPrefetch?.(chat)}
+      onPointerEnter={(event) => {
+        if (event.pointerType !== 'mouse' || !onPrefetch) return;
+        cancelPrefetch();
+        prefetchTimer.current = window.setTimeout(() => {
+          prefetchTimer.current = null;
+          onPrefetch(chat);
+        }, 400);
+      }}
+      onPointerLeave={cancelPrefetch}
       onContextMenu={(e) => {
         if (onContextMenu) {
           e.preventDefault();
@@ -60,23 +75,24 @@ export const ChatListItem: React.FC<Props> = ({
           className="w-11 h-11 rounded-full overflow-hidden flex items-center justify-center font-bold text-xs shadow-xs"
           style={{
             backgroundColor:
-              chat.avatarType === 'image' && chat.avatar
+              chat.avatarType === 'image' && chat.avatar && !avatarFailed
                 ? 'transparent'
                 : chat.avatarBg || '#00a884',
           }}
         >
-          {chat.avatarType === 'image' && chat.avatar ? (
+          {chat.avatarType === 'image' && chat.avatar && !avatarFailed ? (
             <img
               src={chat.avatar}
               alt={chat.name}
               className="w-full h-full object-cover"
               referrerPolicy="no-referrer"
+              onError={() => setAvatarFailed(true)}
             />
           ) : chat.avatarType === 'group' ? (
             <Users className="h-5 w-5 text-white" />
           ) : (
             <span className="text-white font-bold text-xs">
-              {chat.avatar || chat.name.substring(0, 2).toUpperCase()}
+              {chat.avatarType === 'image' ? chat.name.substring(0, 2).toUpperCase() : chat.avatar || chat.name.substring(0, 2).toUpperCase()}
             </span>
           )}
         </div>

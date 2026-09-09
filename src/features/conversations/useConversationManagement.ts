@@ -6,7 +6,7 @@ import { labelCatalog } from '../labels/labelCatalog';
 
 const emptyCatalogs: ConversationManagementCatalogs = { agents: [], teams: [], labels: [] };
 
-export const useConversationManagement = (accountId: number | null, inboxId: number | null) => {
+export const useConversationManagement = (accountId: number | null, inboxId: number | null, enabled = false) => {
   const [catalogs, setCatalogs] = useState<ConversationManagementCatalogs>(emptyCatalogs);
   const [catalogStatus, setCatalogStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [catalogError, setCatalogError] = useState<string | null>(null);
@@ -32,10 +32,10 @@ export const useConversationManagement = (accountId: number | null, inboxId: num
   }, [accountId, inboxId]);
 
   useEffect(() => {
-    if (!accountId) { setCatalogs(emptyCatalogs); setCatalogStatus('idle'); return; }
+    if (!accountId || !enabled) { setCatalogs({ agents: [], teams: [], labels: accountId ? labelCatalog.peek(accountId) || [] : [] }); setCatalogStatus('idle'); return; }
     setCatalogs({ agents: [], teams: [], labels: labelCatalog.peek(accountId) || [] });
     void loadCatalogs();
-  }, [accountId, loadCatalogs]);
+  }, [accountId, enabled, loadCatalogs]);
 
   useEffect(() => {
     if (!accountId) return;
