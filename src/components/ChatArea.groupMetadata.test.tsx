@@ -6,6 +6,7 @@ import { ChatArea } from './ChatArea';
 import { groupMetadataClient, type GroupMetadata } from '../features/groups/metadata';
 import type { ContactProfile, ConversationSummary } from '../domain/currentUser';
 import type { Chat } from '../types';
+import { contactService } from '../integrations/chatwoot/contacts';
 
 const get = vi.spyOn(groupMetadataClient, 'get');
 let container: HTMLDivElement;
@@ -47,6 +48,21 @@ describe('ChatArea group metadata loading', () => {
 
     await render(groupChat);
     expect(get).toHaveBeenCalledTimes(1);
+  });
+
+  it('abre o mesmo Contact real pelo avatar e pelo nome do autor', async () => {
+    get.mockReturnValue(new Promise(() => {}));
+    const contactGet = vi.spyOn(contactService, 'get').mockResolvedValue({ id: 44, name: 'Ricardo', avatarUrl: null, phoneNumber: '+5544988687221', email: null, identifier: null, companyName: null, city: null, country: null, blocked: false, lastActivityAt: null, createdAt: null, additionalAttributes: {}, customAttributes: {} });
+    vi.spyOn(contactService, 'listNotes').mockResolvedValue([]);
+    const groupChat = { ...chat([{ id: '1', sender: 'them' as const, senderName: 'Ricardo', senderPhone: '+5544988687221', senderIdentity: 'contact:44', text: 'Olá', time: '10:00', whatsappTransport: 'waha' as const, whatsappRemoteJid: '123@g.us' }]), isGroup: true };
+    await render(groupChat, { ...conversation, isGroup: true });
+    await act(async () => { container.querySelector<HTMLButtonElement>('button[aria-label="Abrir contato de Ricardo"]')?.click(); });
+    expect(contactGet).toHaveBeenCalledWith(1, 44, expect.any(AbortSignal));
+    await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Fechar painel"]')?.click(); });
+    const nameButton = Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'Ricardo' && button.className.includes('hover:underline'));
+    expect(nameButton).toBeTruthy();
+    await act(async () => { nameButton?.click(); });
+    expect(container.textContent).toContain('Dados do contato');
   });
 
   it('discards metadata from A when it returns after navigating to B', async () => {

@@ -158,7 +158,7 @@ describe('chatwootBridge media messages', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 1 }), { status: 200 })));
     await chatwootBridge.withAccount(1, () => chatwootBridge.createIncomingTransportMessage('inbox', 'group', 31, 'waha', 'Mensagem original', 'message-1', undefined, '120363@g.us', undefined, { chatType: 'group', participantJid: '123@lid', participantContactId: 91 }));
     const body = JSON.parse((vi.mocked(fetch).mock.calls.at(-1)?.[1] as RequestInit).body as string);
-    expect(body).toMatchObject({ content: 'Mensagem original', message_type: 'incoming', sender_type: 'Contact', sender_id: 91 });
+    expect(body).toMatchObject({ content: 'Mensagem original', message_type: 'incoming', sender_type: 'Contact', sender_id: 91, content_attributes: { whatsapp_participant_contact_id: 91 } });
     expect(body.content).not.toContain('Ricardo');
   });
 

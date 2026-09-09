@@ -53,6 +53,22 @@ describe('MessageHistoryCache', () => {
     expect(cache.upsertIfPresent(1, message(1, { conversationId: 99 }))).toBe(false);
   });
 
+  it('não degrada o Contact participante quando o refresh traz o sender do grupo', () => {
+    const cache = new MessageHistoryCache();
+    const attributes = { whatsapp_remote_jid: '120363@g.us', whatsapp_participant_jid: '123@lid', whatsapp_participant_phone: '+5544988687221' };
+    cache.set(1, 1, page(message(20, { senderId: 91, senderName: 'Ricardo', senderPhoneNumber: '+5544988687221', senderAvatarUrl: 'ricardo.jpg', contentAttributes: attributes })));
+    cache.set(1, 1, page(message(20, { senderId: 65, senderName: 'Equipe', senderPhoneNumber: null, contentAttributes: attributes })), { preserveExisting: true });
+    expect(cache.get(1, 1)?.messages[0]).toMatchObject({ senderId: 91, senderName: 'Ricardo', senderPhoneNumber: '+5544988687221', senderAvatarUrl: 'ricardo.jpg' });
+  });
+
+  it('enriquece mensagem histórica sem sender e não cria duplicata', () => {
+    const cache = new MessageHistoryCache();
+    cache.set(1, 1, page(message(20, { sourceId: 'waha:same' })));
+    cache.set(1, 1, page(message(99, { sourceId: 'waha:same', senderId: 91, senderName: 'Ricardo', senderPhoneNumber: '+5544988687221' })), { preserveExisting: true });
+    expect(cache.get(1, 1)?.messages).toHaveLength(1);
+    expect(cache.get(1, 1)?.messages[0]).toMatchObject({ id: 99, senderId: 91, senderName: 'Ricardo' });
+  });
+
   it('reconcilia pelo source_id quando REST e realtime têm ids locais diferentes', () => {
     const cache = new MessageHistoryCache();
     cache.set(1, 1, page(message(20, { sourceId: 'wamid.same', content: 'realtime' })));

@@ -54,6 +54,13 @@ const syncGroupParticipantContact = async (
   transport: 'waha' | 'evolution',
 ) => {
   const identity = resolveGroupParticipantIdentity(input);
+  const persistedContactId = Number(input.contactId);
+  if (Number.isInteger(persistedContactId) && persistedContactId > 0) {
+    const persisted = await chatwootBridge.groupParticipantContact(persistedContactId);
+    if (transport === 'waha') await chatwootBridge.saveWahaIdentity(persisted.id, identity.phone || persisted.phoneNumber, identity.lid);
+    else await chatwootBridge.saveEvolutionIdentity(persisted.id, identity.phone || persisted.phoneNumber, identity.lid);
+    return { ...identity, contactId: persisted.id, phone: persisted.phoneNumber || identity.phone, displayName: persisted.name || identity.displayName, avatarUrl: persisted.avatarUrl || identity.avatarUrl };
+  }
   if (!identity.phone) return null;
   const contact = await chatwootBridge.findOrCreateGroupParticipantContact(inbox.id, { phoneNumber: identity.phone, name: identity.displayName, avatarUrl: identity.avatarUrl });
   if (transport === 'waha') await chatwootBridge.saveWahaIdentity(contact.id, identity.phone, identity.lid);

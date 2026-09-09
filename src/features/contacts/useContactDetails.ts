@@ -10,6 +10,7 @@ export const useContactDetails = (accountId: number | null, contactId: number | 
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isCreatingNote, setIsCreatingNote] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const requestRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const activeTargetRef = useRef<string | null>(null);
@@ -68,5 +69,12 @@ export const useContactDetails = (accountId: number | null, contactId: number | 
     if (updated.id === contactId) setContact(updated);
   }, [contactId]);
 
-  return { contact, notes, status, error, isSaving, isCreatingNote, retry: load, update, createNote, applyRealtimeUpdate };
+  const remove = useCallback(async () => {
+    if (!accountId || !contactId || isDeleting) return false;
+    setIsDeleting(true);
+    try { await contactService.remove(accountId, contactId); return true; }
+    finally { setIsDeleting(false); }
+  }, [accountId, contactId, isDeleting]);
+
+  return { contact, notes, status, error, isSaving, isCreatingNote, isDeleting, retry: load, update, createNote, remove, applyRealtimeUpdate };
 };

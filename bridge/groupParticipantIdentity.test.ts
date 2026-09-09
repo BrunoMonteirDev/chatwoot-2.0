@@ -10,6 +10,11 @@ describe('group participant identity', () => {
     expect(linked.every(participant => typeof participant.contactId === 'number')).toBe(true);
     expect(link.mock.calls[0][0].participantAlt).toBe('0@lid');
   });
+  it('repassa contact_id persistido para reutilização account-scoped', async () => {
+    const link = vi.fn().mockResolvedValue({ providerId: '1@lid', contactId: 44 });
+    await linkGroupParticipantContacts([{ jid: '1@lid', contactId: 44 }], link);
+    expect(link).toHaveBeenCalledWith(expect.objectContaining({ contactId: 44 }));
+  });
   it('prefers a provider phone JID, preserves name and avatar, and never derives a phone from a LID', () => {
     expect(resolveGroupParticipantIdentity({ participant: '19696904601705@lid', participantAlt: '5511999999999@c.us', pushName: 'Ana', avatarUrl: 'https://avatar' })).toEqual({ providerId: '5511999999999@c.us', lid: '19696904601705', phoneJid: '5511999999999@c.us', phone: '+5511999999999', displayName: 'Ana', avatarUrl: 'https://avatar' });
     expect(resolveGroupParticipantIdentity({ participant: '19696904601705@lid' })).toEqual({ providerId: '19696904601705@lid', lid: '19696904601705' });

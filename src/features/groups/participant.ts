@@ -12,10 +12,11 @@ export const participantLabel = (name?: string | null, jid?: string | null, phon
   if (displayPhone) return displayPhone;
   return jid?.endsWith('@lid') ? 'Participante' : jid?.trim() || 'Participante';
 };
-type ParticipantIdentity = { jid: string; providerId?: string; lid?: string; phoneJid?: string; phone?: string; phoneNumber?: string };
+type ParticipantIdentity = { jid: string; providerId?: string; lid?: string; phoneJid?: string; phone?: string; phoneNumber?: string; contactId?: number };
 export const participantIdentityKeys = (participant: ParticipantIdentity) => {
   const values = [participant.jid, participant.providerId, participant.lid, participant.phoneJid, participant.phone, participant.phoneNumber];
   const keys = new Set(values.filter((value): value is string => Boolean(value)));
+  if (participant.contactId) keys.add(`contact:${participant.contactId}`);
   values.forEach(value => {
     const digits = value?.replace(/\D/g, '');
     if (!digits) return;

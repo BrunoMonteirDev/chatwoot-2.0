@@ -29,10 +29,10 @@ export class GroupParticipantIdentityCache {
   set(scope: ParticipantScope, identity: GroupParticipantIdentity) { if (identity.lid) this.values.set(this.key(scope, identity.lid), identity); }
 }
 
-export const linkGroupParticipantContacts = async <T extends { jid: string; phoneJid?: string; lid?: string; phoneNumber?: string; name?: string; avatarUrl?: string }>(
+export const linkGroupParticipantContacts = async <T extends { jid: string; phoneJid?: string; lid?: string; phoneNumber?: string; name?: string; avatarUrl?: string; contactId?: number }>(
   participants: T[],
   link: (input: Record<string, unknown>) => Promise<GroupParticipantIdentity | null>,
 ) => Promise.all(participants.map(async participant => ({
   ...participant,
-  ...(await link({ participant: participant.jid, participantAlt: participant.phoneJid || (participant.lid ? `${participant.lid.replace(/@lid$/, '')}@lid` : undefined), phone: participant.phoneNumber, name: participant.name, avatarUrl: participant.avatarUrl }) || {}),
+  ...(await link({ participant: participant.jid, participantAlt: participant.phoneJid || (participant.lid ? `${participant.lid.replace(/@lid$/, '')}@lid` : undefined), phone: participant.phoneNumber, name: participant.name, avatarUrl: participant.avatarUrl, contactId: participant.contactId }) || {}),
 })));

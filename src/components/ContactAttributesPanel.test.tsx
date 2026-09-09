@@ -64,7 +64,7 @@ describe('group metadata requests', () => {
     expect(container.textContent).toContain('Administrador');
     await act(async () => { Array.from(container.querySelectorAll('div')).find(element => element.textContent?.includes('João editado') && element.className.includes('cursor-pointer'))?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => {});
-    const button = Array.from(container.querySelectorAll('button')).find(element => element.textContent?.includes('Iniciar conversa'));
+    const button = Array.from(container.querySelectorAll('button')).find(element => element.textContent?.includes('Conversar'));
     expect(button).toBeTruthy();
     await act(async () => { button?.click(); });
     expect(start).toHaveBeenCalledWith(44);

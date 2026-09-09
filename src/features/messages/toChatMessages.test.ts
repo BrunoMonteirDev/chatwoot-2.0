@@ -63,6 +63,12 @@ describe('toChatMessages reactions', () => {
     expect(message).toMatchObject({ senderName: 'Ricardo editado', senderPhone: '+5544988687221', senderIdentity: 'contact:91', senderAvatarUrl: 'https://example.test/avatar.jpg', text: 'Mensagem sem prefixo' });
   });
 
+  it('não aceita o Contact do grupo como autor e usa o alias do participante', () => {
+    const [message] = toChatMessages([baseMessage({ senderId: 65, senderName: 'Equipe', senderPhoneNumber: null, contentAttributes: { whatsapp_remote_jid: '120363@g.us', whatsapp_participant_jid: '123@lid', whatsapp_participant_name: 'Ricardo' } })]);
+    expect(message.senderName).toBe('Ricardo');
+    expect(message.senderIdentity).toBe('123@lid');
+  });
+
   it('expõe o marcador normalizado de mensagem encaminhada', () => {
     expect(toChatMessages([baseMessage({ contentAttributes: { whatsapp_is_forwarded: true } })])[0].isForwarded).toBe(true);
     expect(toChatMessages([baseMessage({ contentAttributes: {} })])[0].isForwarded).toBe(false);

@@ -79,6 +79,11 @@ import { mentionReplacements, mentionTargetFor, participantMentionLabel, pruneMe
 import { isPhoneDefaultContactName, providerProfileClient } from '../features/contacts/providerProfile';
 import { messageBubbleWidthClassName, messageTimelineClassName, messageVisualMediaClassName } from '../features/messages/messageLayout';
 
+const updateParticipantIndex = (index: Record<string, GroupParticipant>, updated: ContactProfile) => Object.fromEntries(
+  Object.entries(index).map(([key, participant]) => [key, participant.contactId === updated.id
+    ? { ...participant, displayName: updated.name, phoneNumber: updated.phoneNumber || participant.phoneNumber, avatarUrl: updated.avatarUrl || participant.avatarUrl }
+    : participant]),
+) as Record<string, GroupParticipant>;
 
 // Helper to format WhatsApp Markdown, URLs, Mentions, Bold (*), Italic (_), Strikethrough (~), Code (`)
 const renderFormattedText = (content: string, depth = 0, isInputBackdrop = false): React.ReactNode[] => {
@@ -701,6 +706,7 @@ export const ChatArea: React.FC<Props> = ({
 }) => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isContactPanelOpen, setIsContactPanelOpen] = useState(false);
+  const [selectedGroupParticipant, setSelectedGroupParticipant] = useState<{ id: string; name: string; phone: string; avatar?: string; contactId?: number } | null>(null);
   const [contactPanelTab, setContactPanelTab] = useState<'contact' | 'attributes' | 'content'>('contact');
   const [conversationParticipants, setConversationParticipants] = useState<AssignableAgent[]>([]);
   const [inputText, setInputText] = useState('');
@@ -799,6 +805,13 @@ export const ChatArea: React.FC<Props> = ({
   const [groupParticipantState, setGroupParticipantState] = useState<{ key: string; current: Record<string, GroupParticipant>; all: Record<string, GroupParticipant> }>(() => ({ key: groupRequestKey, current: indexGroupParticipants(initialGroupMetadata?.participants || []), all: indexGroupParticipants([...(initialGroupMetadata?.historicalParticipants || []), ...(initialGroupMetadata?.participants || [])]) }));
   const groupParticipants = groupParticipantState.key === groupRequestKey ? groupParticipantState.current : indexGroupParticipants(initialGroupMetadata?.participants || []);
   const groupParticipantIdentities = groupParticipantState.key === groupRequestKey ? groupParticipantState.all : indexGroupParticipants([...(initialGroupMetadata?.historicalParticipants || []), ...(initialGroupMetadata?.participants || [])]);
+  useEffect(() => { setSelectedGroupParticipant(null); }, [chat.id]);
+  const openGroupParticipant = (contactId: number | undefined, name: string, phone = '', avatar?: string) => {
+    if (!contactId) return;
+    setSelectedGroupParticipant({ id: `contact:${contactId}`, contactId, name, phone, avatar });
+    setContactPanelTab('contact');
+    setIsContactPanelOpen(true);
+  };
   const activeGroupRequest = useRef(groupRequestKey);
   activeGroupRequest.current = groupRequestKey;
   const applyGroupMetadata = (group: GroupMetadata) => {
@@ -1926,10 +1939,12 @@ export const ChatArea: React.FC<Props> = ({
           const hasWideMedia = Boolean(msg.attachments?.some(attachment => attachment.type === 'image' || attachment.type === 'video'));
           const groupParticipant = msg.senderIdentity ? groupParticipantIdentities[msg.senderIdentity] : undefined;
           const participantAvatar = groupParticipant?.avatarUrl;
-          const senderName = groupParticipant
+          const resolvedSenderName = groupParticipant
             ? participantLabel(groupParticipant.displayName || groupParticipant.name, groupParticipant.phoneJid || groupParticipant.jid, groupParticipant.phoneNumber || groupParticipant.phone)
             : msg.senderName;
+          const senderName = resolvedSenderName === chat.name ? 'Participante' : resolvedSenderName;
           const senderPhone = msg.senderPhone || (groupParticipant ? participantPhone(groupParticipant.jid, groupParticipant.phoneNumber) : undefined);
+          const senderContactId = groupParticipant?.contactId || (msg.senderIdentity?.startsWith('contact:') ? Number(msg.senderIdentity.slice(8)) : undefined);
           const showDatePill =
             msg.dateLabel && (!prevMsg || prevMsg.dateLabel !== msg.dateLabel);
 
@@ -1962,9 +1977,9 @@ export const ChatArea: React.FC<Props> = ({
                 }`}
               >
                 <div className={`flex w-full items-end gap-1.5 ${isMe ? 'justify-end' : 'justify-start'}`}>
-                {!isMe && isGroupMessage && senderName && <div className="mb-0.5 grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-full text-[9px] font-bold text-white" style={{ backgroundColor: msg.senderColor || participantColor(msg.senderIdentity || senderName) }}>
+                {!isMe && isGroupMessage && senderName && <button type="button" disabled={!senderContactId} aria-label={`Abrir contato de ${senderName}`} onClick={() => openGroupParticipant(senderContactId, senderName, senderPhone, participantAvatar || msg.senderAvatarUrl)} className="mb-0.5 grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-full text-[9px] font-bold text-white enabled:cursor-pointer enabled:ring-offset-1 enabled:hover:ring-2 enabled:hover:ring-[#00a884] disabled:cursor-default" style={{ backgroundColor: msg.senderColor || participantColor(msg.senderIdentity || senderName) }}>
                   {participantAvatar ? <img src={participantAvatar} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : senderName.split('·')[0].trim().split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toUpperCase()}
-                </div>}
+                </button>}
                 <div
                   onContextMenu={(e) => handleMessageContextMenu(e, msg)}
                   className={`${messageBubbleWidthClassName(hasWideMedia)} rounded-lg px-3 py-1.5 shadow-xs relative group border select-none ${
@@ -1997,14 +2012,14 @@ export const ChatArea: React.FC<Props> = ({
 
                   {/* Sender Name in Group Chat (only if not an audio note card, which has its own header) */}
                   {!isMe && senderName && !(msg.audioAuthor || msg.attachments?.some((a) => a.type === 'audio')) && (
-                    <div
-                      className={`text-xs font-semibold mb-1 ${
+                    <button type="button" disabled={!senderContactId || !isGroupMessage} onClick={() => openGroupParticipant(senderContactId, senderName, senderPhone, participantAvatar || msg.senderAvatarUrl)}
+                      className={`block text-left text-xs font-semibold mb-1 enabled:cursor-pointer enabled:hover:underline ${
                         msg.senderColor ? '' : isDarkMode ? 'text-[#00a884]' : 'text-[#008069]'
                       }`}
                       style={msg.senderColor ? { color: msg.senderColor } : undefined}
                     >
                       {senderName}
-                    </div>
+                    </button>
                   )}
 
                   {/* Quoted Reply Message */}
@@ -2824,6 +2839,10 @@ export const ChatArea: React.FC<Props> = ({
           onGroupMetadataResolved={applyGroupMetadata}
           initialGroupMetadata={initialGroupMetadata}
           onStartParticipantConversation={conversation ? contactId => onStartGroupParticipantConversation?.(contactId, conversation.inboxId) : undefined}
+          selectedParticipant={selectedGroupParticipant}
+          inboxes={inboxes}
+          onOpenConversation={onOpenDirectConversation}
+          onParticipantUpdated={(updated) => setGroupParticipantState(current => ({ ...current, current: updateParticipantIndex(current.current, updated), all: updateParticipantIndex(current.all, updated) }))}
         />
       )}
 

@@ -175,6 +175,7 @@ const transportMessageAttributes = (transport: WhatsAppTransport, messageType: '
   ...(context.participantName ? { whatsapp_participant_name: context.participantName } : {}),
   ...(context.participantPhone ? { whatsapp_participant_phone: context.participantPhone } : {}),
   ...(context.participantAvatarUrl ? { whatsapp_participant_avatar_url: context.participantAvatarUrl } : {}),
+  ...(context.participantContactId ? { whatsapp_participant_contact_id: context.participantContactId } : {}),
   ...(context.isForwarded ? { whatsapp_is_forwarded: true } : {}),
   ...(typeof context.forwardingScore === 'number' ? { whatsapp_forwarding_score: context.forwardingScore } : {}),
   ...(transport === 'waha' && context.providerMessageKey ? { whatsapp_provider_message_key: context.providerMessageKey } : {}),
@@ -348,7 +349,7 @@ export const chatwootBridge = {
     const normalizedPhoneNumber = normalizeBrazilianPhone(input.phoneNumber);
     const digits = normalizedPhoneNumber.replace(/\D/g, '');
     const search = /^55([1-9]\d)\d{8}$/.exec(digits) ? `+55${digits.slice(2, 4)}` : normalizedPhoneNumber;
-    const queries = [...new Set([search, normalizedPhoneNumber, digits.slice(-8)])];
+    const queries = [...new Set([search, normalizedPhoneNumber])];
     const candidates = (await Promise.all(queries.map(query => request<{ payload: AccountContact[] }>(`/api/v1/accounts/${currentAccountId()}/contacts/search?q=${encodeURIComponent(query)}`, {}, true)))).flatMap(item => item.payload);
     const existing = candidates.find(item => item.phone_number && normalizeBrazilianPhone(item.phone_number).replace(/\D/g, '') === digits);
     if (existing) {

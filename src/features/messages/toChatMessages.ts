@@ -24,14 +24,16 @@ export const toChatMessages = (items: ConversationMessage[]): Message[] => items
   const remoteJid = typeof message.contentAttributes.whatsapp_remote_jid === 'string' ? message.contentAttributes.whatsapp_remote_jid : null;
   const isGroupMessage = remoteJid?.endsWith('@g.us') === true;
   const identity = participantIdentity(jid, phone);
+  const participantContactId = Number(message.contentAttributes.whatsapp_participant_contact_id);
+  const hasParticipantContact = Boolean(message.senderId && (message.senderPhoneNumber || message.senderId === participantContactId));
   return ({
   id: String(message.id),
   sender: message.kind === 'outgoing' || message.kind === 'private_note' ? 'me' : 'them',
   // Chatwoot correctly identifies the group as the conversation contact. The
   // real author of an incoming group message is carried separately by the
   // bridge so a group does not look like a direct conversation with itself.
-  senderName: message.kind === 'outgoing' ? 'Você' : isGroupMessage && message.senderId ? message.senderName || message.senderPhoneNumber || 'Participante' : jid || phone ? participantLabel(name, jid, phone) : isGroupMessage ? 'Participante' : message.senderName || undefined,
-  ...(isGroupMessage && message.senderId ? { senderPhone: message.senderPhoneNumber || undefined, senderIdentity: `contact:${message.senderId}`, senderColor: participantColor(`contact:${message.senderId}`) } : jid || phone ? { senderPhone: participantPhone(jid, phone), senderIdentity: identity, senderColor: participantColor(identity) } : {}),
+  senderName: message.kind === 'outgoing' ? 'Você' : isGroupMessage && hasParticipantContact ? message.senderName || message.senderPhoneNumber || 'Participante' : jid || phone ? participantLabel(name, jid, phone) : isGroupMessage ? 'Participante' : message.senderName || undefined,
+  ...(isGroupMessage && hasParticipantContact ? { senderPhone: message.senderPhoneNumber || undefined, senderIdentity: `contact:${message.senderId}`, senderColor: participantColor(`contact:${message.senderId}`) } : jid || phone ? { senderPhone: participantPhone(jid, phone), senderIdentity: identity, senderColor: participantColor(identity) } : {}),
   senderEmail: message.senderEmail || undefined,
   senderAvatarUrl: message.senderAvatarUrl || undefined,
   origin: message.origin || undefined,

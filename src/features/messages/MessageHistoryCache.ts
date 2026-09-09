@@ -4,6 +4,22 @@ import type { MessageHistoryPage } from '../../integrations/chatwoot/messages';
 export const MESSAGE_HISTORY_TTL_MS = 30_000;
 export const MESSAGE_HISTORY_MAX_CONVERSATIONS = 12;
 
+const senderScore = (message: ConversationMessage) => {
+  const participantContactId = Number(message.contentAttributes.whatsapp_participant_contact_id);
+  const participantPhone = typeof message.contentAttributes.whatsapp_participant_phone === 'string'
+    ? message.contentAttributes.whatsapp_participant_phone.replace(/\D/g, '') : '';
+  const senderPhone = message.senderPhoneNumber?.replace(/\D/g, '') || '';
+  return (message.senderId ? 4 : 0) + (message.senderName?.trim() ? 2 : 0)
+    + (senderPhone ? 4 : 0) + (message.senderAvatarUrl ? 1 : 0)
+    + (message.senderId && message.senderId === participantContactId ? 100 : 0)
+    + (participantPhone && senderPhone === participantPhone ? 20 : 0);
+};
+
+export const preserveRichSender = (current: ConversationMessage, incoming: ConversationMessage): ConversationMessage => {
+  if (senderScore(incoming) > senderScore(current)) return incoming;
+  return { ...incoming, senderId: current.senderId, senderName: current.senderName, senderPhoneNumber: current.senderPhoneNumber, senderEmail: current.senderEmail, senderAvatarUrl: current.senderAvatarUrl };
+};
+
 export const mergeMessage = (current: ConversationMessage[], incoming: ConversationMessage): ConversationMessage[] => {
   const index = current.findIndex((message) => message.id === incoming.id
     || Boolean(incoming.sourceId && message.sourceId === incoming.sourceId)
@@ -11,7 +27,7 @@ export const mergeMessage = (current: ConversationMessage[], incoming: Conversat
   if (index >= 0) {
     if (current[index].updatedAt && incoming.updatedAt && current[index].updatedAt > incoming.updatedAt) return current;
     const next = [...current];
-    next[index] = incoming;
+    next[index] = preserveRichSender(current[index], incoming);
     return next.sort((a, b) => a.createdAt - b.createdAt || a.id - b.id);
   }
   return [...current, incoming].sort((a, b) => a.createdAt - b.createdAt || a.id - b.id);

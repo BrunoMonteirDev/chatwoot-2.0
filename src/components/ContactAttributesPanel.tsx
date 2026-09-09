@@ -46,6 +46,7 @@ import { participantColor, participantPhone } from '../features/groups/participa
 import type { WhatsAppTransport } from '../integrations/whatsapp/provider';
 import { triggerAttachmentDownload } from '../features/attachments/fileUtils';
 import { useContactDetails } from '../features/contacts/useContactDetails';
+import { useContactConversations } from '../features/contacts/useContactConversations';
 import { ContactDetailsPanel } from './ContactDetailsPanel';
 
 interface GroupMember {
@@ -80,6 +81,10 @@ interface Props {
   onGroupMetadataResolved?: (metadata: GroupMetadata) => void;
   initialGroupMetadata?: GroupMetadata | null;
   onStartParticipantConversation?: (contactId: number) => void;
+  selectedParticipant?: GroupMember | null;
+  inboxes?: import('../domain/currentUser').Inbox[];
+  onOpenConversation?: (conversationId: number) => void;
+  onParticipantUpdated?: (contact: import('../domain/currentUser').ContactProfile) => void;
 }
 
 export const ContactAttributesPanel: React.FC<Props> = ({
@@ -101,6 +106,10 @@ export const ContactAttributesPanel: React.FC<Props> = ({
   onGroupMetadataResolved,
   initialGroupMetadata = null,
   onStartParticipantConversation,
+  selectedParticipant = null,
+  inboxes = [],
+  onOpenConversation,
+  onParticipantUpdated,
 }) => {
   // Atributos e Conteúdo têm uma única implementação: ContactDetailsPanel.
   // Este painel permanece apenas como a aba Dados específica de grupos.
@@ -121,6 +130,7 @@ export const ContactAttributesPanel: React.FC<Props> = ({
 
   // Selected Group Member for "Dados do contato" nested panel
   const [selectedMemberContact, setSelectedMemberContact] = useState<GroupMember | null>(null);
+  useEffect(() => { setSelectedMemberContact(selectedParticipant); }, [selectedParticipant, chat.id]);
 
   // Search filter inside group members list
   const [memberSearchQuery, setMemberSearchQuery] = useState('');
@@ -248,18 +258,20 @@ export const ContactAttributesPanel: React.FC<Props> = ({
   // Compute common groups from allChats
   const commonGroups = allChats.filter((c) => c.isGroup && c.id !== chat.id);
   const memberContact = useContactDetails(accountId || null, selectedMemberContact?.contactId || null);
+  const memberConversations = useContactConversations(accountId || null, selectedMemberContact?.contactId || null, Boolean(selectedMemberContact?.contactId));
   const updateMemberContact = async (update: Parameters<typeof memberContact.update>[0]) => {
     const updated = await memberContact.update(update);
     if (updated && selectedMemberContact) {
       setGroupMembers(current => current.map(member => member.contactId === updated.id ? { ...member, name: updated.name, phone: updated.phoneNumber || member.phone, avatar: updated.avatarUrl || member.avatar } : member));
       setSelectedMemberContact(current => current?.contactId === updated.id ? { ...current, name: updated.name, phone: updated.phoneNumber || current.phone, avatar: updated.avatarUrl || current.avatar } : current);
+      onParticipantUpdated?.(updated);
     }
     return updated;
   };
 
   // Private contact details are rendered by ContactDetailsPanel.
   if (!chat.isGroup) return null;
-  if (selectedMemberContact?.contactId) return <ContactDetailsPanel contact={memberContact.contact} notes={memberContact.notes} status={memberContact.status} error={memberContact.error} isSaving={memberContact.isSaving} isCreatingNote={memberContact.isCreatingNote} isDarkMode={isDarkMode} panelTitle="Dados do contato" onClose={() => setSelectedMemberContact(null)} onRetry={memberContact.retry} onUpdate={updateMemberContact} onCreateNote={memberContact.createNote} onStartConversation={onStartParticipantConversation ? () => onStartParticipantConversation(selectedMemberContact.contactId!) : undefined} />;
+  if (selectedMemberContact?.contactId) return <ContactDetailsPanel contact={memberContact.contact} notes={memberContact.notes} status={memberContact.status} error={memberContact.error} isSaving={memberContact.isSaving} isCreatingNote={memberContact.isCreatingNote} isDarkMode={isDarkMode} panelTitle="Dados do contato" onClose={() => setSelectedMemberContact(null)} onRetry={memberContact.retry} onUpdate={updateMemberContact} onCreateNote={memberContact.createNote} onStartConversation={onStartParticipantConversation ? () => onStartParticipantConversation(selectedMemberContact.contactId!) : undefined} onNewConversation={onStartParticipantConversation ? () => onStartParticipantConversation(selectedMemberContact.contactId!) : undefined} contactConversations={memberConversations.conversations} contactConversationsStatus={memberConversations.status} contactConversationsError={memberConversations.error} inboxes={inboxes} onOpenConversation={onOpenConversation} onDelete={memberContact.remove} isDeleting={memberContact.isDeleting} />;
 
   return (
     <div
