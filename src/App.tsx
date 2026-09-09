@@ -408,12 +408,9 @@ export default function App() {
   }, [applyRoute, currentAccount?.id, routeAccountId]);
 
   const openConversation = useCallback((conversationId: string) => {
-    const numericId = Number(conversationId);
-    if (currentAccount?.id && Number.isInteger(numericId)) markConversationOpen(currentAccount.id, numericId);
     navigate({ tab: 'chats', conversationId, ...(selectedInbox !== 'todas' ? { inbox: selectedInbox } : {}) });
-  }, [currentAccount?.id, navigate, selectedInbox]);
+  }, [navigate, selectedInbox]);
   const openConversationDirectly = useCallback((conversationId: number) => {
-    if (currentAccount?.id) markConversationOpen(currentAccount.id, conversationId);
     const accountId = String(currentAccount?.id || routeAccountId);
     const target = urlForAppRoute({ accountId, tab: 'chats', conversationId: String(conversationId) });
     if (`${window.location.pathname}${window.location.search}` !== target) window.history.pushState({}, '', target);
@@ -876,7 +873,6 @@ export default function App() {
       if (cached?.isFresh) return;
       const page = await messageHistoryCache.request(currentAccount.id, conversationId, (signal) => messageService.list({ accountId: currentAccount.id, conversationId, signal }));
       messageHistoryCache.set(currentAccount.id, conversationId, page, { preserveExisting: Boolean(cached), conversation: conversations.find(item => item.id === conversationId) });
-      markConversationPrefetched(currentAccount.id, conversationId);
     });
   }, [conversations, currentAccount]);
 

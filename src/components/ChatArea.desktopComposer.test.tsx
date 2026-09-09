@@ -88,4 +88,14 @@ describe('ChatArea desktop composer', () => {
     const mobileMode = container.querySelector('button[title="Trocar para nota privada"]');
     expect(mobileMode?.className).toContain('md:hidden');
   });
+
+  it('mantém cápsula e áudio/enviar na mesma linha desktop sem ocupar a página', async () => {
+    await renderComposer();
+    const row = container.querySelector('[data-testid="desktop-composer-row"]');
+    const capsule = container.querySelector('[data-testid="composer-capsule"]');
+    expect(row?.className).toContain('md:flex-wrap');
+    expect(row?.className).not.toContain('md:block');
+    expect(capsule?.className).toContain('flex-1');
+    expect(row?.contains(container.querySelector('button[title="Gravar áudio"]'))).toBe(true);
+  });
 });

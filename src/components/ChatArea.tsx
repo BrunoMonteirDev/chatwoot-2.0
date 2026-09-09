@@ -2458,13 +2458,13 @@ export const ChatArea: React.FC<Props> = ({
             </div>
           ) : (
             /* Middle Textarea Input */
-            <div className="flex items-center gap-2 md:block">
-            {activeComposerNotice && <div className={`relative mb-2 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${templateOnly ? 'border-[#00a884]/35 bg-[#00a884]/10 text-[#00a884]' : 'border-red-500/30 bg-red-500/10 text-red-400'}`}>
+            <div data-testid="desktop-composer-row" className="flex items-center gap-2 md:flex-wrap">
+            {activeComposerNotice && <div className={`relative mb-2 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs md:w-full ${templateOnly ? 'border-[#00a884]/35 bg-[#00a884]/10 text-[#00a884]' : 'border-red-500/30 bg-red-500/10 text-red-400'}`}>
               <span><strong>{activeComposerNotice.title}</strong> {activeComposerNotice.description}</span>
               {templateOnly && canUseMetaTemplates && <button type="button" onClick={() => setShowTemplatePicker(true)} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[#00a884] px-3 py-2 font-bold text-white hover:bg-[#008069]"><MessageCircle className="h-4 w-4" />Enviar template</button>}
               {templateOnly && showTemplatePicker && conversation && accountId && <MetaTemplatePicker accountId={accountId} native={conversationInbox?.channelType === 'Channel::Whatsapp'} inboxId={conversation.inboxId} conversationId={conversation.id} onClose={() => setShowTemplatePicker(false)} />}
             </div>}
-            {!templateOnly && <div className={`w-full min-w-0 flex-1 rounded-[28px] border border-transparent px-4 py-1 relative md:px-3 ${messageMode === 'privada' ? isDarkMode ? 'bg-[#1a1710] md:border-amber-600/40' : 'bg-[#fffbeb] md:border-amber-300' : isDarkMode ? 'bg-[#202c33] md:border-[#2a3942]' : 'bg-[#f0f2f5] md:bg-white md:border-[#d1d7db]'}`}>
+            {!templateOnly && <div data-testid="composer-capsule" className={`w-full min-w-0 flex-1 rounded-[28px] border border-transparent px-4 py-1 relative md:px-3 ${messageMode === 'privada' ? isDarkMode ? 'bg-[#1a1710] md:border-amber-600/40' : 'bg-[#fffbeb] md:border-amber-300' : isDarkMode ? 'bg-[#202c33] md:border-[#2a3942]' : 'bg-[#f0f2f5] md:bg-white md:border-[#d1d7db]'}`}>
               <textarea
                 ref={textareaRef}
                 disabled={externalSendBlocked}
