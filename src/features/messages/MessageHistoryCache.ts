@@ -1,4 +1,4 @@
-import type { ConversationMessage, ConversationSummary } from '../../domain/currentUser';
+import type { ContactProfile, ConversationMessage, ConversationSummary } from '../../domain/currentUser';
 import type { MessageHistoryPage } from '../../integrations/chatwoot/messages';
 import { indexGroupParticipants, participantPhone, validParticipantName } from '../groups/participant';
 import type { GroupParticipant } from '../groups/metadata';
@@ -19,8 +19,12 @@ const senderScore = (message: ConversationMessage) => {
 };
 
 export const preserveRichSender = (current: ConversationMessage, incoming: ConversationMessage): ConversationMessage => {
-  if (senderScore(incoming) > senderScore(current)) return incoming;
-  return { ...incoming, senderId: current.senderId, senderName: current.senderName, senderPhoneNumber: current.senderPhoneNumber, senderEmail: current.senderEmail, senderAvatarUrl: current.senderAvatarUrl };
+  const attachments = incoming.attachments.map(attachment => {
+    const previous = current.attachments.find(candidate => candidate.id === attachment.id || candidate.url === attachment.url);
+    return previous ? { ...attachment, width: attachment.width || previous.width, height: attachment.height || previous.height } : attachment;
+  });
+  if (senderScore(incoming) > senderScore(current)) return { ...incoming, attachments };
+  return { ...incoming, attachments, senderId: current.senderId, senderName: current.senderName, senderPhoneNumber: current.senderPhoneNumber, senderEmail: current.senderEmail, senderAvatarUrl: current.senderAvatarUrl };
 };
 
 export const mergeMessage = (current: ConversationMessage[], incoming: ConversationMessage): ConversationMessage[] => {
@@ -108,7 +112,7 @@ export class MessageHistoryCache {
     this.entries.delete(key);
     this.entries.set(key, entry);
     while (this.entries.size > this.maxEntries) this.entries.delete(this.entries.keys().next().value!);
-    void this.persistence?.put(this.persisted(accountId, conversationId, entry));
+    this.persist(this.persistence?.put(this.persisted(accountId, conversationId, entry)));
     return entry;
   }
 
@@ -118,7 +122,7 @@ export class MessageHistoryCache {
     const key = this.key(accountId, conversationId);
     let pending = this.hydrateInFlight.get(key);
     if (!pending) {
-      pending = this.persistence?.get(accountId, conversationId).then((stored) => {
+      pending = this.persistence?.get(accountId, conversationId).catch(() => null).then((stored) => {
         const installedWhileReading = this.entries.get(key);
         if (installedWhileReading) return { ...installedWhileReading, isFresh: this.now() - installedWhileReading.updatedAt < this.ttlMs };
         if (!stored) return null;
@@ -141,7 +145,7 @@ export class MessageHistoryCache {
     if (!previous) return;
     const entry = { ...previous, conversation };
     this.install(entry);
-    void this.persistence?.put(this.persisted(accountId, conversation.id, entry));
+    this.persist(this.persistence?.put(this.persisted(accountId, conversation.id, entry)));
   }
 
   upsertIfPresent(accountId: number, message: ConversationMessage) {
@@ -153,7 +157,7 @@ export class MessageHistoryCache {
     const enriched = participants ? enrichGroupParticipantMessages([message], participants, previous.conversation?.contactName)[0] : message;
     const entry = { ...previous, messages: mergeMessage(previous.messages, enriched), updatedAt: this.now() };
     this.entries.set(key, entry);
-    void this.persistence?.put(this.persisted(accountId, message.conversationId, entry));
+    this.persist(this.persistence?.put(this.persisted(accountId, message.conversationId, entry)));
     return true;
   }
 
@@ -165,20 +169,71 @@ export class MessageHistoryCache {
     const messages = enrichGroupParticipantMessages(previous.messages, participants, previous.conversation?.contactName);
     const entry = { ...previous, messages };
     this.install(entry);
-    void this.persistence?.put(this.persisted(accountId, conversationId, entry));
+    this.persist(this.persistence?.put(this.persisted(accountId, conversationId, entry)));
+    return messages;
+  }
+
+  enrichSenderContacts(accountId: number, conversationId: number, contacts: ContactProfile[]) {
+    const key = this.key(accountId, conversationId);
+    const previous = this.entries.get(key);
+    if (!previous || !contacts.length) return null;
+    const byId = new Map(contacts.map(contact => [contact.id, contact]));
+    let changed = false;
+    const messages = previous.messages.map(message => {
+      const participantContactId = Number(message.contentAttributes.whatsapp_participant_contact_id);
+      const contact = byId.get(participantContactId || message.senderId || 0);
+      if (!contact) return message;
+      const next = {
+        ...message,
+        senderId: contact.id,
+        senderName: contact.name || message.senderName,
+        senderPhoneNumber: contact.phoneNumber || message.senderPhoneNumber,
+        senderEmail: contact.email || message.senderEmail,
+        senderAvatarUrl: contact.avatarUrl || message.senderAvatarUrl,
+        contentAttributes: { ...message.contentAttributes, whatsapp_participant_contact_id: contact.id },
+      };
+      if (next.senderName === message.senderName && next.senderPhoneNumber === message.senderPhoneNumber && next.senderEmail === message.senderEmail && next.senderAvatarUrl === message.senderAvatarUrl && next.senderId === message.senderId) return message;
+      changed = true;
+      return next;
+    });
+    if (!changed) return previous.messages;
+    const entry = { ...previous, messages };
+    this.install(entry);
+    this.persist(this.persistence?.put(this.persisted(accountId, conversationId, entry)));
+    return messages;
+  }
+
+  enrichAttachmentDimensions(accountId: number, conversationId: number, messageId: number, attachmentId: number, width: number, height: number) {
+    if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) return null;
+    const key = this.key(accountId, conversationId);
+    const previous = this.entries.get(key);
+    if (!previous) return null;
+    let changed = false;
+    const messages = previous.messages.map(message => message.id !== messageId ? message : {
+      ...message,
+      attachments: message.attachments.map(attachment => {
+        if (attachment.id !== attachmentId || (attachment.width === width && attachment.height === height)) return attachment;
+        changed = true;
+        return { ...attachment, width, height };
+      }),
+    });
+    if (!changed) return previous.messages;
+    const entry = { ...previous, messages };
+    this.install(entry);
+    this.persist(this.persistence?.put(this.persisted(accountId, conversationId, entry)));
     return messages;
   }
 
   setScroll(accountId: number, conversationId: number, scrollTop: number) {
     const key = this.key(accountId, conversationId);
     const entry = this.entries.get(key);
-    if (entry) { entry.scrollTop = scrollTop; void this.persistence?.put(this.persisted(accountId, conversationId, entry)); }
+    if (entry) { entry.scrollTop = scrollTop; this.persist(this.persistence?.put(this.persisted(accountId, conversationId, entry))); }
   }
 
   removeMessage(accountId: number, conversationId: number, messageId: number) {
     const key = this.key(accountId, conversationId);
     const entry = this.entries.get(key);
-    if (entry) { entry.messages = entry.messages.filter((message) => message.id !== messageId); void this.persistence?.put(this.persisted(accountId, conversationId, entry)); }
+    if (entry) { entry.messages = entry.messages.filter((message) => message.id !== messageId); this.persist(this.persistence?.put(this.persisted(accountId, conversationId, entry))); }
   }
 
   request(accountId: number, conversationId: number, fetcher: Fetcher, signal?: AbortSignal, variant = 'latest'): Promise<MessageHistoryPage> {
@@ -202,7 +257,7 @@ export class MessageHistoryCache {
   abort(accountId: number, conversationId: number, variant = 'latest') { this.inFlight.get(`${this.key(accountId, conversationId)}:${variant}`)?.controller.abort(); }
   isLoading(accountId: number, conversationId: number, variant = 'latest') { return this.inFlight.has(`${this.key(accountId, conversationId)}:${variant}`); }
   size() { return this.entries.size; }
-  async clear() { this.generation += 1; this.entries.clear(); this.participants.clear(); this.hydrateInFlight.clear(); await this.persistence?.clear(); }
+  async clear() { this.generation += 1; this.entries.clear(); this.participants.clear(); this.hydrateInFlight.clear(); await this.persistence?.clear().catch(() => undefined); }
 
   private install(entry: Entry) {
     this.entries.delete(entry.key);
@@ -212,6 +267,10 @@ export class MessageHistoryCache {
 
   private persisted(accountId: number, conversationId: number, entry: Entry): PersistedMessageHistory {
     return { key: entry.key, accountId, conversationId, messages: entry.messages, hasOlderMessages: entry.hasOlderMessages, updatedAt: entry.updatedAt, scrollTop: entry.scrollTop, oldestMessageId: entry.messages[0]?.id, conversation: entry.conversation };
+  }
+
+  private persist(operation?: Promise<void>) {
+    void operation?.catch(error => { if (import.meta.env.DEV) console.warn('[indexeddb] cache write skipped', error); });
   }
 }
 

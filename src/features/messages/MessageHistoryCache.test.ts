@@ -186,6 +186,45 @@ describe('MessageHistoryCache', () => {
     expect(await persistence.get(1, 1)).toBeNull();
   });
 
+  it('mantém falha do IndexedDB fora do fluxo da timeline e sem rejeição exposta', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const persistence = {
+      get: vi.fn(async () => { throw new Error('storage unavailable'); }),
+      put: vi.fn(async () => { throw new Error('storage unavailable'); }),
+      clear: vi.fn(async () => { throw new Error('storage unavailable'); }),
+    };
+    const cache = new MessageHistoryCache(12, 30_000, () => 100, persistence);
+    cache.set(1, 1, page(message(1)));
+    expect(cache.get(1, 1)?.messages).toEqual([message(1)]);
+    await expect(cache.hydrate(1, 2)).resolves.toBeNull();
+    await expect(cache.clear()).resolves.toBeUndefined();
+    warning.mockRestore();
+  });
+
+  it('enriquece avatar em RAM, persiste o sender e o reutiliza após F5', async () => {
+    const persistence = new MemoryMessageHistoryPersistence();
+    const cache = new MessageHistoryCache(12, 30_000, () => 100, persistence);
+    cache.set(1, 1, page(message(1, { senderId: 800, contentAttributes: { whatsapp_participant_contact_id: 91 } })));
+    cache.enrichSenderContacts(1, 1, [{ id: 91, name: 'Ricardo', avatarUrl: 'ricardo.jpg', phoneNumber: '+5511999999999', email: null, identifier: null, companyName: null, city: null, country: null, blocked: false, lastActivityAt: null, createdAt: null, additionalAttributes: {}, customAttributes: {} }]);
+    expect(cache.get(1, 1)?.messages[0]).toMatchObject({ senderId: 91, senderName: 'Ricardo', senderAvatarUrl: 'ricardo.jpg' });
+    await Promise.resolve();
+    const afterRefresh = new MessageHistoryCache(12, 30_000, () => 101, persistence);
+    expect((await afterRefresh.hydrate(1, 1))?.messages[0]).toMatchObject({ senderId: 91, senderAvatarUrl: 'ricardo.jpg' });
+  });
+
+  it('persiste dimensões descobertas e não deixa revalidação sem metadata apagá-las', async () => {
+    const persistence = new MemoryMessageHistoryPersistence();
+    const cache = new MessageHistoryCache(12, 30_000, () => 100, persistence);
+    const legacy = message(1, { attachments: [{ id: 7, kind: 'image', url: 'photo.jpg', thumbnailUrl: null, title: null, contentType: 'image/jpeg', size: null, width: null, height: null }] });
+    cache.set(1, 1, page(legacy));
+    cache.enrichAttachmentDimensions(1, 1, 1, 7, 1920, 1080);
+    cache.set(1, 1, page(legacy), { preserveExisting: true });
+    expect(cache.get(1, 1)?.messages[0].attachments[0]).toMatchObject({ width: 1920, height: 1080 });
+    await Promise.resolve();
+    const afterRefresh = new MessageHistoryCache(12, 30_000, () => 101, persistence);
+    expect((await afterRefresh.hydrate(1, 1))?.messages[0].attachments[0]).toMatchObject({ width: 1920, height: 1080 });
+  });
+
   it('descarta resposta iniciada antes do logout', async () => {
     const cache = new MessageHistoryCache();
     let resolve!: (value: ReturnType<typeof page>) => void;

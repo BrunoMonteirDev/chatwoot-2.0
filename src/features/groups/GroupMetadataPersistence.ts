@@ -1,4 +1,5 @@
 import type { GroupMetadata } from './metadata';
+import { IndexedDbConnectionManager } from '../persistence/IndexedDbConnectionManager';
 
 const DATABASE = 'kopla-group-metadata-v1';
 const STORE = 'groups';
@@ -26,44 +27,42 @@ export class MemoryGroupMetadataPersistence implements GroupMetadataPersistence 
 }
 
 export class IndexedDbGroupMetadataPersistence implements GroupMetadataPersistence {
-  private database?: Promise<IDBDatabase | null>;
-  private open() {
-    if (this.database) return this.database;
-    this.database = new Promise((resolve) => {
-      if (typeof indexedDB === 'undefined') { resolve(null); return; }
-      const request = indexedDB.open(DATABASE, 1);
-      request.onupgradeneeded = () => request.result.createObjectStore(STORE, { keyPath: 'key' });
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => resolve(null);
-      request.onblocked = () => resolve(null);
-    });
-    return this.database;
-  }
+  private readonly database = new IndexedDbConnectionManager(DATABASE, 1, database => database.createObjectStore(STORE, { keyPath: 'key' }));
+
   async get(key: string) {
-    const database = await this.open();
-    if (!database) return null;
-    return new Promise<PersistedGroupMetadata | null>((resolve) => {
-      const request = database.transaction(STORE, 'readonly').objectStore(STORE).get(key);
+    return this.safe(() => this.database.run(database => new Promise<PersistedGroupMetadata | null>((resolve, reject) => {
+      const transaction = database.transaction(STORE, 'readonly');
+      const request = transaction.objectStore(STORE).get(key);
       request.onsuccess = () => resolve((request.result as PersistedGroupMetadata | undefined) || null);
-      request.onerror = () => resolve(null);
-    });
+      request.onerror = () => reject(request.error);
+    })), null);
   }
+
   async put(value: PersistedGroupMetadata) {
-    const database = await this.open();
-    if (!database) return;
-    await new Promise<void>((resolve) => {
-      const request = database.transaction(STORE, 'readwrite').objectStore(STORE).put(value);
-      request.onsuccess = () => resolve();
-      request.onerror = () => resolve();
-    });
+    await this.safe(() => this.database.run(database => new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORE, 'readwrite');
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+      transaction.objectStore(STORE).put(value);
+    })), undefined);
   }
+
   async clear() {
-    const database = await this.open();
-    if (!database) return;
-    await new Promise<void>((resolve) => {
-      const request = database.transaction(STORE, 'readwrite').objectStore(STORE).clear();
-      request.onsuccess = () => resolve();
-      request.onerror = () => resolve();
-    });
+    await this.safe(() => this.database.run(database => new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORE, 'readwrite');
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+      transaction.objectStore(STORE).clear();
+    })), undefined);
+  }
+
+  private async safe<T>(operation: () => Promise<T | null>, fallback: T): Promise<T> {
+    try { return (await operation()) ?? fallback; }
+    catch (error) {
+      if (import.meta.env.DEV) console.warn('[indexeddb] group metadata cache unavailable', error);
+      return fallback;
+    }
   }
 }

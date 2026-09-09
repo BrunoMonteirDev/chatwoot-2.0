@@ -4,7 +4,7 @@ import { contactService, type ContactUpdate } from '../../integrations/chatwoot/
 import { errorMessageForUser } from '../../integrations/chatwoot/errors';
 
 const CONTACT_DETAILS_TTL_MS = 5 * 60_000;
-type ContactDetailsEntry = { contact: ContactProfile; updatedAt: number };
+type ContactDetailsEntry = { contact: ContactProfile; updatedAt: number; detailed: boolean };
 const contactDetailsCache = new Map<string, ContactDetailsEntry>();
 const contactNotesCache = new Map<string, { notes: ContactNote[]; updatedAt: number }>();
 const contactDetailsRequests = new Map<string, Promise<ContactDetailsEntry>>();
@@ -15,18 +15,28 @@ const cachedContactDetails = (accountId: number, contactId: number) => contactDe
 const requestContactDetails = (accountId: number, contactId: number) => {
   const key = contactKey(accountId, contactId);
   const cached = contactDetailsCache.get(key);
-  if (cached && Date.now() - cached.updatedAt < CONTACT_DETAILS_TTL_MS) return Promise.resolve(cached);
+  if (cached?.detailed && Date.now() - cached.updatedAt < CONTACT_DETAILS_TTL_MS) return Promise.resolve(cached);
   let pending = contactDetailsRequests.get(key);
   if (!pending) {
     const generation = contactCacheGeneration;
     pending = contactService.get(accountId, contactId).then(contact => {
-      const entry = { ...contactDetailsCache.get(key), contact, updatedAt: Date.now() };
+      const entry = { contact, updatedAt: Date.now(), detailed: true };
       if (generation === contactCacheGeneration) contactDetailsCache.set(key, entry);
       return entry;
     }).finally(() => contactDetailsRequests.delete(key));
     contactDetailsRequests.set(key, pending);
   }
   return pending;
+};
+export const cachedContactProfile = (accountId: number, contactId: number) => cachedContactDetails(accountId, contactId)?.contact || null;
+export const resolveContactProfile = async (accountId: number, contactId: number) => (await requestContactDetails(accountId, contactId)).contact;
+export const cacheContactProfiles = (accountId: number, contacts: ContactProfile[]) => {
+  const updatedAt = Date.now();
+  contacts.forEach(contact => {
+    const key = contactKey(accountId, contact.id);
+    const existing = contactDetailsCache.get(key);
+    if (!existing?.detailed) contactDetailsCache.set(key, { contact, updatedAt, detailed: false });
+  });
 };
 const requestContactNotes = (accountId: number, contactId: number) => {
   const key = contactKey(accountId, contactId);
@@ -84,7 +94,7 @@ export const useContactDetails = (accountId: number | null, contactId: number | 
     const cached = cachedContactDetails(accountId, contactId);
     if (cached) {
       setContact(cached.contact); setNotes(contactNotesCache.get(contactKey(accountId, contactId))?.notes || []); setStatus('ready');
-      if (Date.now() - cached.updatedAt < CONTACT_DETAILS_TTL_MS) return;
+      if (cached.detailed && Date.now() - cached.updatedAt < CONTACT_DETAILS_TTL_MS) return;
     }
     void load();
     return () => abortRef.current?.abort();

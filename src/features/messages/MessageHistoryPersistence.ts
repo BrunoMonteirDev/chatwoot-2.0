@@ -1,4 +1,5 @@
 import type { ConversationMessage, ConversationSummary } from '../../domain/currentUser';
+import { IndexedDbConnectionManager } from '../persistence/IndexedDbConnectionManager';
 
 export const MESSAGE_HISTORY_DATABASE = 'kopla-message-history-v1';
 const STORE = 'histories';
@@ -32,64 +33,63 @@ export class MemoryMessageHistoryPersistence implements MessageHistoryPersistenc
 }
 
 export class IndexedDbMessageHistoryPersistence implements MessageHistoryPersistence {
-  private database?: Promise<IDBDatabase | null>;
-
-  private open() {
-    if (this.database) return this.database;
-    this.database = new Promise((resolve) => {
-      if (typeof indexedDB === 'undefined') { resolve(null); return; }
-      const request = indexedDB.open(MESSAGE_HISTORY_DATABASE, 1);
-      request.onupgradeneeded = () => {
-        const store = request.result.createObjectStore(STORE, { keyPath: 'key' });
-        store.createIndex('updatedAt', 'updatedAt');
-      };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => resolve(null);
-      request.onblocked = () => resolve(null);
-    });
-    return this.database;
-  }
+  private readonly database = new IndexedDbConnectionManager(MESSAGE_HISTORY_DATABASE, 1, database => {
+    const store = database.createObjectStore(STORE, { keyPath: 'key' });
+    store.createIndex('updatedAt', 'updatedAt');
+  });
 
   async get(accountId: number, conversationId: number) {
-    const database = await this.open();
-    if (!database) return null;
-    return new Promise<PersistedMessageHistory | null>((resolve) => {
-      const request = database.transaction(STORE, 'readonly').objectStore(STORE).get(keyFor(accountId, conversationId));
+    return this.safe(() => this.database.run(database => new Promise<PersistedMessageHistory | null>((resolve, reject) => {
+      const transaction = database.transaction(STORE, 'readonly');
+      const request = transaction.objectStore(STORE).get(keyFor(accountId, conversationId));
       request.onsuccess = () => resolve((request.result as PersistedMessageHistory | undefined) || null);
-      request.onerror = () => resolve(null);
-    });
+      request.onerror = () => reject(request.error);
+    })), null);
   }
 
   async put(entry: PersistedMessageHistory) {
-    const database = await this.open();
-    if (!database) return;
-    await new Promise<void>((resolve) => {
-      const request = database.transaction(STORE, 'readwrite').objectStore(STORE).put(entry);
-      request.onsuccess = () => resolve();
-      request.onerror = () => resolve();
-    });
-    await this.trim(database);
+    await this.safe(() => this.database.run(database => new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORE, 'readwrite');
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+      transaction.objectStore(STORE).put(entry);
+    })), undefined);
+    await this.trim();
   }
 
-  private async trim(database: IDBDatabase) {
-    const keys = await new Promise<IDBValidKey[]>((resolve) => {
+  private async trim() {
+    const keys = await this.safe(() => this.database.run(database => new Promise<IDBValidKey[]>((resolve, reject) => {
       const request = database.transaction(STORE, 'readonly').objectStore(STORE).index('updatedAt').getAllKeys();
       request.onsuccess = () => resolve(request.result);
-      request.onerror = () => resolve([]);
-    });
+      request.onerror = () => reject(request.error);
+    })), []);
     if (keys.length <= MAX_PERSISTED_CONVERSATIONS) return;
-    const transaction = database.transaction(STORE, 'readwrite');
-    keys.slice(0, keys.length - MAX_PERSISTED_CONVERSATIONS).forEach(key => transaction.objectStore(STORE).delete(key));
+    await this.safe(() => this.database.run(database => new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORE, 'readwrite');
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+      keys.slice(0, keys.length - MAX_PERSISTED_CONVERSATIONS).forEach(key => transaction.objectStore(STORE).delete(key));
+    })), undefined);
   }
 
   async clear() {
-    const database = await this.open();
-    if (!database) return;
-    await new Promise<void>((resolve) => {
-      const request = database.transaction(STORE, 'readwrite').objectStore(STORE).clear();
-      request.onsuccess = () => resolve();
-      request.onerror = () => resolve();
-    });
+    await this.safe(() => this.database.run(database => new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORE, 'readwrite');
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+      transaction.objectStore(STORE).clear();
+    })), undefined);
+  }
+
+  private async safe<T>(operation: () => Promise<T | null>, fallback: T): Promise<T> {
+    try { return (await operation()) ?? fallback; }
+    catch (error) {
+      if (import.meta.env.DEV) console.warn('[indexeddb] message history cache unavailable', error);
+      return fallback;
+    }
   }
 }
 

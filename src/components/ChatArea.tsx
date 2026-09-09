@@ -81,8 +81,9 @@ import { persistedGroupMetadata, type GroupMetadata, type GroupParticipant } fro
 import { indexGroupParticipants, participantColor, participantLabel, participantPhone } from '../features/groups/participant';
 import { mentionReplacements, mentionTargetFor, participantMentionLabel, pruneMentionSelections, type MentionSelection } from '../features/groups/mentions';
 import { providerProfileClient } from '../features/contacts/providerProfile';
-import { messageBubbleWidthClassName, messageTimelineClassName, messageVisualMediaClassName } from '../features/messages/messageLayout';
+import { messageBubbleWidthClassName, messageTimelineClassName } from '../features/messages/messageLayout';
 import { conversationOpeningMetrics } from '../features/messages/conversationOpeningMetrics';
+import { TimelineMediaAttachment } from './TimelineMediaAttachment';
 
 const updateParticipantIndex = (index: Record<string, GroupParticipant>, updated: ContactProfile) => Object.fromEntries(
   Object.entries(index).map(([key, participant]) => [key, participant.contactId === updated.id
@@ -331,6 +332,7 @@ const DocumentAttachmentCard: React.FC<{
           <img
             src={attachment.previewUrl}
             alt={attachment.title || 'Document Preview'}
+            loading="lazy"
             className="h-full w-full object-cover object-top"
           />
         </div>
@@ -631,6 +633,7 @@ interface Props {
   onContactProfileResolved?: (profile: { name?: string; avatarUrl?: string }) => void;
   onStartGroupParticipantConversation?: (contactId: number, inboxId: number) => void;
   onContactPanelStateChange?: (open: boolean, tab: 'contact' | 'attributes' | 'content') => void;
+  onAttachmentDimensionsResolved?: (messageId: string, attachmentId: string, width: number, height: number) => void;
 }
 
 export const ChatArea: React.FC<Props> = ({
@@ -698,6 +701,7 @@ export const ChatArea: React.FC<Props> = ({
   onGroupMetadataResolved,
   onContactProfileResolved,
   onStartGroupParticipantConversation,
+  onAttachmentDimensionsResolved,
   onContactPanelStateChange,
 }) => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -2012,7 +2016,7 @@ export const ChatArea: React.FC<Props> = ({
               >
                 <div className={`flex w-full items-end gap-1.5 ${isMe ? 'justify-end' : 'justify-start'}`}>
                 {!isMe && isGroupMessage && senderName && <button type="button" disabled={!senderContactId} aria-label={`Abrir contato de ${senderName}`} onClick={() => openGroupParticipant(senderContactId, senderName, senderPhone, participantAvatar || msg.senderAvatarUrl)} className="mb-0.5 grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-full text-[9px] font-bold text-white enabled:cursor-pointer enabled:ring-offset-1 enabled:hover:ring-2 enabled:hover:ring-[#00a884] disabled:cursor-default" style={{ backgroundColor: msg.senderColor || participantColor(msg.senderIdentity || senderName) }}>
-                  {participantAvatar ? <img src={participantAvatar} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : senderName.split('·')[0].trim().split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toUpperCase()}
+                  {participantAvatar || msg.senderAvatarUrl ? <img src={participantAvatar || msg.senderAvatarUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : senderName.split('·')[0].trim().split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toUpperCase()}
                 </button>}
                 <div
                   onContextMenu={(e) => handleMessageContextMenu(e, msg)}
@@ -2084,27 +2088,10 @@ export const ChatArea: React.FC<Props> = ({
                           return <DocumentAttachmentCard key={att.id} attachment={att} />;
                         }
                         if (att.type === 'image') {
-                          return (
-                            <div
-                              key={att.id}
-                              onClick={() =>
-                                onImageClick(att.url, att.title, att.subtitle)
-                              }
-                              className={`relative inline-flex max-w-full overflow-hidden rounded-md align-top group/img cursor-pointer ${isDarkMode ? 'bg-black/20' : 'bg-black/5'}`}
-                            >
-                              <img
-                                src={att.url}
-                                alt={att.title || 'Attachment'}
-                                width={att.width}
-                                height={att.height}
-                                className={`${messageVisualMediaClassName} transition-transform group-hover/img:scale-102 duration-200`}
-                                referrerPolicy="no-referrer"
-                              />
-                            </div>
-                          );
+                          return <TimelineMediaAttachment key={`${att.id}:${att.url}`} attachment={att} isDarkMode={isDarkMode} onImageClick={onImageClick} onDimensionsResolved={(attachmentId, width, height) => onAttachmentDimensionsResolved?.(msg.id, attachmentId, width, height)} />;
                         }
                         if (att.type === 'video') {
-                          return <video key={att.id} controls preload="metadata" poster={att.previewUrl} width={att.width} height={att.height} className={`${messageVisualMediaClassName} rounded-md bg-black`} src={att.url}>Seu navegador não suporta vídeo.</video>;
+                          return <TimelineMediaAttachment key={`${att.id}:${att.url}`} attachment={att} isDarkMode={isDarkMode} onImageClick={onImageClick} onDimensionsResolved={(attachmentId, width, height) => onAttachmentDimensionsResolved?.(msg.id, attachmentId, width, height)} />;
                         }
                         return null;
                       })}

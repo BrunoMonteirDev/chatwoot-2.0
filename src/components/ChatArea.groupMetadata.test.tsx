@@ -36,6 +36,13 @@ describe('ChatArea group metadata opening', () => {
     expect(get).not.toHaveBeenCalled();
   });
 
+  it('renders the sender thumbnail carried by the message without opening group data', async () => {
+    const withSenderAvatar = { ...chat, messages: [{ ...chat.messages[0], senderName: 'Maria', senderAvatarUrl: 'https://example.test/maria.jpg' }] };
+    await act(async () => { root.render(<ChatArea chat={withSenderAvatar} conversation={conversation} accountId={1} historyStatus="ready" onSendMessage={() => undefined} onImageClick={() => undefined} onSearchInChat={() => undefined} />); });
+    expect(container.querySelector('img[src="https://example.test/maria.jpg"]')).toBeTruthy();
+    expect(get).not.toHaveBeenCalled();
+  });
+
   it('switches A → B → C from selected conversation data without stale provider responses', async () => {
     for (const [id, name] of [[81, 'Grupo A'], [82, 'Grupo B'], [83, 'Contato C']] as const) {
       const selected = { ...conversation, id, contactName: name, contactId: id, isGroup: id !== 83 };

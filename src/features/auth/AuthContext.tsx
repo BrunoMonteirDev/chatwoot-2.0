@@ -44,8 +44,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const clearAuthentication = useCallback(() => {
     authSession.clear();
-    void messageHistoryCache.clear();
-    void groupMetadataClient.clear();
+    void Promise.allSettled([messageHistoryCache.clear(), groupMetadataClient.clear()]);
     clearContactDetailsCache();
     clearWhatsAppCapabilityCache();
     labelCatalog.clear();

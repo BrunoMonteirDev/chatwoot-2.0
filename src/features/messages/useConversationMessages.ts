@@ -8,6 +8,8 @@ import { whatsappMessageMutationService } from '../../integrations/whatsapp/mess
 import { mergeMessage, messageHistoryCache } from './MessageHistoryCache';
 import type { GroupParticipant } from '../groups/metadata';
 import { conversationOpeningMetrics } from './conversationOpeningMetrics';
+import { cachedContactProfile, resolveContactProfile } from '../contacts/useContactDetails';
+import { missingSenderContactIds } from './senderAvatarEnrichment';
 
 export const mergeRealtimeMessage = mergeMessage;
 
@@ -64,6 +66,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
   const reactionInFlight = useRef(new Set<string>());
   const hasRenderableHistoryRef = useRef(false);
   const renderedConversationKeyRef = useRef<string | null>(null);
+  const avatarEnrichmentRef = useRef(new Set<string>());
 
   const load = useCallback(async (before?: number, prepend = false, silent = false) => {
     if (!accountId || !conversationId) return;
@@ -131,6 +134,25 @@ export const useConversationMessages = (accountId: number | null, conversationId
 
   useLayoutEffect(() => {
     if (status === 'ready' && renderedConversationKeyRef.current === `${accountId}:${conversationId}` && accountId && conversationId) conversationOpeningMetrics.messagesRendered(accountId, conversationId);
+  }, [accountId, conversationId, messages, status]);
+
+  useEffect(() => {
+    const activeKey = `${accountId}:${conversationId}`;
+    if (status !== 'ready' || renderedConversationKeyRef.current !== activeKey || !accountId || !conversationId) return;
+    const contactIds = missingSenderContactIds(messages).filter(contactId => !avatarEnrichmentRef.current.has(`${activeKey}:${contactId}`));
+    if (!contactIds.length) return;
+    contactIds.forEach(contactId => avatarEnrichmentRef.current.add(`${activeKey}:${contactId}`));
+    let active = true;
+    void Promise.all(contactIds.map(contactId => {
+      const cached = cachedContactProfile(accountId, contactId);
+      return cached?.avatarUrl ? cached : resolveContactProfile(accountId, contactId);
+    }))
+      .then(contacts => {
+        const enriched = messageHistoryCache.enrichSenderContacts(accountId, conversationId, contacts);
+        if (active && renderedConversationKeyRef.current === activeKey && enriched) setMessages(enriched);
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
   }, [accountId, conversationId, messages, status]);
 
   const loadOlder = useCallback(() => {
@@ -293,6 +315,13 @@ export const useConversationMessages = (accountId: number | null, conversationId
     if (enriched) setMessages(enriched);
   }, [accountId, conversationId]);
 
+  const rememberAttachmentDimensions = useCallback((messageId: number, attachmentId: number, width: number, height: number) => {
+    if (!accountId || !conversationId) return;
+    // Do not replace the active render on decode: its fallback frame remains
+    // stable. The keyed RAM/IndexedDB entry is ready for the next mount/F5.
+    messageHistoryCache.enrichAttachmentDimensions(accountId, conversationId, messageId, attachmentId, width, height);
+  }, [accountId, conversationId]);
+
   // Backstop for transient ActionCable/proxy drops: merge the latest page in
   // the background rather than resetting the current view or its scroll.
   const refreshLatest = useCallback(async () => {
@@ -314,5 +343,5 @@ export const useConversationMessages = (accountId: number | null, conversationId
   const cachedScrollTop = accountId && conversationId ? messageHistoryCache.get(accountId, conversationId)?.scrollTop || 0 : 0;
   const activeStatus = renderedConversationKeyRef.current === `${accountId}:${conversationId}` ? status : conversationId ? 'loading' : 'idle';
 
-  return { messages, status: activeStatus, error, hasOlderMessages, isLoadingOlder, cachedScrollTop, saveScroll, retry: () => load(), loadOlder, send, retrySend, remove, react, edit: (messageId: number, content: string) => mutate('edit', messageId, content), revoke: (messageId: number) => mutate('revoke', messageId), upsertRealtimeMessage, enrichParticipants, refreshLatest };
+  return { messages, status: activeStatus, error, hasOlderMessages, isLoadingOlder, cachedScrollTop, saveScroll, retry: () => load(), loadOlder, send, retrySend, remove, react, edit: (messageId: number, content: string) => mutate('edit', messageId, content), revoke: (messageId: number) => mutate('revoke', messageId), upsertRealtimeMessage, enrichParticipants, rememberAttachmentDimensions, refreshLatest };
 };

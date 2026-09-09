@@ -59,7 +59,7 @@ import { useConversationManagement } from './features/conversations/useConversat
 import { useAccountLabels } from './features/labels/useAccountLabels';
 import { updateConversationLabelsOptimistically } from './features/labels/conversationLabels';
 import { useChatwootRealtime } from './features/realtime/useChatwootRealtime';
-import { useContactDetails } from './features/contacts/useContactDetails';
+import { cacheContactProfiles, useContactDetails } from './features/contacts/useContactDetails';
 import { useContacts } from './features/contacts/useContacts';
 import { toContactListItem } from './features/contacts/toContactListItem';
 import { conversationService, type ConversationServerFilters } from './integrations/chatwoot/conversations';
@@ -87,6 +87,9 @@ export default function App() {
   const [contactPanelState, setContactPanelState] = useState<{ open: boolean; tab: 'contact' | 'attributes' | 'content' }>({ open: false, tab: 'contact' });
   const [managementCatalogInboxId, setManagementCatalogInboxId] = useState<number | null>(null);
   const contactDirectory = useContacts(currentAccount?.id ?? null);
+  useEffect(() => {
+    if (currentAccount && contactDirectory.contacts.length) cacheContactProfiles(currentAccount.id, contactDirectory.contacts);
+  }, [contactDirectory.contacts, currentAccount]);
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeChatId, setActiveChatId] = useState<string>(() => initialRoute.conversationId || '');
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -1369,6 +1372,7 @@ export default function App() {
                   onLoadOlderMessages={messageHistory.loadOlder}
                   historyScrollTop={messageHistory.cachedScrollTop}
                   onHistoryScrollChange={messageHistory.saveScroll}
+                  onAttachmentDimensionsResolved={(messageId, attachmentId, width, height) => messageHistory.rememberAttachmentDimensions(Number(messageId), Number(attachmentId), width, height)}
                   onRetryMessage={(messageId) => void messageHistory.retrySend(Number(messageId)).then((message) => {
                     if (message) applyOutgoingMessage(message);
                   })}
