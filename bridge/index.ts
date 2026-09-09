@@ -148,6 +148,99 @@ const groupTransport = (configuration: { transports: Array<'evolution' | 'waha' 
   // gets it from the conversation's latest group message; never assume Meta.
   return configuration.transports.length === 1 ? configuration.transports[0] : null;
 };
+const eligibleGroupInbox = async (accountId: number, inbox: Awaited<ReturnType<typeof chatwootBridge.listInboxesForSession>>[number]) => {
+  const attributes = inbox.additional_attributes || {};
+  const apiConfiguration = inbox.channel_type === 'Channel::Api' ? transportConfigurationForInbox(attributes) : null;
+  const hybridSession = inbox.channel_type === 'Channel::Whatsapp' && attributes.hybrid_enabled === true && typeof attributes.hybrid_waha_session === 'string' ? attributes.hybrid_waha_session : null;
+  const transport = hybridSession || apiConfiguration?.transports.includes('waha') ? 'waha' : apiConfiguration?.transports.includes('evolution') ? 'evolution' : null;
+  const session = hybridSession || apiConfiguration?.wahaSessionName || null;
+  if (!transport) return null;
+  try {
+    if (transport === 'waha') {
+      if (!session) return null;
+      await adoptLegacyWahaOwnership(accountId, inbox.id);
+      await wahaSessions.assertOwned(accountId, inbox.id, session);
+      if ((await wahaTransport.getSession(session)).status !== 'WORKING') return null;
+    } else if (!apiConfiguration?.evolutionInstanceName || evolutionConnectionStatus(await evolutionBridge.getConnection(apiConfiguration.evolutionInstanceName)) !== 'connected') return null;
+    return { id: inbox.id, name: inbox.name || `Inbox ${inbox.id}`, transport, sessionName: session, instanceName: apiConfiguration?.evolutionInstanceName || null };
+  } catch { return null; }
+};
+const normalizedContactDigits = (value: unknown) => typeof value === 'string' ? value.replace(/\D/g, '') : '';
+const groupCreationContacts = async (accountId: number, contactIds: number[], sessionHeaders: Headers) => {
+  if (!contactIds.length || contactIds.some(id => !Number.isInteger(id)) || new Set(contactIds).size !== contactIds.length) throw new Error('Seleção de contatos inválida.');
+  const contacts = await chatwootBridge.contactsByIdsForSession(accountId, contactIds, sessionHeaders);
+  return contacts.map(contact => {
+    const phone = normalizedContactDigits(contact.phone_number);
+    if (!phone) throw new Error(`O contato ${contact.id} não possui telefone válido.`);
+    return { id: contact.id, name: contact.name || contact.phone_number || phone, phone, avatarUrl: contact.thumbnail || null };
+  });
+};
+
+app.get('/groups/creation/inboxes', async (request, response) => {
+  if (!(await requireBridgeUser(request, response))) return;
+  const accountId = Number(request.query.accountId); const sessionHeaders = chatwootSessionHeaders(request);
+  if (!Number.isInteger(accountId) || !sessionHeaders) return response.status(400).json({ error: 'Conta obrigatória.' });
+  try {
+    const inboxes = await chatwootBridge.listInboxesForSession(accountId, sessionHeaders);
+    const eligible = (await Promise.all(inboxes.map(inbox => eligibleGroupInbox(accountId, inbox)))).filter(Boolean);
+    return response.json({ inboxes: eligible });
+  } catch { return response.status(403).json({ error: 'Não foi possível validar as caixas de entrada desta conta.' }); }
+});
+
+app.get('/groups/creation/contacts', async (request, response) => {
+  if (!(await requireBridgeUser(request, response))) return;
+  const accountId = Number(request.query.accountId); const query = String(request.query.q || '').trim(); const sessionHeaders = chatwootSessionHeaders(request);
+  if (!Number.isInteger(accountId) || !sessionHeaders || query.length < 2) return response.json({ contacts: [] });
+  try {
+    const digits = normalizedContactDigits(query);
+    const queries = [...new Set([query, digits, digits.length >= 8 ? digits.slice(-8) : ''].filter(value => value.length >= 2))];
+    const matches = (await Promise.all(queries.map(value => chatwootBridge.searchContactsForSession(accountId, value, sessionHeaders)))).flat();
+    const seen = new Set<number>();
+    const contacts = matches.filter(contact => {
+      if (seen.has(contact.id)) return false;
+      const phone = normalizedContactDigits(contact.phone_number);
+      const matchesQuery = !digits || phone.includes(digits) || digits.includes(phone) || (digits.length >= 8 && phone.endsWith(digits.slice(-8)));
+      if (digits && !matchesQuery && !(contact.name || '').toLowerCase().includes(query.toLowerCase())) return false;
+      seen.add(contact.id); return Boolean(phone);
+    }).slice(0, 20).map(contact => ({ id: contact.id, name: contact.name || contact.phone_number, phoneNumber: contact.phone_number, avatarUrl: contact.thumbnail || null }));
+    return response.json({ contacts });
+  } catch { return response.status(403).json({ error: 'Não foi possível buscar contatos desta conta.' }); }
+});
+
+app.post('/groups/creation', async (request, response) => {
+  if (!(await requireBridgeUser(request, response))) return;
+  const body = request.body as Record<string, unknown>; const accountId = Number(body.accountId); const inboxId = Number(body.inboxId); const mode = body.mode; const name = typeof body.name === 'string' ? body.name.trim() : ''; const description = typeof body.description === 'string' ? body.description.trim() : ''; const contactIds = Array.isArray(body.contactIds) ? body.contactIds.map(Number) : []; const sessionHeaders = chatwootSessionHeaders(request);
+  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !sessionHeaders || !name || (mode !== 'invite' && mode !== 'direct')) return response.status(422).json({ error: 'Dados de criação inválidos.' });
+  try {
+    const rawInbox = (await chatwootBridge.listInboxesForSession(accountId, sessionHeaders)).find(inbox => inbox.id === inboxId);
+    const inbox = rawInbox && await eligibleGroupInbox(accountId, rawInbox); if (!inbox) return response.status(422).json({ error: 'Esta caixa de entrada não está conectada ou não suporta grupos.' });
+    const contacts = await groupCreationContacts(accountId, contactIds, sessionHeaders); const direct = mode === 'direct' ? contacts.map(contact => contact.phone) : [];
+    const created = inbox.transport === 'waha' ? await wahaTransport.createGroup(inbox.sessionName!, name, direct) : await evolutionBridge.createGroup(inbox.instanceName!, name, direct);
+    if (description) {
+      if (inbox.transport === 'waha') await wahaTransport.updateGroupDescription(inbox.sessionName!, created.id, description);
+      else await evolutionBridge.updateGroupDescription(inbox.instanceName!, created.id, description);
+    }
+    if (mode === 'direct') return response.status(201).json({ groupId: created.id, results: contacts.map(contact => ({ contactId: contact.id, ok: true })) });
+    const inviteLink = inbox.transport === 'waha' ? await wahaTransport.getGroupInviteLink(inbox.sessionName!, created.id) : await evolutionBridge.getGroupInviteLink(inbox.instanceName!, created.id);
+    const text = `Você foi convidado para participar do grupo ${name}. Entrar no grupo: ${inviteLink}`;
+    const results = await Promise.all(contacts.map(async contact => { try { inbox.transport === 'waha' ? await wahaTransport.sendText(inbox.sessionName!, contact.phone, text) : await evolutionBridge.sendText(inbox.instanceName!, contact.phone, text); return { contactId: contact.id, ok: true }; } catch (error) { return { contactId: contact.id, ok: false, error: error instanceof Error ? error.message : 'Falha ao enviar convite.' }; } }));
+    return response.status(201).json({ groupId: created.id, inviteLink, results });
+  } catch (error) { return response.status(502).json({ error: error instanceof Error ? error.message : 'Não foi possível criar o grupo.' }); }
+});
+
+app.post('/groups/creation/invitations', async (request, response) => {
+  if (!(await requireBridgeUser(request, response))) return;
+  const body = request.body as Record<string, unknown>; const accountId = Number(body.accountId); const inboxId = Number(body.inboxId); const groupId = typeof body.groupId === 'string' ? body.groupId : ''; const name = typeof body.name === 'string' ? body.name.trim() : ''; const contactIds = Array.isArray(body.contactIds) ? body.contactIds.map(Number) : []; const sessionHeaders = chatwootSessionHeaders(request);
+  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !sessionHeaders || !groupId || !name) return response.status(422).json({ error: 'Dados de convite inválidos.' });
+  try {
+    const rawInbox = (await chatwootBridge.listInboxesForSession(accountId, sessionHeaders)).find(inbox => inbox.id === inboxId); const inbox = rawInbox && await eligibleGroupInbox(accountId, rawInbox); if (!inbox) return response.status(422).json({ error: 'Inbox indisponível.' });
+    const contacts = await groupCreationContacts(accountId, contactIds, sessionHeaders);
+    if (inbox.transport === 'waha') await wahaTransport.getGroupMetadata(inbox.sessionName!, groupId); else await evolutionBridge.getGroupMetadata(inbox.instanceName!, groupId);
+    const inviteLink = inbox.transport === 'waha' ? await wahaTransport.getGroupInviteLink(inbox.sessionName!, groupId) : await evolutionBridge.getGroupInviteLink(inbox.instanceName!, groupId); const text = `Você foi convidado para participar do grupo ${name}. Entrar no grupo: ${inviteLink}`;
+    const results = await Promise.all(contacts.map(async contact => { try { inbox.transport === 'waha' ? await wahaTransport.sendText(inbox.sessionName!, contact.phone, text) : await evolutionBridge.sendText(inbox.instanceName!, contact.phone, text); return { contactId: contact.id, ok: true }; } catch (error) { return { contactId: contact.id, ok: false, error: error instanceof Error ? error.message : 'Falha ao enviar convite.' }; } }));
+    return response.json({ groupId, inviteLink, results });
+  } catch (error) { return response.status(502).json({ error: error instanceof Error ? error.message : 'Não foi possível reenviar os convites.' }); }
+});
 const loadGroupMetadata = async (transport: 'evolution' | 'waha', configuration: { evolutionInstanceName: string | null; wahaSessionName: string | null }, groupJid: string): Promise<GroupMetadata> => {
   if (transport === 'waha') {
     if (!configuration.wahaSessionName) throw new Error('A sessão WAHA desta inbox não está configurada.');

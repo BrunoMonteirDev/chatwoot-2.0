@@ -18,6 +18,7 @@ export interface DownloadedWahaMedia { buffer: Buffer; contentType: string; file
 export interface WahaHistoryQuery { limit: number; offset: number; timestampGte?: number; timestampLte?: number; }
 export interface WahaChatProfile { id: string; name?: string; }
 export interface WhatsAppGroupMetadata { id: string; subject?: string; avatarUrl?: string; description?: string; participants: Array<{ jid: string; lid?: string; phoneJid?: string; name?: string; phoneNumber?: string; avatarUrl?: string; admin?: string | null }>; }
+export interface CreatedWahaGroup { id: string; inviteLink?: string; }
 
 export class WahaApiError extends Error {
   constructor(readonly kind: 'not_configured' | 'timeout' | 'network' | 'invalid_response' | 'api', readonly status?: number, details?: string) {
@@ -191,6 +192,18 @@ export const wahaTransport = {
   },
   async getGroupMetadata(session: string, groupId: string) {
     return groupMetadata(await request(`/api/${namePath(session)}/groups/${encodeURIComponent(groupId)}`), groupId);
+  },
+  async createGroup(session: string, name: string, participants: string[] = []): Promise<CreatedWahaGroup> {
+    const payload = record(await request(`/api/${namePath(session)}/groups`, { method: 'POST', body: JSON.stringify({ name, participants: participants.map(id => ({ id: normalizeWahaChatId(id) })) }) }));
+    const id = typeof payload?.id === 'string' ? payload.id : typeof payload?.gid === 'string' ? payload.gid : '';
+    if (!id) throw new WahaApiError('invalid_response');
+    return { id };
+  },
+  async getGroupInviteLink(session: string, groupId: string): Promise<string> {
+    const payload = record(await request(`/api/${namePath(session)}/groups/${encodeURIComponent(groupId)}/invite-code`));
+    const link = typeof payload?.inviteUrl === 'string' ? payload.inviteUrl : typeof payload?.inviteLink === 'string' ? payload.inviteLink : typeof payload?.code === 'string' ? `https://chat.whatsapp.com/${payload.code}` : '';
+    if (!link) throw new WahaApiError('invalid_response');
+    return link;
   },
   async updateGroupDescription(session: string, groupId: string, description: string) {
     return groupMetadata(await request(`/api/${namePath(session)}/groups/${encodeURIComponent(groupId)}/description`, { method: 'PUT', body: JSON.stringify({ description }) }), groupId);

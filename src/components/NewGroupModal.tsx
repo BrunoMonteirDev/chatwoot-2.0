@@ -1,274 +1,30 @@
-import React, { useState } from 'react';
-import { Users, X, Check, Search, AlertTriangle } from 'lucide-react';
-import { Chat } from '../types';
+import React, { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, Check, Loader2, Search, Users, X } from 'lucide-react';
+import { groupCreationClient, type GroupCreationContact, type GroupCreationInbox, type GroupCreationResult } from '../features/groups/creation';
 
-interface Props {
-  chats: Chat[];
-  onCreateGroup: (
-    groupName: string,
-    description: string,
-    channelName: string,
-    selectedContactIds: string[]
-  ) => void;
-  onClose: () => void;
-  isDarkMode?: boolean;
-}
-
-const UNOFFICIAL_GROUP_CHANNELS = [
-  'grupo.kopla (API Não Oficial)',
-  'WhatsApp Não Oficial - Baileys API',
-  'WhatsApp Web Multi-Device (Não Oficial)',
-];
-
-export const NewGroupModal: React.FC<Props> = ({
-  chats,
-  onCreateGroup,
-  onClose,
-  isDarkMode = false,
-}) => {
-  const [groupName, setGroupName] = useState('');
-  const [description, setDescription] = useState('');
-  const [channelName, setChannelName] = useState('grupo.kopla (API Não Oficial)');
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-
-  const validContacts = chats.filter((c) => c.id !== 'me' && !c.isGroup);
-
-  const filteredContacts = validContacts.filter(
-    (c) =>
-      c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (c.phone && c.phone.includes(searchQuery))
-  );
-
-  const toggleSelectContact = (id: string) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!groupName.trim()) return;
-    onCreateGroup(groupName.trim(), description.trim(), channelName, selectedIds);
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
-      <div
-        className={`w-full max-w-lg rounded-2xl shadow-2xl border flex flex-col overflow-hidden max-h-[90vh] ${
-          isDarkMode ? 'bg-[#1f2c34] border-[#2a3942] text-white' : 'bg-white border-gray-200 text-[#111b21]'
-        }`}
-      >
-        {/* Header */}
-        <div
-          className={`px-5 py-4 flex items-center justify-between border-b ${
-            isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-gray-200 bg-gray-50'
-          }`}
-        >
-          <div className="flex items-center space-x-2.5">
-            <div className="w-9 h-9 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
-              <Users className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="font-bold text-base leading-tight">Criar Novo Grupo (API Não Oficial)</h2>
-              <p className="text-xs text-[#8696a0]">Recurso exclusivo para canais de API Não Oficial</p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className={`p-1.5 rounded-full transition-colors cursor-pointer ${
-              isDarkMode ? 'hover:bg-white/10 text-[#8696a0] hover:text-white' : 'hover:bg-black/10 text-[#54656f]'
-            }`}
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Body Form */}
-        <form onSubmit={handleSubmit} className="p-5 space-y-4 overflow-y-auto flex-1">
-          {/* Warning Notice Banner regarding WhatsApp Official and other inboxes */}
-          <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-500 flex items-start space-x-2.5 text-xs">
-            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold">Restrição de Conectividade</p>
-              <p className="text-[11px] opacity-90 leading-relaxed">
-                Grupos são suportados <strong>exclusivamente por APIs Não Oficiais</strong>. WhatsApp Oficial, Instagram, Messenger e E-mail não possuem o recurso de grupos de mensagens.
-              </p>
-            </div>
-          </div>
-
-          {/* Group Name */}
-          <div>
-            <label className="block text-xs font-bold text-[#00a884] uppercase tracking-wider mb-1.5">
-              Nome do Grupo *
-            </label>
-            <input
-              type="text"
-              required
-              value={groupName}
-              onChange={(e) => setGroupName(e.target.value)}
-              placeholder="Ex: Suporte VIP Kopla, Grupo de Vendas..."
-              className={`w-full px-3.5 py-2.5 rounded-xl border text-sm outline-none transition-colors ${
-                isDarkMode
-                  ? 'bg-[#202c33] border-[#2a3942] focus:border-[#00a884] text-white placeholder-[#8696a0]'
-                  : 'bg-gray-50 border-gray-300 focus:border-[#00a884] text-[#111b21] placeholder-gray-400'
-              }`}
-            />
-          </div>
-
-          {/* Group Description */}
-          <div>
-            <label className="block text-xs font-bold text-[#8696a0] uppercase tracking-wider mb-1.5">
-              Descrição / Links do Grupo
-            </label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={2}
-              placeholder="Digite a descrição, links do CRM ou observações..."
-              className={`w-full p-3 rounded-xl border text-xs outline-none resize-none transition-colors ${
-                isDarkMode
-                  ? 'bg-[#202c33] border-[#2a3942] focus:border-[#00a884] text-white placeholder-[#8696a0]'
-                  : 'bg-gray-50 border-gray-300 focus:border-[#00a884] text-[#111b21] placeholder-gray-400'
-              }`}
-            />
-          </div>
-
-          {/* Unofficial Channel Selection */}
-          <div>
-            <label className="block text-xs font-bold text-[#8696a0] uppercase tracking-wider mb-1.5">
-              Canal de Conectividade (Apenas API Não Oficial)
-            </label>
-            <select
-              value={channelName}
-              onChange={(e) => setChannelName(e.target.value)}
-              className={`w-full px-3 py-2.5 rounded-xl border text-xs font-semibold outline-none cursor-pointer ${
-                isDarkMode
-                  ? 'bg-[#202c33] border-[#2a3942] text-emerald-400'
-                  : 'bg-gray-50 border-gray-300 text-emerald-700'
-              }`}
-            >
-              {UNOFFICIAL_GROUP_CHANNELS.map((ch) => (
-                <option key={ch} value={ch}>
-                  {ch}
-                </option>
-              ))}
-            </select>
-            <p className="text-[10px] text-[#8696a0] mt-1">
-              Canais WhatsApp Oficial e redes sociais não suportam criação de grupo.
-            </p>
-          </div>
-
-          {/* Participants Selection */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-bold text-[#8696a0] uppercase tracking-wider">
-                Adicionar Participantes ({selectedIds.length})
-              </label>
-              {selectedIds.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setSelectedIds([])}
-                  className="text-xs text-[#00a884] hover:underline cursor-pointer"
-                >
-                  Limpar seleção
-                </button>
-              )}
-            </div>
-
-            {/* Search Input for Participants */}
-            <div
-              className={`flex items-center rounded-xl h-9 px-3 border mb-2 ${
-                isDarkMode ? 'bg-[#202c33] border-[#2a3942]' : 'bg-gray-100 border-gray-200'
-              }`}
-            >
-              <Search className="w-3.5 h-3.5 text-[#8696a0] mr-2 shrink-0" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Buscar participante por nome ou número..."
-                className="w-full bg-transparent text-xs outline-none"
-              />
-            </div>
-
-            {/* Contact List */}
-            <div
-              className={`max-h-40 overflow-y-auto rounded-xl border p-1 space-y-1 ${
-                isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-gray-200 bg-gray-50'
-              }`}
-            >
-              {filteredContacts.length > 0 ? (
-                filteredContacts.map((contact) => {
-                  const isSelected = selectedIds.includes(contact.id);
-                  return (
-                    <div
-                      key={contact.id}
-                      onClick={() => toggleSelectContact(contact.id)}
-                      className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${
-                        isSelected
-                          ? isDarkMode
-                            ? 'bg-[#00a884]/20 text-white'
-                            : 'bg-[#00a884]/10 text-black'
-                          : isDarkMode
-                          ? 'hover:bg-white/5 text-[#aebac1]'
-                          : 'hover:bg-black/5 text-[#54656f]'
-                      }`}
-                    >
-                      <div className="flex items-center space-x-2.5 min-w-0">
-                        <div className="w-7 h-7 rounded-full bg-[#00a884] text-white flex items-center justify-center font-bold text-xs shrink-0">
-                          {contact.avatar}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-xs font-semibold truncate text-white/90">{contact.name}</p>
-                          <p className="text-[10px] text-[#8696a0] truncate">{contact.phone || contact.about}</p>
-                        </div>
-                      </div>
-                      <div
-                        className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${
-                          isSelected
-                            ? 'bg-[#00a884] border-[#00a884] text-white'
-                            : isDarkMode
-                            ? 'border-[#2a3942]'
-                            : 'border-gray-300'
-                        }`}
-                      >
-                        {isSelected && <Check className="w-3.5 h-3.5" />}
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <p className="p-3 text-center text-xs text-[#8696a0]">Nenhum contato encontrado</p>
-              )}
-            </div>
-          </div>
-
-          {/* Footer Actions */}
-          <div className="pt-2 flex items-center space-x-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className={`flex-1 py-2.5 rounded-xl border text-xs font-bold transition-colors cursor-pointer ${
-                isDarkMode
-                  ? 'border-[#2a3942] text-[#aebac1] hover:bg-white/5'
-                  : 'border-gray-300 text-gray-700 hover:bg-gray-100'
-              }`}
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={!groupName.trim()}
-              className="flex-1 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-bold text-xs shadow-md transition-all cursor-pointer flex items-center justify-center space-x-1.5"
-            >
-              <Users className="w-4 h-4" />
-              <span>Criar Grupo (API Não Oficial)</span>
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
+interface Props { accountId: number; onClose: () => void; isDarkMode?: boolean; }
+export const NewGroupModal: React.FC<Props> = ({ accountId, onClose, isDarkMode = false }) => {
+  const [name, setName] = useState(''); const [description, setDescription] = useState('');
+  const [mode, setMode] = useState<'invite' | 'direct'>('invite'); const [directConfirmed, setDirectConfirmed] = useState(false);
+  const [inboxes, setInboxes] = useState<GroupCreationInbox[]>([]); const [inboxId, setInboxId] = useState<number | null>(null);
+  const [query, setQuery] = useState(''); const [results, setResults] = useState<GroupCreationContact[]>([]); const [selected, setSelected] = useState<GroupCreationContact[]>([]);
+  const [loading, setLoading] = useState(true); const [searching, setSearching] = useState(false); const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null); const [created, setCreated] = useState<GroupCreationResult | null>(null);
+  useEffect(() => { let active = true; groupCreationClient.listInboxes(accountId).then(({ inboxes: list }) => { if (active) { setInboxes(list); setInboxId(list[0]?.id ?? null); } }).catch(cause => active && setError(cause instanceof Error ? cause.message : 'Falha ao carregar inboxes.')).finally(() => active && setLoading(false)); return () => { active = false; }; }, [accountId]);
+  useEffect(() => { const controller = new AbortController(); const value = query.trim(); if (value.length < 2) { setResults([]); setSearching(false); return () => controller.abort(); } setSearching(true); const timer = window.setTimeout(() => groupCreationClient.searchContacts(accountId, value, controller.signal).then(data => setResults(data.contacts)).catch(cause => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Falha na busca.'); }).finally(() => !controller.signal.aborted && setSearching(false)), 300); return () => { window.clearTimeout(timer); controller.abort(); }; }, [accountId, query]);
+  const selectedIds = useMemo(() => new Set(selected.map(item => item.id)), [selected]); const failures = created?.results.filter(item => !item.ok) || [];
+  const submit = async (event: React.FormEvent) => { event.preventDefault(); if (!inboxId || !name.trim() || (mode === 'direct' && !directConfirmed)) return; setSubmitting(true); setError(null); try { setCreated(await groupCreationClient.create({ accountId, inboxId, name: name.trim(), description: description.trim(), mode, contactIds: selected.map(item => item.id) })); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Falha ao criar grupo.'); } finally { setSubmitting(false); } };
+  const retry = async () => { if (!created || !inboxId) return; setSubmitting(true); try { const retried = await groupCreationClient.retryInvitations({ accountId, inboxId, groupId: created.groupId, name: name.trim(), contactIds: failures.map(item => item.contactId) }); const updates = new Map(retried.results.map(item => [item.contactId, item])); setCreated({ ...created, results: created.results.map(item => updates.get(item.contactId) || item) }); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Falha no reenvio.'); } finally { setSubmitting(false); } };
+  const field = isDarkMode ? 'bg-[#202c33] border-[#2a3942] text-white' : 'bg-gray-50 border-gray-300 text-[#111b21]';
+  return <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60"><div className={`w-full max-w-lg rounded-2xl shadow-2xl border max-h-[90vh] overflow-y-auto ${isDarkMode ? 'bg-[#1f2c34] border-[#2a3942] text-white' : 'bg-white border-gray-200 text-[#111b21]'}`}>
+    <div className="px-5 py-4 flex justify-between border-b border-current/10"><div className="flex gap-2 items-center"><Users className="w-5 h-5 text-[#00a884]"/><h2 className="font-bold">Criar Novo Grupo</h2></div><button type="button" onClick={onClose}><X className="w-5 h-5"/></button></div>
+    <form onSubmit={submit} className="p-5 space-y-5">
+      <section className="space-y-3"><h3 className="text-xs font-bold text-[#00a884] uppercase">1. Dados do grupo</h3><label className="block text-xs font-semibold">Nome do grupo<input required value={name} onChange={e => setName(e.target.value)} className={`mt-1 w-full px-3 py-2.5 rounded-xl border outline-none ${field}`}/></label><label className="block text-xs font-semibold">Descrição opcional<textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} className={`mt-1 w-full p-3 rounded-xl border outline-none resize-none ${field}`}/></label></section>
+      <section><h3 className="text-xs font-bold text-[#00a884] uppercase mb-2">2. Caixa de entrada</h3>{loading ? <Loader2 className="animate-spin w-4 h-4"/> : inboxes.length ? <select value={inboxId || ''} onChange={e => setInboxId(Number(e.target.value))} className={`w-full px-3 py-2.5 rounded-xl border ${field}`}>{inboxes.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select> : <p className="text-xs text-[#8696a0]">Nenhuma caixa de entrada com suporte a grupos está conectada.</p>}</section>
+      <section><h3 className="text-xs font-bold text-[#00a884] uppercase mb-2">3. Como adicionar participantes</h3><div className="grid grid-cols-2 rounded-xl border border-current/20 p-1"><button type="button" onClick={() => { setMode('invite'); setDirectConfirmed(false); }} className={`py-2 rounded-lg text-xs font-bold ${mode === 'invite' ? 'bg-[#00a884] text-white' : ''}`}>Convidar</button><button type="button" onClick={() => { setMode('direct'); setDirectConfirmed(false); }} className={`py-2 rounded-lg text-xs font-bold ${mode === 'direct' ? 'bg-[#00a884] text-white' : ''}`}>Adicionar diretamente</button></div>{mode === 'direct' && !directConfirmed && <div className="mt-3 p-3 rounded-xl border border-amber-500/30 text-xs"><div className="flex gap-2"><AlertTriangle className="w-4 h-4 text-amber-500 shrink-0"/><p>Adicionar pessoas diretamente a grupos sem consentimento pode gerar denúncias, restrições ou suspensão da conta do WhatsApp. Use esta opção somente para contatos que autorizaram previamente a inclusão.</p></div><div className="flex gap-2 mt-3 justify-end"><button type="button" onClick={() => setMode('invite')} className="px-3 py-2">Cancelar</button><button type="button" onClick={() => setDirectConfirmed(true)} className="px-3 py-2 bg-amber-600 text-white rounded-lg">Entendo o risco e quero continuar</button></div></div>}</section>
+      <section><h3 className="text-xs font-bold text-[#00a884] uppercase mb-2">4. Buscar participantes</h3><div className={`flex items-center rounded-xl px-3 border ${field}`}><Search className="w-4 h-4 text-[#8696a0]"/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Nome ou telefone" className="w-full bg-transparent px-2 py-2.5 text-xs outline-none"/>{searching && <Loader2 className="w-4 h-4 animate-spin"/>}</div>{results.length > 0 && <div className="max-h-40 overflow-y-auto mt-2 border border-current/10 rounded-xl">{results.map(contact => <button type="button" key={contact.id} disabled={selectedIds.has(contact.id)} onClick={() => setSelected(items => items.some(item => item.id === contact.id) ? items : [...items, contact])} className="w-full flex gap-3 items-center p-2 text-left hover:bg-black/5 disabled:opacity-50"><div className="w-8 h-8 rounded-full bg-[#00a884] text-white overflow-hidden flex items-center justify-center">{contact.avatarUrl ? <img src={contact.avatarUrl} alt="" className="w-full h-full object-cover"/> : (contact.name || contact.phoneNumber).slice(0, 1).toUpperCase()}</div><div><p className="text-xs font-semibold">{contact.name || contact.phoneNumber}</p><p className="text-[10px] text-[#8696a0]">{contact.phoneNumber}</p></div>{selectedIds.has(contact.id) && <Check className="ml-auto w-4 h-4"/>}</button>)}</div>}</section>
+      <section><h3 className="text-xs font-bold text-[#00a884] uppercase mb-2">5. Participantes selecionados ({selected.length})</h3><div className="flex flex-wrap gap-2">{selected.map(contact => <span key={contact.id} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-[#00a884]/15 text-xs">{contact.name || contact.phoneNumber}<button type="button" onClick={() => setSelected(items => items.filter(item => item.id !== contact.id))}><X className="w-3 h-3"/></button></span>)}</div></section>
+      {error && <p className="text-xs text-red-500">{error}</p>}{created && <div className="text-xs space-y-1"><p className="font-bold">Grupo criado.</p>{created.results.map(item => { const contact = selected.find(value => value.id === item.contactId); return <p key={item.contactId} className={item.ok ? 'text-emerald-500' : 'text-red-500'}>{contact?.name || contact?.phoneNumber || item.contactId}: {item.ok ? (mode === 'invite' ? 'convite enviado' : 'adicionado') : `falha — ${item.error || 'não enviado'}`}</p>; })}{failures.length > 0 && mode === 'invite' && <button type="button" disabled={submitting} onClick={() => void retry()} className="text-[#00a884] font-bold">Tentar novamente os convites com falha</button>}</div>}
+      <button type="submit" disabled={submitting || !inboxId || !name.trim() || Boolean(created) || (mode === 'direct' && !directConfirmed)} className="w-full py-2.5 rounded-xl bg-[#00a884] disabled:opacity-40 text-white font-bold text-xs flex justify-center gap-2">{submitting && <Loader2 className="w-4 h-4 animate-spin"/>}{mode === 'invite' ? 'Criar grupo e enviar convites' : 'Criar grupo e adicionar participantes'}</button>
+    </form></div></div>;
 };

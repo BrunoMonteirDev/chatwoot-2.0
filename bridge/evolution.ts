@@ -52,6 +52,7 @@ export interface SentEvolutionMessage {
   fromMe: boolean;
 }
 export interface EvolutionGroupMetadata { id: string; subject?: string; avatarUrl?: string; description?: string; participants: Array<{ jid: string; name?: string; phoneNumber?: string; admin?: string | null }>; }
+export interface CreatedEvolutionGroup { id: string; inviteLink?: string; }
 
 // Evolution v2.3 validates one Unicode code point, whereas WhatsApp's red
 // heart from the browser is normally `U+2764 U+FE0F`. Strip presentation and
@@ -144,6 +145,22 @@ const evolutionGroupMetadata = (payload: unknown, groupJid: string): EvolutionGr
 };
 
 export const evolutionBridge = {
+  async createGroup(instance: string, subject: string, participants: string[] = []): Promise<CreatedEvolutionGroup> {
+    const response = await evolutionRequest(`/group/create/${encodeURIComponent(instance)}`, { method: 'POST', body: JSON.stringify({ subject, participants: participants.map(normalizeEvolutionDestination) }) });
+    if (!response.ok) throw new Error(`Evolution ${response.status}: ${await response.text()}`);
+    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    const id = typeof payload?.id === 'string' ? payload.id : typeof payload?.groupJid === 'string' ? payload.groupJid : '';
+    if (!id) throw new Error('A Evolution não retornou o identificador do grupo.');
+    return { id };
+  },
+  async getGroupInviteLink(instance: string, groupId: string): Promise<string> {
+    const response = await evolutionRequest(`/group/inviteCode/${encodeURIComponent(instance)}?groupJid=${encodeURIComponent(groupId)}`);
+    if (!response.ok) throw new Error(`Evolution ${response.status}: ${await response.text()}`);
+    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    const link = typeof payload?.inviteUrl === 'string' ? payload.inviteUrl : typeof payload?.inviteLink === 'string' ? payload.inviteLink : typeof payload?.inviteCode === 'string' ? `https://chat.whatsapp.com/${payload.inviteCode}` : '';
+    if (!link) throw new Error('A Evolution não retornou o link de convite.');
+    return link;
+  },
   async getGroupMetadata(instance: string, groupJid: string) {
     return evolutionGroupMetadata(await managementResponse(`/group/findGroupInfos/${encodeURIComponent(instance)}`, { method: 'POST', body: JSON.stringify({ groupJid }) }), groupJid);
   },

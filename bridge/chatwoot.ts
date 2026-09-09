@@ -6,7 +6,7 @@ import { externalMessageId, transportConfigurationForInbox, type WhatsAppTranspo
 import type { StagedMetaHistoryMessage } from './metaHistoryStore.js';
 import type { EvolutionGroupParticipant } from './evolutionEvent.js';
 
-export type ApiInbox = { id: number; channel_type: string; inbox_identifier?: string; additional_attributes?: Record<string, unknown>; secret?: string };
+export type ApiInbox = { id: number; name?: string; channel_type: string; inbox_identifier?: string; additional_attributes?: Record<string, unknown>; secret?: string };
 type Contact = { id: number; source_id: string; name?: string; phone_number?: string; thumbnail?: string | null };
 type Conversation = { id: number; internal_id?: number; status: string; inbox_id?: number; last_activity_at?: number };
 type ConversationTarget = { id: number; inbox_id: number; meta?: { sender?: { id?: number; name?: string; thumbnail?: string | null; phone_number?: string | null; additional_attributes?: Record<string, unknown> | null } }; contact_inbox?: { source_id?: string | null } };
@@ -266,6 +266,19 @@ export const chatwootBridge = {
       throw new Error(`A inbox ${inboxId} não possui WAHA híbrido configurado.`);
     }
     return { id: inbox.id, configuration: { mode: 'hybrid' as const, transports: ['meta_cloud', 'waha'] as WhatsAppTransport[], evolutionInstanceName: null, wahaSessionName: sessionName } };
+  },
+  async listInboxesForSession(accountId: number, sessionHeaders: Headers): Promise<ApiInbox[]> {
+    return (await requestWithSession<{ payload: ApiInbox[] }>(`/api/v1/accounts/${accountId}/inboxes`, sessionHeaders)).payload;
+  },
+  async searchContactsForSession(accountId: number, query: string, sessionHeaders: Headers): Promise<AccountContact[]> {
+    const response = await requestWithSession<{ payload: AccountContact[] }>(`/api/v1/accounts/${accountId}/contacts/search?q=${encodeURIComponent(query)}&include_contact_inboxes=false`, sessionHeaders);
+    return response.payload;
+  },
+  async contactsByIdsForSession(accountId: number, contactIds: number[], sessionHeaders: Headers): Promise<AccountContact[]> {
+    return Promise.all(contactIds.map(async id => {
+      const response = await requestWithSession<{ payload: AccountContact }>(`/api/v1/accounts/${accountId}/contacts/${id}`, sessionHeaders);
+      return response.payload;
+    }));
   },
   async isApiInbox(inboxId: number) {
     return (await this.listApiInboxes()).some(inbox => inbox.id === inboxId);

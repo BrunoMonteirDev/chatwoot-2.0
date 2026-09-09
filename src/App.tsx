@@ -996,7 +996,7 @@ export default function App() {
     setShowMobileChat(true);
   };
 
-  // Create new group
+  /* legacy group creation removed: the secure bridge owns provider creation */
   const handleCreateNewGroup = (
     groupName: string,
     description: string,
@@ -1038,6 +1038,8 @@ export default function App() {
     setActiveChatId(newGroupChat.id);
     setShowMobileChat(true);
   };
+
+  void handleCreateNewGroup;
 
   return (
     <div
@@ -1475,8 +1477,7 @@ export default function App() {
       {/* New Group Modal */}
       {showNewGroupModal && (
         <NewGroupModal
-          chats={chats}
-          onCreateGroup={handleCreateNewGroup}
+          accountId={currentAccount!.id}
           onClose={() => setShowNewGroupModal(false)}
           isDarkMode={isDarkMode}
         />
