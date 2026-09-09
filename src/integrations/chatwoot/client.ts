@@ -70,6 +70,9 @@ export class ChatwootApiClient {
     } catch (error) {
       if (error instanceof ChatwootApiError) throw error;
       if (error instanceof DOMException && error.name === 'AbortError') {
+        // A caller abort (for example after changing conversations) is normal
+        // lifecycle cancellation, not a network timeout worth reporting.
+        if (options.signal?.aborted) throw error;
         throw new ChatwootNetworkError('A conexão com o Chatwoot excedeu o tempo limite.');
       }
       throw new ChatwootNetworkError();

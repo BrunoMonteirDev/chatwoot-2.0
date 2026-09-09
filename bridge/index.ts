@@ -1559,12 +1559,16 @@ const deliverOfficialHybridWahaInbound = async (message: IncomingWahaMessage) =>
   if (!config.hybridWahaBridgeSecret) return { handled: false };
   const ownership = await wahaSessions.get(message.session);
   if (!ownership || ownership.status === 'cleanup_pending') return { handled: false };
+  const participantContact = !message.fromMe && message.chatType === 'group'
+    ? await chatwootBridge.withAccount(ownership.accountId, () => syncGroupParticipantContact({ id: ownership.inboxId }, { participant: message.participantJid, pushName: message.participantName, avatarUrl: message.avatarUrl }, 'waha')).catch(() => null)
+    : null;
   const body = JSON.stringify({
     account_id: ownership.accountId, inbox_id: ownership.inboxId, waha_session: message.session,
     payload: {
       external_id: message.externalId, provider_message_key: message.providerMessageKey,
       remote_jid: message.remoteJid, group_name: message.groupName || message.name,
       participant_jid: message.participantJid, participant_name: message.participantName,
+      participant_contact_id: participantContact?.contactId,
       quoted_message_id: message.quotedMessageId, from_me: message.fromMe, content: message.content,
       media: message.media && { kind: message.media.kind, mimetype: message.media.mimetype, filename: message.media.filename }
     }

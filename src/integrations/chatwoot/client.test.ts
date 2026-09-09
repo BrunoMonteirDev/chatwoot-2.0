@@ -25,4 +25,14 @@ describe('ChatwootApiClient', () => {
     expect(authSession.get()?.accessToken).toBe('new');
     expect(authSession.get()?.expiry).toBe('2');
   });
+
+  it('preserva AbortError solicitado pelo caller para não registrar cancelamento como falha de rede', async () => {
+    const controller = new AbortController();
+    vi.mocked(fetch).mockImplementation((_url, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+    }));
+    const pending = new ChatwootApiClient('').get('/api/v1/accounts/1/conversations', { signal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  });
 });

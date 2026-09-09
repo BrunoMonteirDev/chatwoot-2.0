@@ -153,9 +153,11 @@ describe('chatwootBridge media messages', () => {
   });
 
   it('envia o Contact participante como sender sem alterar o conteúdo do grupo', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 1 }), { status: 200 })));
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ api_access_token: 'service-token', account_id: 1 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 1 }), { status: 200 })));
     await chatwootBridge.withAccount(1, () => chatwootBridge.createIncomingTransportMessage('inbox', 'group', 31, 'waha', 'Mensagem original', 'message-1', undefined, '120363@g.us', undefined, { chatType: 'group', participantJid: '123@lid', participantContactId: 91 }));
-    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    const body = JSON.parse((vi.mocked(fetch).mock.calls.at(-1)?.[1] as RequestInit).body as string);
     expect(body).toMatchObject({ content: 'Mensagem original', message_type: 'incoming', sender_type: 'Contact', sender_id: 91 });
     expect(body.content).not.toContain('Ricardo');
   });

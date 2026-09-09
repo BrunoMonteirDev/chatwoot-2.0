@@ -30,7 +30,8 @@ describe('group metadata requests', () => {
   });
   it('loads a real group normally and clears group data when switching to private', async () => {
     await render(true);
-    expect(get).toHaveBeenCalledExactlyOnceWith(1, 5, 91, 'waha');
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(get.mock.calls[0].slice(0, 4)).toEqual([1, 5, 91, 'waha']);
     expect(container.textContent).toContain('Real group');
     await render(false, 'meta_cloud', 92);
     expect(get).toHaveBeenCalledTimes(1);

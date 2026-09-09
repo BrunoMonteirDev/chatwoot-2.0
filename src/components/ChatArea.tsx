@@ -795,29 +795,34 @@ export const ChatArea: React.FC<Props> = ({
   const isGroupConversation = Boolean(chat.isGroup || conversation?.isGroup || contact?.additionalAttributes.whatsapp_chat_type === 'group'
     || chat.messages.some(message => message.whatsappRemoteJid?.endsWith('@g.us')));
   const initialGroupMetadata = contact ? persistedGroupMetadata(contact.additionalAttributes, groupMetadataTransport, contact.name) : null;
-  const [groupParticipants, setGroupParticipants] = useState<Record<string, GroupParticipant>>(() => indexGroupParticipants(initialGroupMetadata?.participants || []));
-  const [groupParticipantIdentities, setGroupParticipantIdentities] = useState<Record<string, GroupParticipant>>(() => indexGroupParticipants([...(initialGroupMetadata?.historicalParticipants || []), ...(initialGroupMetadata?.participants || [])]));
+  const groupRequestKey = `${accountId}:${conversation?.inboxId || ''}:${conversation?.id || ''}:${initialGroupMetadata?.id || chat.messages.find(message => message.whatsappRemoteJid?.endsWith('@g.us'))?.whatsappRemoteJid || ''}`;
+  const [groupParticipantState, setGroupParticipantState] = useState<{ key: string; current: Record<string, GroupParticipant>; all: Record<string, GroupParticipant> }>(() => ({ key: groupRequestKey, current: indexGroupParticipants(initialGroupMetadata?.participants || []), all: indexGroupParticipants([...(initialGroupMetadata?.historicalParticipants || []), ...(initialGroupMetadata?.participants || [])]) }));
+  const groupParticipants = groupParticipantState.key === groupRequestKey ? groupParticipantState.current : indexGroupParticipants(initialGroupMetadata?.participants || []);
+  const groupParticipantIdentities = groupParticipantState.key === groupRequestKey ? groupParticipantState.all : indexGroupParticipants([...(initialGroupMetadata?.historicalParticipants || []), ...(initialGroupMetadata?.participants || [])]);
+  const activeGroupRequest = useRef(groupRequestKey);
+  activeGroupRequest.current = groupRequestKey;
   const applyGroupMetadata = (group: GroupMetadata) => {
-    setGroupParticipants(indexGroupParticipants(group.participants));
-    setGroupParticipantIdentities(indexGroupParticipants([...(group.historicalParticipants || []), ...group.participants]));
+    setGroupParticipantState({ key: groupRequestKey, current: indexGroupParticipants(group.participants), all: indexGroupParticipants([...(group.historicalParticipants || []), ...group.participants]) });
     onGroupMetadataResolved?.(group);
   };
   const [providerContactProfile, setProviderContactProfile] = useState<{ name?: string; avatarUrl?: string }>({});
   const [isSyncingContactProfile, setIsSyncingContactProfile] = useState(false);
   const automaticallySyncedContactProfiles = useRef(new Set<string>());
   useEffect(() => {
-    if (!isGroupConversation || !conversation || !groupMetadataTransport) { setGroupParticipants({}); setGroupParticipantIdentities({}); return; }
-    let active = true;
+    if (!isGroupConversation || !conversation || !groupMetadataTransport) return;
     if (!accountId) return;
-    void groupMetadataClient.get(accountId, conversation.inboxId, conversation.id, groupMetadataTransport).then(({ group }) => {
-      if (!active) return;
+    const controller = new AbortController();
+    const capturedKey = groupRequestKey;
+    const expectedGroupJid = initialGroupMetadata?.id || chat.messages.find(message => message.whatsappRemoteJid?.endsWith('@g.us'))?.whatsappRemoteJid;
+    void groupMetadataClient.get(accountId, conversation.inboxId, conversation.id, groupMetadataTransport, controller.signal).then(({ group }) => {
+      if (controller.signal.aborted || activeGroupRequest.current !== capturedKey || (expectedGroupJid && group.id !== expectedGroupJid)) return;
       applyGroupMetadata(group);
-    }).catch(() => { if (active) setGroupParticipants({}); });
-    return () => { active = false; };
-  }, [accountId, chat.id, conversation?.id, conversation?.inboxId, groupMetadataTransport, isGroupConversation]);
+    }).catch(() => undefined);
+    return () => controller.abort();
+  }, [accountId, conversation?.id, conversation?.inboxId, groupMetadataTransport, groupRequestKey, isGroupConversation]);
   useEffect(() => {
     if (initialGroupMetadata) applyGroupMetadata(initialGroupMetadata);
-  }, [contact?.id, contact?.additionalAttributes.whatsapp_group_metadata_synced_at]);
+  }, [groupRequestKey, contact?.additionalAttributes.whatsapp_group_metadata_synced_at]);
   useEffect(() => {
     const isGroup = chat.isGroup || conversation?.isGroup || chat.messages.some(message => message.whatsappRemoteJid?.endsWith('@g.us'));
     const transport = chat.messages.slice().reverse().find(message => message.whatsappTransport && message.whatsappTransport !== 'meta_cloud')?.whatsappTransport;

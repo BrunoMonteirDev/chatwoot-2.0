@@ -12,7 +12,7 @@ let container: HTMLDivElement;
 let root: Root;
 const conversation: ConversationSummary = { id: 81, inboxId: 5, channelType: 'Channel::Api', contactName: 'Equipe', contactId: 65, contactAvatarUrl: null, lastMessage: 'Olá', lastMessageByCurrentUser: false, lastActivityAt: 1, updatedAt: 1, unreadCount: 0, status: 'open', priority: null, assigneeId: null, assigneeName: null, participantIds: [], teamId: null, teamName: null, labels: [], isGroup: false };
 const chat = (messages: Chat['messages'] = []): Chat => ({ id: '81', name: 'Equipe', avatar: '', lastMessage: 'Olá', time: '', messages, isGroup: false });
-const render = async (value: Chat) => act(async () => { root.render(<ChatArea chat={value} conversation={conversation} accountId={1} onSendMessage={() => undefined} onImageClick={() => undefined} onSearchInChat={() => undefined} />); });
+const render = async (value: Chat, selected: ConversationSummary = conversation) => act(async () => { root.render(<ChatArea chat={value} conversation={selected} accountId={1} onSendMessage={() => undefined} onImageClick={() => undefined} onSearchInChat={() => undefined} />); });
 
 describe('ChatArea group metadata loading', () => {
   beforeEach(() => {
@@ -31,7 +31,8 @@ describe('ChatArea group metadata loading', () => {
 
     const groupChat = chat([{ id: '1', sender: 'them', senderName: 'Participante', senderIdentity: '19696904601705@lid', text: 'Olá', time: '10:00', whatsappTransport: 'waha', whatsappRemoteJid: '123@g.us' }]);
     await render(groupChat);
-    expect(get).toHaveBeenCalledExactlyOnceWith(1, 5, 81, 'waha');
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(get.mock.calls[0].slice(0, 4)).toEqual([1, 5, 81, 'waha']);
     expect(container.textContent).toContain('Participante');
 
     await act(async () => resolveMetadata({ group: { id: '123@g.us', subject: 'Equipe', memberCount: 5, transport: 'waha', canEditDescription: true, participants: [
@@ -43,6 +44,23 @@ describe('ChatArea group metadata loading', () => {
 
     await render(groupChat);
     expect(get).toHaveBeenCalledTimes(1);
+  });
+
+  it('discards metadata from A when it returns after navigating to B', async () => {
+    let resolveA!: (value: { group: GroupMetadata }) => void;
+    let resolveB!: (value: { group: GroupMetadata }) => void;
+    get.mockImplementation((_account, _inbox, id) => new Promise(resolve => { if (id === 81) resolveA = resolve; else resolveB = resolve; }));
+    const chatA = chat([{ id: 'a', sender: 'them', senderName: 'Participante', senderIdentity: '1@lid', text: 'A', time: '10:00', whatsappTransport: 'waha', whatsappRemoteJid: 'a@g.us' }]);
+    const conversationB = { ...conversation, id: 82, contactName: 'Grupo B' };
+    const chatB = { ...chat([{ id: 'b', sender: 'them', senderName: 'Participante', senderIdentity: '2@lid', text: 'B', time: '10:01', whatsappTransport: 'waha', whatsappRemoteJid: 'b@g.us' }]), id: '82', name: 'Grupo B' };
+
+    await render(chatA);
+    await render(chatB, conversationB);
+    await act(async () => resolveB({ group: { id: 'b@g.us', subject: 'Grupo B', transport: 'waha', canEditDescription: true, participants: [{ jid: '2@lid', displayName: 'Bruna' }] } }));
+    expect(container.textContent).toContain('Bruna');
+    await act(async () => resolveA({ group: { id: 'a@g.us', subject: 'Grupo A', transport: 'waha', canEditDescription: true, participants: [{ jid: '1@lid', displayName: 'Alice' }] } }));
+    expect(container.textContent).toContain('Bruna');
+    expect(container.textContent).not.toContain('Alice');
   });
 
   it('never loads group metadata for a private conversation', async () => {
