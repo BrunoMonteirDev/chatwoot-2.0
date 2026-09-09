@@ -53,6 +53,36 @@ describe('MessageHistoryCache', () => {
     expect(cache.upsertIfPresent(1, message(1, { conversationId: 99 }))).toBe(false);
   });
 
+  it('reconcilia pelo source_id quando REST e realtime têm ids locais diferentes', () => {
+    const cache = new MessageHistoryCache();
+    cache.set(1, 1, page(message(20, { sourceId: 'wamid.same', content: 'realtime' })));
+    cache.set(1, 1, page(message(99, { sourceId: 'wamid.same', content: 'rest' })), { preserveExisting: true });
+    expect(cache.get(1, 1)?.messages).toHaveLength(1);
+    expect(cache.get(1, 1)?.messages[0]).toMatchObject({ id: 99, sourceId: 'wamid.same' });
+  });
+
+  it('isola respostas fora de ordem pela conta e conversa', async () => {
+    const cache = new MessageHistoryCache();
+    let resolveA!: (value: ReturnType<typeof page>) => void;
+    let resolveB!: (value: ReturnType<typeof page>) => void;
+    const a = cache.request(1, 10, () => new Promise((resolve) => { resolveA = resolve; }));
+    const b = cache.request(1, 20, () => new Promise((resolve) => { resolveB = resolve; }));
+    resolveB(page(message(20, { conversationId: 20 })));
+    cache.set(1, 20, await b);
+    resolveA(page(message(10, { conversationId: 10 })));
+    cache.set(1, 10, await a);
+    expect(cache.get(1, 10)?.messages.map(item => item.conversationId)).toEqual([10]);
+    expect(cache.get(1, 20)?.messages.map(item => item.conversationId)).toEqual([20]);
+  });
+
+  it('mantém no cache mutações locais e remoções ao sair e voltar', () => {
+    const cache = new MessageHistoryCache();
+    cache.set(1, 1, page(message(1)));
+    cache.upsertIfPresent(1, message(2, { status: 'sending' }));
+    cache.removeMessage(1, 1, 1);
+    expect(cache.get(1, 1)?.messages).toEqual([message(2, { status: 'sending' })]);
+  });
+
   it('guarda e recupera a posição de scroll por conversa', () => {
     const cache = new MessageHistoryCache();
     cache.set(1, 1, page(message(1)));

@@ -836,22 +836,23 @@ export default function App() {
     });
   }, [listChats, searchQuery, selectedInbox, activeFilter, selectedStatus, filterRules, selectedSort, authenticatedUser]);
 
-  // Only message JSON/metadata is prefetched; attachment URLs are left untouched
-  // until their normal renderer requests them. The visible list is capped so a
-  // large inbox never turns idling into a burst of history requests.
-  useEffect(() => {
+  const prefetchConversation = useCallback((chat: Chat) => {
     if (!currentAccount) return;
-    filteredAndSortedChats.slice(0, 10).forEach((chat) => {
-      const conversationId = Number(chat.id);
-      if (!Number.isInteger(conversationId) || conversationId < 1 || messageHistoryCache.has(currentAccount.id, conversationId) || messageHistoryCache.isLoading(currentAccount.id, conversationId)) return;
-      const key = messageHistoryCache.key(currentAccount.id, conversationId);
-      messageHistoryPrefetcher.enqueue(key, async () => {
-        if (messageHistoryCache.has(currentAccount.id, conversationId)) return;
-        const page = await messageHistoryCache.request(currentAccount.id, conversationId, (signal) => messageService.list({ accountId: currentAccount.id, conversationId, signal }));
-        messageHistoryCache.set(currentAccount.id, conversationId, page);
-      });
+    const conversationId = Number(chat.id);
+    if (!Number.isInteger(conversationId) || conversationId < 1 || messageHistoryCache.has(currentAccount.id, conversationId) || messageHistoryCache.isLoading(currentAccount.id, conversationId)) return;
+    const key = messageHistoryCache.key(currentAccount.id, conversationId);
+    messageHistoryPrefetcher.enqueue(key, async () => {
+      if (messageHistoryCache.has(currentAccount.id, conversationId)) return;
+      const page = await messageHistoryCache.request(currentAccount.id, conversationId, (signal) => messageService.list({ accountId: currentAccount.id, conversationId, signal }));
+      messageHistoryCache.set(currentAccount.id, conversationId, page);
     });
-  }, [currentAccount, filteredAndSortedChats]);
+  }, [currentAccount]);
+
+  // Warm only the three most likely visible conversations while the browser is
+  // idle. Pointer intent can enqueue any other visible row on demand.
+  useEffect(() => {
+    filteredAndSortedChats.slice(0, 3).forEach(prefetchConversation);
+  }, [filteredAndSortedChats, prefetchConversation]);
 
   // Handle sending message
   const handleSendMessage = (chatId: string, text: string, attachments?: File[], isPrivate?: boolean, replyTo?: import('./types').ReplyTo | null) => {
@@ -1313,6 +1314,7 @@ export default function App() {
                         onSelect={(selected) => {
                           openConversation(selected.id);
                         }}
+                        onPrefetch={prefetchConversation}
                         isDarkMode={isDarkMode}
                       />
                     ))

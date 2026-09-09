@@ -22,6 +22,12 @@ describe('mergeRealtimeMessage', () => {
     expect(withEarlier.map(item => item.id)).toEqual([98, 99]);
   });
 
+  it('reconcilia realtime e REST pelo source_id', () => {
+    const realtime = message({ id: 98, echoId: undefined, sourceId: 'provider-1' });
+    const rest = message({ id: 99, echoId: undefined, sourceId: 'provider-1', status: 'sent' });
+    expect(mergeRealtimeMessage([realtime], rest)).toEqual([rest]);
+  });
+
   it('troca e remove apenas a reaction do próprio atendente', () => {
     const initial = [{ sender_id: 'self', emoji: '❤️', transport: 'evolution', origin: 'platform' }, { sender_id: 'contact:5511', emoji: '👍', transport: 'evolution', origin: 'contact' }];
     expect(optimisticReactionList(initial, 'evolution', '😂')).toEqual([

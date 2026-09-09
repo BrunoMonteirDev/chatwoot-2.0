@@ -69,16 +69,20 @@ export const useConversationMessages = (accountId: number | null, conversationId
     if (prepend) setIsLoadingOlder(true);
     else if (!silent) { setStatus('loading'); setError(null); }
     try {
-      const page = await messageHistoryCache.request(accountId, conversationId, (signal) => messageService.list({ accountId, conversationId, before, signal }), controller.signal, before ? `before:${before}` : 'latest');
-      if (controller.signal.aborted || requestId !== requestIdRef.current) return;
+      const page = await messageHistoryCache.request(accountId, conversationId, (signal) => messageService.list({ accountId, conversationId, before, signal }), undefined, before ? `before:${before}` : 'latest');
       const cached = messageHistoryCache.set(accountId, conversationId, page, { prepend, preserveExisting: silent });
+      // A completed response always warms its own keyed cache, even if the user
+      // has already moved elsewhere. Only the active hook state is guarded.
+      if (controller.signal.aborted || requestId !== requestIdRef.current) return;
       setMessages(cached.messages);
       setHasOlderMessages(cached.hasOlderMessages);
       setStatus('ready');
     } catch (cause) {
       if (controller.signal.aborted || requestId !== requestIdRef.current) return;
-      setError(errorMessageForUser(cause));
-      setStatus('error');
+      if (!silent) {
+        setError(errorMessageForUser(cause));
+        setStatus('error');
+      }
     } finally {
       if (!controller.signal.aborted && requestId === requestIdRef.current) setIsLoadingOlder(false);
     }
@@ -132,16 +136,20 @@ export const useConversationMessages = (accountId: number | null, conversationId
     };
     inFlightEchoIds.current.add(echoId);
     pendingMessageFiles.current.save(echoId, files);
+    messageHistoryCache.upsertIfPresent(accountId, optimistic);
     setMessages(current => [...current, optimistic]);
     setStatus('ready');
     try {
       const created = await messageService.create({ accountId, conversationId, content: optimistic.content, private: isPrivate, echoId, files, inReplyTo, whatsappMentions, whatsappMentionReplacements });
+      messageHistoryCache.upsertIfPresent(accountId, created);
       setMessages(current => current.map(message => message.echoId === echoId || message.id === optimistic.id ? created : message));
       pendingMessageFiles.current.delete(echoId);
       return created;
     } catch (cause) {
       const error = errorMessageForUser(cause);
-      setMessages(current => current.map(message => message.echoId === echoId ? { ...message, status: 'failed', error } : message));
+      const failed = { ...optimistic, status: 'failed' as const, error };
+      messageHistoryCache.upsertIfPresent(accountId, failed);
+      setMessages(current => current.map(message => message.echoId === echoId ? failed : message));
       return null;
     } finally {
       inFlightEchoIds.current.delete(echoId);
@@ -172,6 +180,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
     if (!accountId || !conversationId || messageId < 1) return false;
     try {
       await messageService.remove(accountId, conversationId, messageId);
+      messageHistoryCache.removeMessage(accountId, conversationId, messageId);
       setMessages(current => current.filter(message => message.id !== messageId));
       return true;
     } catch {

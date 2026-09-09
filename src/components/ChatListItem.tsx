@@ -7,6 +7,7 @@ interface Props {
   chat: Chat;
   isSelected: boolean;
   onSelect: (chat: Chat) => void;
+  onPrefetch?: (chat: Chat) => void;
   onContextMenu?: (e: React.MouseEvent, chat: Chat) => void;
   isDarkMode?: boolean;
 }
@@ -15,6 +16,7 @@ export const ChatListItem: React.FC<Props> = ({
   chat,
   isSelected,
   onSelect,
+  onPrefetch,
   onContextMenu,
   isDarkMode = false,
 }) => {
@@ -34,6 +36,8 @@ export const ChatListItem: React.FC<Props> = ({
   return (
     <div
       onClick={() => onSelect(chat)}
+      onPointerEnter={() => onPrefetch?.(chat)}
+      onPointerDown={() => onPrefetch?.(chat)}
       onContextMenu={(e) => {
         if (onContextMenu) {
           e.preventDefault();

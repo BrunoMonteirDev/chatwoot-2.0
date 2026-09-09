@@ -5,7 +5,9 @@ export const MESSAGE_HISTORY_TTL_MS = 30_000;
 export const MESSAGE_HISTORY_MAX_CONVERSATIONS = 12;
 
 export const mergeMessage = (current: ConversationMessage[], incoming: ConversationMessage): ConversationMessage[] => {
-  const index = current.findIndex((message) => message.id === incoming.id || Boolean(incoming.echoId && message.echoId === incoming.echoId));
+  const index = current.findIndex((message) => message.id === incoming.id
+    || Boolean(incoming.sourceId && message.sourceId === incoming.sourceId)
+    || Boolean(incoming.echoId && message.echoId === incoming.echoId));
   if (index >= 0) {
     if (current[index].updatedAt && incoming.updatedAt && current[index].updatedAt > incoming.updatedAt) return current;
     const next = [...current];
@@ -69,6 +71,12 @@ export class MessageHistoryCache {
     const key = this.key(accountId, conversationId);
     const entry = this.entries.get(key);
     if (entry) entry.scrollTop = scrollTop;
+  }
+
+  removeMessage(accountId: number, conversationId: number, messageId: number) {
+    const key = this.key(accountId, conversationId);
+    const entry = this.entries.get(key);
+    if (entry) entry.messages = entry.messages.filter((message) => message.id !== messageId);
   }
 
   request(accountId: number, conversationId: number, fetcher: Fetcher, signal?: AbortSignal, variant = 'latest'): Promise<MessageHistoryPage> {
