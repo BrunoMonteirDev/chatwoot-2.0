@@ -55,6 +55,34 @@ describe('inboxService', () => {
     expect(vi.mocked(fetch).mock.calls.filter(call => String(call[0]) === '/api/v1/accounts/12/inboxes' && (call[1] as RequestInit | undefined)?.method === 'POST')).toHaveLength(0);
   });
 
+  it('cria uma inbox Meta manual pelo contrato nativo sem devolver a credencial ao estado', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
+      id: 9,
+      name: 'Oficial manual',
+      avatar_url: null,
+      channel_type: 'Channel::Whatsapp',
+      provider: 'whatsapp_cloud',
+      phone_number: '+5511999999999',
+      provider_config: { api_key: 'response-must-be-discarded', phone_number_id: '10001', business_account_id: '20002' },
+    }), { status: 200 }));
+
+    const result = await inboxService.createManualMetaInbox(12, {
+      name: ' Oficial manual ', phoneNumber: ' +5511999999999 ', phoneNumberId: ' 10001 ', businessAccountId: ' 20002 ', accessToken: 'request-only-token',
+    });
+
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/v1/accounts/12/inboxes');
+    expect(JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string)).toEqual({
+      name: 'Oficial manual',
+      channel: { type: 'whatsapp', phone_number: '+5511999999999', provider: 'whatsapp_cloud', provider_config: { api_key: 'request-only-token', phone_number_id: '10001', business_account_id: '20002' } },
+    });
+    expect(result).toMatchObject({ configured: true, inbox: { id: 9, channelType: 'Channel::Whatsapp', metaPhoneNumberId: '10001', metaBusinessAccountId: '20002' } });
+    expect(JSON.stringify(result)).not.toContain('response-must-be-discarded');
+    expect(JSON.stringify(result)).not.toContain('request-only-token');
+    const persistedBrowserValues = Array.from({ length: localStorage.length }, (_, index) => localStorage.getItem(localStorage.key(index) || '')).join(' ');
+    expect(persistedBrowserValues).not.toContain('request-only-token');
+    expect(persistedBrowserValues).not.toContain('response-must-be-discarded');
+  });
+
   it('lista e substitui membros reais da inbox', async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 2, name: 'Ana', thumbnail: null }]), { status: 200 }))

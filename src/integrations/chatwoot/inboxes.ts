@@ -10,6 +10,8 @@ import type { MetaOnboardingMode } from '../meta/embeddedSignup';
 const root = (accountId: number) => `/api/v1/accounts/${accountId}`;
 
 export interface CreateEvolutionInboxParams { name: string; webhookUrl?: string; }
+export interface CreateManualMetaInboxParams { name: string; phoneNumber: string; phoneNumberId: string; businessAccountId: string; accessToken: string; }
+export interface ManualMetaInboxCreation { inbox: Inbox; configured: true; }
 export interface SaveAgentParams { name: string; email?: string; role: 'agent' | 'administrator'; availability: 'online' | 'offline' | 'busy'; customRoleId?: number | null; }
 export interface SaveCustomRoleParams { name: string; description: string; permissions: string[]; }
 export interface SavePermissionProfileParams { name: string; description: string; kind: 'inbox' | 'system'; inboxPermissions: string[]; systemPermissions: string[]; }
@@ -51,6 +53,25 @@ export const inboxService = {
     const inbox = (await this.list(accountId)).find(item => item.id === response.id);
     if (!inbox || inbox.channelType !== 'Channel::Whatsapp') throw new Error('O Chatwoot não retornou uma inbox WhatsApp nativa.');
     return inbox;
+  },
+
+  async createManualMetaInbox(accountId: number, params: CreateManualMetaInboxParams): Promise<ManualMetaInboxCreation> {
+    const response = await chatwootApiClient.post<ChatwootInboxDto>(`${root(accountId)}/inboxes`, {
+      name: params.name.trim(),
+      channel: {
+        type: 'whatsapp',
+        phone_number: params.phoneNumber.trim(),
+        provider: 'whatsapp_cloud',
+        provider_config: {
+          api_key: params.accessToken,
+          phone_number_id: params.phoneNumberId.trim(),
+          business_account_id: params.businessAccountId.trim(),
+        },
+      },
+    });
+    // `normalizeInbox` deliberately discards provider_config.api_key. The
+    // credential exists only in this request and in Rails' channel store.
+    return { inbox: normalizeInbox(response), configured: true };
   },
 
   async reauthorizeNativeWhatsAppInbox(accountId: number, inboxId: number, params: { code: string; businessId: string; wabaId: string; phoneNumberId?: string | null; onboardingMode: MetaOnboardingMode }): Promise<Inbox> {

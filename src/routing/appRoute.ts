@@ -1,6 +1,6 @@
 import type { NavTab } from '../types';
 
-export type InboxCreationProvider = 'waha' | 'meta' | 'hybrid';
+export type InboxCreationProvider = 'waha' | 'meta';
 export type InboxCreationRoute =
   | { step: 'channel' }
   | { step: 'whatsapp'; provider?: InboxCreationProvider }
@@ -46,7 +46,9 @@ export const appRouteFromUrl = (url: Pick<URL, 'pathname' | 'searchParams'>): Ap
   if (accountId && settingsInboxAgents) return { accountId, tab: 'settings', settingsTab: 'caixas', inboxCreation: { step: 'agents', inboxId: settingsInboxAgents[1] } };
   if (accountId && suffix === 'settings/caixas/new/whatsapp') {
     const requestedProvider = url.searchParams.get('provider');
-    const provider = requestedProvider === 'waha' || requestedProvider === 'meta' || requestedProvider === 'hybrid' ? requestedProvider : undefined;
+    // Older links used `provider=hybrid`. Hybrid is a capability of a Meta
+    // inbox, not a third provider, so normalize those links to Meta.
+    const provider = requestedProvider === 'waha' ? 'waha' : requestedProvider === 'meta' || requestedProvider === 'hybrid' ? 'meta' : undefined;
     return { accountId, tab: 'settings', settingsTab: 'caixas', inboxCreation: { step: 'whatsapp', ...(provider ? { provider } : {}) } };
   }
   if (accountId && suffix === 'settings/caixas/new') return { accountId, tab: 'settings', settingsTab: 'caixas', inboxCreation: { step: 'channel' } };

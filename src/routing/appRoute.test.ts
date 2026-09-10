@@ -39,18 +39,19 @@ describe('app routes', () => {
     const whatsapp = route('/app/accounts/42/settings/caixas/new/whatsapp');
     const waha = route('/app/accounts/42/settings/caixas/new/whatsapp?provider=waha');
     const meta = route('/app/accounts/42/settings/caixas/new/whatsapp?provider=meta');
-    const hybrid = route('/app/accounts/42/settings/caixas/new/whatsapp?provider=hybrid');
+    const legacyHybrid = route('/app/accounts/42/settings/caixas/new/whatsapp?provider=hybrid');
     const agents = route('/app/accounts/42/settings/caixas/new/731/agents');
 
     expect(channel.inboxCreation).toEqual({ step: 'channel' });
     expect(whatsapp.inboxCreation).toEqual({ step: 'whatsapp' });
     expect(waha.inboxCreation).toEqual({ step: 'whatsapp', provider: 'waha' });
     expect(meta.inboxCreation).toEqual({ step: 'whatsapp', provider: 'meta' });
-    expect(hybrid.inboxCreation).toEqual({ step: 'whatsapp', provider: 'hybrid' });
+    expect(legacyHybrid.inboxCreation).toEqual({ step: 'whatsapp', provider: 'meta' });
+    expect(urlForAppRoute(legacyHybrid)).toBe('/app/accounts/42/settings/caixas/new/whatsapp?provider=meta');
     expect(agents.inboxCreation).toEqual({ step: 'agents', inboxId: '731' });
     expect(urlForAppRoute(waha)).toBe('/app/accounts/42/settings/caixas/new/whatsapp?provider=waha');
     expect(urlForAppRoute(agents)).toBe('/app/accounts/42/settings/caixas/new/731/agents');
-    for (const creationRoute of [channel, whatsapp, waha, meta, hybrid, agents]) {
+    for (const creationRoute of [channel, whatsapp, waha, meta, agents]) {
       expect(route(urlForAppRoute(creationRoute))).toEqual(creationRoute);
     }
   });

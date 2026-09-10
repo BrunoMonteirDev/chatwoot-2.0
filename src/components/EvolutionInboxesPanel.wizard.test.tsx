@@ -73,8 +73,8 @@ describe('route-owned inbox creation wizard', () => {
     expect(element.textContent).not.toContain('Conectar WhatsApp Business');
 
     await act(async () => root.render(<EvolutionInboxesPanel {...baseProps} inboxCreationRoute={{ step: 'whatsapp', provider: 'meta' }} />));
-    expect(element.textContent).toContain('API oficial do WhatsApp');
-    expect(element.textContent).toContain('Conectar WhatsApp Business');
+    expect(element.textContent).toContain('Meta Embedded Signup');
+    expect(element.textContent).toContain('Configuração manual');
     expect(element.textContent).not.toContain('Criar caixa e adicionar agentes');
   });
 
@@ -86,6 +86,7 @@ describe('route-owned inbox creation wizard', () => {
     onNavigateInboxCreation.mockClear();
     await act(async () => buttonWithText(element, 'WhatsApp oficial').click());
     expect(onNavigateInboxCreation).toHaveBeenCalledWith({ step: 'whatsapp', provider: 'meta' });
+    expect(element.textContent).not.toContain('WhatsApp híbrido');
   });
 
   it('usa o inboxId real retornado pela criação e navega para agentes', async () => {
