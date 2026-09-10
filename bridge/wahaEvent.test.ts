@@ -39,6 +39,8 @@ describe('WAHA webhook normalization', () => {
   it('normaliza lifecycle group.v2 sem transformar o grupo em contato individual', () => {
     expect(parseIncomingWahaGroupLifecycle({ event: 'group.v2.participants', session: 'empresa', payload: { groupId: '120@g.us', action: 'promote', participants: [{ id: '5511999999999@c.us', name: 'Ana', role: 'admin' }] } })).toMatchObject({ session: 'empresa', groupId: '120@g.us', participantAction: 'promote', participants: [{ jid: '5511999999999@c.us', phoneNumber: '5511999999999', name: 'Ana', admin: 'admin' }] });
     expect(parseIncomingWahaGroupLifecycle({ event: 'group.v2.update', session: 'empresa', payload: { group: { id: '120@g.us', subject: 'Vendas', description: 'Equipe' } } })).toMatchObject({ groupId: '120@g.us', subject: 'Vendas', description: 'Equipe' });
+    expect(parseIncomingWahaGroupLifecycle({ event: 'group.v2.update', session: 'empresa', payload: { JID: '121@g.us', Name: 'Operações', Topic: 'Plantão', Participants: [{ JID: '5511888888888@c.us', IsAdmin: true }] } })).toMatchObject({ groupId: '121@g.us', subject: 'Operações', description: 'Plantão', participants: [{ jid: '5511888888888@c.us', phoneNumber: '5511888888888', admin: 'admin' }] });
+    expect(parseIncomingWahaGroupLifecycle({ event: 'group.v2.update', session: 'empresa', payload: { JID: '121@g.us', Topic: '' } })).toMatchObject({ groupId: '121@g.us', description: '' });
   });
 
   it('reutiliza a normalização realtime para registros históricos GOWS', () => {

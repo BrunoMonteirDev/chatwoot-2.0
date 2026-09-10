@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 let bridgeServer: Server; let railsServer: Server; let base: string; let dir: string;
 let waha: typeof import('./waha').wahaTransport; let chatwoot: typeof import('./chatwoot').chatwootBridge;
 let evolution: typeof import('./evolution').evolutionBridge;
+let bootstrapFreshWahaGroupMetadata: typeof import('./index').bootstrapFreshWahaGroupMetadata;
 const headers = { 'Content-Type': 'application/json', 'access-token': 'token', 'token-type': 'Bearer', client: 'client', expiry: '9999999999', uid: 'agent@example.test' };
 const post = (path: string, body: Record<string, unknown>) => fetch(`${base}${path}`, { method: 'POST', headers, body: JSON.stringify(body) });
 const inbox = (id: number, name: string, session: string) => ({ id, name, channel_type: 'Channel::Api', inbox_identifier: `api-${id}`, additional_attributes: { whatsapp_transports: ['waha'], waha_session_name: session } });
@@ -18,7 +19,7 @@ beforeAll(async () => {
   for (const [key, value] of Object.entries({ NODE_ENV: 'test', BRIDGE_WEBHOOK_SECRET: 'test', CHATWOOT_BASE_URL: railsBase, BRIDGE_REDIS_URL: '', WAHA_BASE_URL: 'http://waha.test', WAHA_API_KEY: 'key', BRIDGE_DEDUP_FILE: `${dir}/dedup.json`, BRIDGE_IDENTITY_FILE: `${dir}/identities.json`, BRIDGE_GROUP_CREATION_FILE: `${dir}/creations.json`, BRIDGE_WAHA_SESSION_OWNERSHIP_FILE: `${dir}/sessions.json` })) vi.stubEnv(key, value);
   const Store = (await import('./wahaSessionStore')).WahaSessionStore; const store = new Store(`${dir}/sessions.json`);
   await store.reserve({ accountId: 1, inboxId: 10, sessionName: 'session-a' }); await store.reserve({ accountId: 1, inboxId: 20, sessionName: 'session-b' }); await store.reserve({ accountId: 1, inboxId: 30, sessionName: 'hybrid-a1-i30' });
-  const imported = await import('./index'); waha = (await import('./waha')).wahaTransport; evolution = (await import('./evolution')).evolutionBridge; chatwoot = (await import('./chatwoot')).chatwootBridge;
+  const imported = await import('./index'); bootstrapFreshWahaGroupMetadata = imported.bootstrapFreshWahaGroupMetadata; waha = (await import('./waha')).wahaTransport; evolution = (await import('./evolution')).evolutionBridge; chatwoot = (await import('./chatwoot')).chatwootBridge;
   bridgeServer = imported.app.listen(0, '127.0.0.1'); await new Promise<void>(resolve => bridgeServer.once('listening', resolve)); base = `http://127.0.0.1:${(bridgeServer.address() as { port: number }).port}`;
 });
 afterAll(async () => { vi.restoreAllMocks(); vi.unstubAllEnvs(); if (bridgeServer) await new Promise<void>((resolve, reject) => bridgeServer.close(error => error ? reject(error) : resolve())); if (railsServer) await new Promise<void>((resolve, reject) => railsServer.close(error => error ? reject(error) : resolve())); await rm(dir, { recursive: true, force: true }); });
@@ -38,6 +39,25 @@ beforeEach(() => {
 });
 
 describe('group creation routing and idempotency', () => {
+  it('bootstraps persisted metadata from the first observed group in a fresh installation', async () => {
+    vi.spyOn(chatwoot, 'groupContactAttributes').mockResolvedValue({});
+    vi.spyOn(chatwoot, 'findOrCreateGroupParticipantContact').mockImplementation(async (_inboxId, input) => ({ id: input.phoneNumber.endsWith('1') ? 91 : 92, name: input.name || input.phoneNumber, phoneNumber: input.phoneNumber, existing: false }));
+    vi.spyOn(chatwoot, 'saveWahaIdentity').mockResolvedValue({} as never);
+    vi.spyOn(waha, 'getChatAvatarUrl').mockResolvedValue(undefined);
+    vi.mocked(waha.getGroupMetadata).mockResolvedValue({ id: 'fresh@g.us', subject: 'Equipe nova', description: 'Descrição inicial', participants: [
+      { jid: '5511999999991@c.us', phoneNumber: '5511999999991', name: 'Ana' },
+      { jid: '5511999999992@c.us', phoneNumber: '5511999999992', name: 'Beto' },
+    ] });
+
+    await chatwoot.withAccount(1, () => bootstrapFreshWahaGroupMetadata({ accountId: 1, id: 20 }, 55, 'session-b', 'fresh@g.us'));
+    await chatwoot.withAccount(1, () => bootstrapFreshWahaGroupMetadata({ accountId: 1, id: 20 }, 55, 'session-b', 'fresh@g.us'));
+
+    expect(waha.getGroupMetadata).toHaveBeenCalledTimes(1);
+    expect(chatwoot.saveEvolutionGroup).toHaveBeenCalledWith(55, 'fresh@g.us', 'Equipe nova', expect.objectContaining({
+      transport: 'waha', description: 'Descrição inicial', participants: [expect.objectContaining({ contactId: 91 }), expect.objectContaining({ contactId: 92 })],
+    }));
+  });
+
   it('resolves only requested persisted participant identities without provider access', async () => {
     const avatarLookup = vi.spyOn(waha, 'getChatAvatarUrl');
     const evolutionMetadata = vi.spyOn(evolution, 'getGroupMetadata');

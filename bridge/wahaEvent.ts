@@ -69,14 +69,15 @@ export const parseIncomingWahaMutation = (payload: unknown): IncomingWahaMutatio
 
 export const parseIncomingWahaGroupLifecycle = (payload: unknown): IncomingWahaGroupLifecycle | null => {
   const base = parseWahaWebhook(payload); if (!['group.v2.join', 'group.v2.leave', 'group.v2.participants', 'group.v2.update'].includes(base.event)) return null;
-  const root = record(payload); const data = record(root.payload || root.data); const group = record(data.group || data); const session = string(root.session); const groupId = string(group.id) || string(data.groupId) || string(data.chatId);
+  const root = record(payload); const data = record(root.payload || root.data); const group = record(data.group || data); const session = string(root.session); const groupId = string(group.id) || string(group.JID) || string(data.groupId) || string(data.chatId);
   if (!session || !groupId || !groupId.endsWith('@g.us')) return null;
   const actionValue = string(data.action) || string(group.action);
   const participantAction = actionValue === 'join' ? 'add' : actionValue === 'leave' ? 'remove' : actionValue === 'promote' ? 'promote' : actionValue === 'demote' ? 'demote' : undefined;
-  const rawParticipants = Array.isArray(group.participants) ? group.participants : Array.isArray(data.participants) ? data.participants : [];
+  const description = typeof group.description === 'string' ? group.description : typeof group.Topic === 'string' ? group.Topic : undefined;
+  const rawParticipants = Array.isArray(group.participants) ? group.participants : Array.isArray(group.Participants) ? group.Participants : Array.isArray(data.participants) ? data.participants : [];
   const participants = rawParticipants.flatMap((item): Array<{ jid: string; name?: string; phoneNumber?: string; admin?: string | null }> => {
-    const value = record(item); const jid = string(value.id) || string(value.jid) || (typeof item === 'string' ? item : undefined); if (!jid) return [];
-    const phoneNumber = phoneFor(jid); const role = string(value.role) || string(value.admin); return [{ jid, ...(string(value.name) || string(value.pushName) ? { name: string(value.name) || string(value.pushName) } : {}), ...(phoneNumber ? { phoneNumber } : {}), ...(role ? { admin: role } : {}) }];
+    const value = record(item); const jid = string(value.id) || string(value.jid) || string(value.JID) || (typeof item === 'string' ? item : undefined); if (!jid) return [];
+    const phoneNumber = phoneFor(jid); const role = string(value.role) || string(value.admin) || (value.IsSuperAdmin === true ? 'superadmin' : value.IsAdmin === true ? 'admin' : undefined); return [{ jid, ...(string(value.name) || string(value.pushName) || string(value.DisplayName) ? { name: string(value.name) || string(value.pushName) || string(value.DisplayName) } : {}), ...(phoneNumber ? { phoneNumber } : {}), ...(role ? { admin: role } : {}) }];
   });
-  return { ...base, session, groupId, ...(string(group.subject) || string(group.name) ? { subject: string(group.subject) || string(group.name) } : {}), ...(string(group.description) ? { description: string(group.description) } : {}), ...(string(group.pictureUrl) || string(group.avatarUrl) ? { avatarUrl: string(group.pictureUrl) || string(group.avatarUrl) } : {}), ...(participants.length ? { participants } : {}), ...(participantAction ? { participantAction } : {}) };
+  return { ...base, session, groupId, ...(string(group.subject) || string(group.name) || string(group.Name) ? { subject: string(group.subject) || string(group.name) || string(group.Name) } : {}), ...(description !== undefined ? { description } : {}), ...(string(group.pictureUrl) || string(group.avatarUrl) ? { avatarUrl: string(group.pictureUrl) || string(group.avatarUrl) } : {}), ...(participants.length ? { participants } : {}), ...(participantAction ? { participantAction } : {}) };
 };
