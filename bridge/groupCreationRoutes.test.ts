@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { createServer, type Server } from 'node:http';
+import { createHmac } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 let bridgeServer: Server; let railsServer: Server; let base: string; let dir: string;
@@ -8,6 +9,10 @@ let waha: typeof import('./waha').wahaTransport; let chatwoot: typeof import('./
 let evolution: typeof import('./evolution').evolutionBridge;
 const headers = { 'Content-Type': 'application/json', 'access-token': 'token', 'token-type': 'Bearer', client: 'client', expiry: '9999999999', uid: 'agent@example.test' };
 const post = (path: string, body: Record<string, unknown>) => fetch(`${base}${path}`, { method: 'POST', headers, body: JSON.stringify(body) });
+const postWaha = (body: Record<string, unknown>) => {
+  const raw = JSON.stringify(body);
+  return fetch(`${base}/webhooks/waha`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-webhook-hmac': createHmac('sha512', 'synthetic-waha-secret').update(raw).digest('hex') }, body: raw });
+};
 const inbox = (id: number, name: string, session: string) => ({ id, name, channel_type: 'Channel::Api', inbox_identifier: `api-${id}`, additional_attributes: { whatsapp_transports: ['waha'], waha_session_name: session } });
 
 beforeAll(async () => {
@@ -15,7 +20,7 @@ beforeAll(async () => {
   railsServer = createServer((_request, response) => { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ account_id: 1, role: 'administrator', accounts: [{ id: 1, role: 'administrator' }] })); });
   railsServer.listen(0, '127.0.0.1'); await new Promise<void>(resolve => railsServer.once('listening', resolve));
   const railsBase = `http://127.0.0.1:${(railsServer.address() as { port: number }).port}`;
-  for (const [key, value] of Object.entries({ NODE_ENV: 'test', BRIDGE_WEBHOOK_SECRET: 'test', CHATWOOT_BASE_URL: railsBase, BRIDGE_REDIS_URL: '', WAHA_BASE_URL: 'http://waha.test', WAHA_API_KEY: 'key', BRIDGE_DEDUP_FILE: `${dir}/dedup.json`, BRIDGE_IDENTITY_FILE: `${dir}/identities.json`, BRIDGE_GROUP_CREATION_FILE: `${dir}/creations.json`, BRIDGE_WAHA_SESSION_OWNERSHIP_FILE: `${dir}/sessions.json` })) vi.stubEnv(key, value);
+  for (const [key, value] of Object.entries({ NODE_ENV: 'test', BRIDGE_WEBHOOK_SECRET: 'test', CHATWOOT_BASE_URL: railsBase, BRIDGE_REDIS_URL: '', WAHA_BASE_URL: 'http://waha.test', WAHA_API_KEY: 'key', WAHA_WEBHOOK_SECRET: 'synthetic-waha-secret', BRIDGE_DEDUP_FILE: `${dir}/dedup.json`, BRIDGE_IDENTITY_FILE: `${dir}/identities.json`, BRIDGE_GROUP_CREATION_FILE: `${dir}/creations.json`, BRIDGE_WAHA_SESSION_OWNERSHIP_FILE: `${dir}/sessions.json` })) vi.stubEnv(key, value);
   const Store = (await import('./wahaSessionStore')).WahaSessionStore; const store = new Store(`${dir}/sessions.json`);
   await store.reserve({ accountId: 1, inboxId: 10, sessionName: 'session-a' }); await store.reserve({ accountId: 1, inboxId: 20, sessionName: 'session-b' }); await store.reserve({ accountId: 1, inboxId: 30, sessionName: 'hybrid-a1-i30' });
   const imported = await import('./index'); groupMetadataBackfill = imported.groupMetadataBackfill; waha = (await import('./waha')).wahaTransport; evolution = (await import('./evolution')).evolutionBridge; chatwoot = (await import('./chatwoot')).chatwootBridge;
@@ -26,11 +31,14 @@ afterAll(async () => { vi.restoreAllMocks(); vi.unstubAllEnvs(); if (bridgeServe
 beforeEach(() => {
   vi.restoreAllMocks();
   vi.spyOn(chatwoot, 'listInboxesForSession').mockResolvedValue([inbox(10, 'A', 'session-a'), inbox(20, 'B', 'session-b')] as never);
+  vi.spyOn(chatwoot, 'listServiceAccountIds').mockResolvedValue([1]);
+  vi.spyOn(chatwoot, 'listAccountInboxes').mockResolvedValue([inbox(10, 'A', 'session-a'), inbox(20, 'B', 'session-b'), { id: 30, name: 'Hybrid', channel_type: 'Channel::Whatsapp', additional_attributes: { hybrid_enabled: true, hybrid_waha_session: 'hybrid-a1-i30' } }] as never);
   vi.spyOn(chatwoot, 'contactsByIdsForSession').mockImplementation(async (_accountId, ids) => ids.map(id => ({ id, name: `Contact ${id}`, phone_number: `+55119999999${id}` })) as never);
   vi.spyOn(chatwoot, 'ensureGroupConversation').mockResolvedValue({ conversationId: 91, contactId: 55, sourceId: 'whatsapp:group:group@g.us' });
   vi.spyOn(chatwoot, 'conversationGroupTargetDetailsForSession').mockResolvedValue({ groupJid: '222@g.us', contactId: 55, persistedMetadata: { participants: [] } } as never);
   vi.spyOn(chatwoot, 'saveEvolutionGroup').mockResolvedValue({} as never);
   vi.spyOn(waha, 'getSession').mockImplementation(async name => ({ name, status: 'WORKING', connectionStatus: 'connected' }));
+  vi.spyOn(waha, 'listChats').mockResolvedValue([]);
   vi.spyOn(waha, 'createGroup').mockImplementation(async session => ({ id: `${session === 'session-b' ? '222' : '111'}@g.us` }));
   vi.spyOn(waha, 'updateGroupDescription').mockResolvedValue({} as never); vi.spyOn(waha, 'getGroupInviteLink').mockResolvedValue('https://chat.whatsapp.com/code'); vi.spyOn(waha, 'sendText').mockResolvedValue({} as never);
   vi.spyOn(waha, 'getGroupMetadata').mockResolvedValue({ id: '222@g.us', subject: 'Equipe', participants: [] }); vi.spyOn(waha, 'addGroupParticipant').mockResolvedValue({ id: '222@g.us', subject: 'Equipe', participants: [] });
@@ -38,12 +46,36 @@ beforeEach(() => {
 });
 
 describe('group creation routing and idempotency', () => {
+  it('descobre grupos silenciosos da primeira conexão sem persistence prévia', async () => {
+    vi.spyOn(chatwoot, 'listPersistedGroupContacts').mockResolvedValue([]);
+    vi.mocked(waha.listChats).mockResolvedValue([
+      { id: '700001@g.us', name: 'Synthetic group alpha' },
+      { id: '700002@g.us', name: 'Synthetic group beta' },
+      { id: '5500000000000@c.us', name: 'Synthetic private chat' },
+    ]);
+    vi.mocked(chatwoot.ensureGroupConversation)
+      .mockResolvedValueOnce({ conversationId: 801, contactId: 901, sourceId: 'whatsapp:group:700001@g.us' })
+      .mockResolvedValueOnce({ conversationId: 802, contactId: 902, sourceId: 'whatsapp:group:700002@g.us' });
+    vi.spyOn(chatwoot, 'groupContactAttributes').mockResolvedValue({});
+    vi.mocked(waha.getGroupMetadata).mockImplementation(async (_session, groupJid) => ({ id: groupJid, subject: `Metadata ${groupJid}`, participants: [{ jid: '5500000000001@c.us', phoneNumber: '5500000000001', name: 'Synthetic member' }] }));
+    vi.spyOn(waha, 'getChatAvatarUrl').mockResolvedValue(undefined);
+    vi.spyOn(chatwoot, 'findOrCreateGroupParticipantContact').mockResolvedValue({ id: 990, name: 'Synthetic member', phoneNumber: '+5500000000001', avatarUrl: undefined, existing: true });
+    vi.spyOn(chatwoot, 'saveWahaIdentity').mockResolvedValue({} as never);
+
+    await groupMetadataBackfill.reconcile({ accountId: 47, inboxId: 608, sessionName: 'tenant-session-x' });
+
+    expect(chatwoot.ensureGroupConversation).toHaveBeenCalledTimes(2);
+    expect(chatwoot.ensureGroupConversation).toHaveBeenCalledWith(608, '700001@g.us', 'Synthetic group alpha', 'waha');
+    expect(waha.getGroupMetadata).toHaveBeenCalledTimes(2);
+    expect(chatwoot.saveEvolutionGroup).toHaveBeenCalledWith(901, '700001@g.us', 'Metadata 700001@g.us', expect.objectContaining({ transport: 'waha', participants: [expect.objectContaining({ contactId: 990 })] }));
+  });
+
   it('backfills a silent persisted group and resolves LID to a real Contact', async () => {
     vi.spyOn(chatwoot, 'listPersistedGroupContacts').mockResolvedValue([{ contactId: 55, groupJid: '222@g.us', subject: 'Nome persistido', description: 'Descrição rica', participants: [], historicalParticipants: [] }]);
     vi.spyOn(chatwoot, 'groupContactAttributes').mockResolvedValue({});
-    vi.mocked(waha.getGroupMetadata).mockResolvedValue({ id: '222@g.us', subject: 'Equipe', description: 'Descrição WAHA', participants: [{ jid: '123@lid', lid: '123@lid', name: 'Maria', admin: 'admin' }] });
+    vi.mocked(waha.getGroupMetadata).mockResolvedValue({ id: '222@g.us', subject: 'Equipe', description: 'Descrição WAHA', participants: [{ jid: '123@lid', lid: '123@lid', name: 'Synthetic participant', admin: 'admin' }] });
     vi.spyOn(waha, 'resolveLid').mockResolvedValue('5511999999999'); vi.spyOn(waha, 'getChatAvatarUrl').mockResolvedValue(undefined);
-    vi.spyOn(chatwoot, 'findOrCreateGroupParticipantContact').mockResolvedValue({ id: 91, name: 'Maria real', phoneNumber: '+5511999999999', existing: true });
+    vi.spyOn(chatwoot, 'findOrCreateGroupParticipantContact').mockResolvedValue({ id: 91, name: 'Synthetic resolved participant', phoneNumber: '+5511999999999', avatarUrl: undefined, existing: true });
     vi.spyOn(chatwoot, 'saveWahaIdentity').mockResolvedValue({} as never);
     await groupMetadataBackfill.reconcile({ accountId: 1, inboxId: 20, sessionName: 'session-b' });
     expect(waha.getGroupMetadata).toHaveBeenCalledWith('session-b', '222@g.us'); expect(waha.resolveLid).toHaveBeenCalledWith('session-b', '123');
@@ -51,13 +83,63 @@ describe('group creation routing and idempotency', () => {
     expect(chatwoot.saveEvolutionGroup).toHaveBeenCalledWith(55, '222@g.us', 'Equipe', expect.objectContaining({ transport: 'waha', description: 'Descrição WAHA', participants: [expect.objectContaining({ jid: '123@lid', lid: '123', phoneJid: '5511999999999@c.us', contactId: 91, admin: 'admin' })] }));
   });
 
-  it('reconcilia cada ownership WORKING no próprio account/inbox/session', async () => {
+  it('atualiza membros e descrição por evento mesmo sem cache de identities', async () => {
+    vi.spyOn(chatwoot, 'listPersistedGroupContacts').mockResolvedValue([
+      { contactId: 901, groupJid: '700003@g.us', subject: 'Synthetic group old', description: 'Synthetic description old', participants: [{ jid: '5500000000001@c.us', phone: '5500000000001', contact_id: 991 }], historicalParticipants: [] },
+      { contactId: 902, groupJid: '700003@g.us', subject: 'Synthetic duplicate', participants: [], historicalParticipants: [] },
+    ]);
+    vi.mocked(waha.getGroupMetadata).mockResolvedValue({ id: '700003@g.us', subject: 'Synthetic group new', description: 'Synthetic description new', participants: [{ jid: '5500000000002@c.us', phoneNumber: '5500000000002', name: 'Synthetic member new' }] });
+    vi.spyOn(waha, 'getChatAvatarUrl').mockResolvedValue(undefined);
+    vi.spyOn(chatwoot, 'findOrCreateGroupParticipantContact').mockResolvedValue({ id: 992, name: 'Synthetic member new', phoneNumber: '+5500000000002', avatarUrl: undefined, existing: true });
+    vi.spyOn(chatwoot, 'saveWahaIdentity').mockResolvedValue({} as never);
+    const response = await postWaha({ event: 'group.v2.update', session: 'session-b', payload: { id: 'synthetic-event-update', group: { id: '700003@g.us' } } });
+    expect(response.status).toBe(202);
+    await vi.waitFor(() => expect(chatwoot.saveEvolutionGroup).toHaveBeenCalledTimes(2));
+    expect(chatwoot.saveEvolutionGroup).toHaveBeenCalledWith(901, '700003@g.us', 'Synthetic group new', expect.objectContaining({ description: 'Synthetic description new', participants: [expect.objectContaining({ contactId: 992 })], historicalParticipants: expect.arrayContaining([expect.objectContaining({ contactId: 991 }), expect.objectContaining({ contactId: 992 })]) }));
+    expect(chatwoot.saveEvolutionGroup).toHaveBeenCalledWith(902, '700003@g.us', 'Synthetic group new', expect.anything());
+  });
+
+  it('payload parcial posterior não apaga metadata rica persistida', async () => {
+    vi.spyOn(chatwoot, 'listPersistedGroupContacts').mockResolvedValue([{ contactId: 903, groupJid: '700004@g.us', subject: 'Synthetic rich group', description: 'Synthetic rich description', participants: [{ jid: '5500000000003@c.us', phone: '5500000000003', contact_id: 993 }, { jid: '5500000000004@c.us', phone: '5500000000004', contact_id: 994 }], historicalParticipants: [] }]);
+    vi.mocked(waha.getGroupMetadata).mockResolvedValue({ id: '700004@g.us', participants: [{ jid: '5500000000003@c.us', phoneNumber: '5500000000003' }] });
+    vi.spyOn(waha, 'getChatAvatarUrl').mockResolvedValue(undefined);
+    const failed = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const response = await postWaha({ event: 'group.v2.update', session: 'session-b', payload: { id: 'synthetic-event-partial', group: { id: '700004@g.us' } } });
+    expect(response.status).toBe(202);
+    await vi.waitFor(() => expect(failed).toHaveBeenCalledWith('[waha] group lifecycle processing failed', expect.objectContaining({ error: 'WAHA returned partial group metadata.' })));
+    expect(chatwoot.saveEvolutionGroup).not.toHaveBeenCalled();
+  });
+
+  it('redescobre cada binding WORKING pelo Chatwoot no restart', async () => {
     const reconcile = vi.spyOn(groupMetadataBackfill, 'reconcile').mockResolvedValue(undefined);
     vi.mocked(waha.getSession).mockImplementation(async name => ({ name, status: name === 'session-b' ? 'FAILED' : 'WORKING', connectionStatus: name === 'session-b' ? 'error' : 'connected' }));
     const { reconcileWorkingWahaGroups } = await import('./index'); await reconcileWorkingWahaGroups();
     expect(reconcile).toHaveBeenCalledWith({ accountId: 1, inboxId: 10, sessionName: 'session-a' });
     expect(reconcile).toHaveBeenCalledWith({ accountId: 1, inboxId: 30, sessionName: 'hybrid-a1-i30' });
     expect(reconcile).not.toHaveBeenCalledWith(expect.objectContaining({ inboxId: 20 }));
+  });
+
+  it('adota o binding persistido quando o primeiro evento chega antes do índice local', async () => {
+    vi.mocked(chatwoot.listServiceAccountIds).mockResolvedValue([47]);
+    vi.mocked(chatwoot.listAccountInboxes).mockResolvedValue([inbox(608, 'Synthetic inbox', 'first-event-session')] as never);
+    vi.spyOn(chatwoot, 'findWahaInbox').mockResolvedValue({ id: 608, identifier: 'synthetic-608' });
+    vi.spyOn(chatwoot, 'updateInboxAdditionalAttributes').mockResolvedValue({} as never);
+    const reconcile = vi.spyOn(groupMetadataBackfill, 'reconcile').mockResolvedValue(undefined);
+    const response = await postWaha({ event: 'session.status', session: 'first-event-session', payload: { id: 'synthetic-first-status', status: 'WORKING' } });
+    expect(response.status).toBe(202);
+    await vi.waitFor(() => expect(reconcile).toHaveBeenCalledWith({ accountId: 47, inboxId: 608, sessionName: 'first-event-session' }));
+  });
+
+  it('mantém accounts e inboxes isoladas durante a reconciliação genérica', async () => {
+    vi.mocked(chatwoot.listServiceAccountIds).mockResolvedValue([47, 73]);
+    vi.mocked(chatwoot.listAccountInboxes).mockImplementation(async accountId => accountId === 47
+      ? [inbox(608, 'Synthetic X', 'tenant-session-x'), inbox(609, 'Synthetic Z', 'tenant-session-z')] as never
+      : [inbox(904, 'Synthetic Y', 'tenant-session-y')] as never);
+    const reconcile = vi.spyOn(groupMetadataBackfill, 'reconcile').mockResolvedValue(undefined);
+    const { reconcileWorkingWahaGroups } = await import('./index'); await reconcileWorkingWahaGroups();
+    expect(reconcile).toHaveBeenCalledWith({ accountId: 47, inboxId: 608, sessionName: 'tenant-session-x' });
+    expect(reconcile).toHaveBeenCalledWith({ accountId: 47, inboxId: 609, sessionName: 'tenant-session-z' });
+    expect(reconcile).toHaveBeenCalledWith({ accountId: 73, inboxId: 904, sessionName: 'tenant-session-y' });
   });
 
   it('reads group details from persistence without any WAHA call', async () => {
@@ -72,11 +154,11 @@ describe('group creation routing and idempotency', () => {
   it('resolves only requested persisted participant identities without provider access', async () => {
     const avatarLookup = vi.spyOn(waha, 'getChatAvatarUrl');
     const evolutionMetadata = vi.spyOn(evolution, 'getGroupMetadata');
-    vi.mocked(chatwoot.contactsByIdsForSession).mockResolvedValue([{ id: 91, name: 'Maria atual', phone_number: '+5511999999999', thumbnail: 'maria-atual.jpg' }] as never);
+    vi.mocked(chatwoot.contactsByIdsForSession).mockResolvedValue([{ id: 91, name: 'Synthetic current participant', phone_number: '+5511999999999', thumbnail: 'synthetic-current.jpg' }] as never);
     vi.mocked(chatwoot.conversationGroupTargetDetailsForSession).mockResolvedValue({
       groupJid: '222@g.us', contactId: 55, persistedMetadata: {
         participants: [
-          { jid: '123@lid', phone_jid: '5511999999999@c.us', display_name: 'Maria', avatar_url: 'maria.jpg', contact_id: 91 },
+          { jid: '123@lid', phone_jid: '5511999999999@c.us', display_name: 'Synthetic participant', avatar_url: 'synthetic.jpg', contact_id: 91 },
           { jid: '456@lid', display_name: 'Outro membro', contact_id: 92 },
         ],
         historicalParticipants: [],
@@ -84,7 +166,7 @@ describe('group creation routing and idempotency', () => {
     } as never);
     const response = await post('/groups/participant-identities', { accountId: 1, inboxId: 20, conversationId: 81, identifiers: [{ contactId: 800, aliases: ['123@lid'] }] });
     const result = await response.json(); expect(response.status, JSON.stringify(result)).toBe(200);
-    expect(result).toEqual({ participants: [expect.objectContaining({ jid: '123@lid', contactId: 91, displayName: 'Maria atual', avatarUrl: 'maria-atual.jpg', phoneNumber: '+5511999999999' })] });
+    expect(result).toEqual({ participants: [expect.objectContaining({ jid: '123@lid', contactId: 91, displayName: 'Synthetic current participant', avatarUrl: 'synthetic-current.jpg', phoneNumber: '+5511999999999' })] });
     expect(chatwoot.contactsByIdsForSession).toHaveBeenCalledWith(1, [91], expect.any(Headers));
     expect(waha.getGroupMetadata).not.toHaveBeenCalled();
     expect(avatarLookup).not.toHaveBeenCalled();

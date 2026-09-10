@@ -32,6 +32,7 @@ import { WahaHistoryStore, type WahaHistoryJob, type WahaHistoryRange } from './
 import { ConnectionStatusOrder, connectionStatusPatch, evolutionConnectionStatus, metaConnectionStatus, type ConnectionStatus } from './connectionStatus.js';
 import { groupMetadataCache, mergeParticipantHistory, persistedGroupMetadata, selectPersistedParticipantIdentities, type GroupMetadata } from './groupMetadata.js';
 import { GroupMetadataBackfill, validPersistedGroupSnapshot, type GroupBackfillScope, type GroupBackfillTarget } from './groupMetadataBackfill.js';
+import { discoverConfiguredWahaGroupScopes } from './wahaGroupScopeDiscovery.js';
 import { bestEffortContactProfile, contactProfileSyncPlan } from './contactProfile.js';
 import { incomingGroupParticipantInput, linkGroupParticipantContacts, resolveGroupParticipantIdentity } from './groupParticipantIdentity.js';
 import { GroupCreationStore, type StoredGroupCreation } from './groupCreationStore.js';
@@ -420,8 +421,33 @@ const loadGroupMetadata = async (transport: 'evolution' | 'waha', configuration:
   return { ...(await evolutionBridge.getGroupMetadata(configuration.evolutionInstanceName, groupJid)), transport, canEditDescription: true };
 };
 
+const discoverWahaGroupBackfillTargets = async (scope: GroupBackfillScope): Promise<GroupBackfillTarget[]> => chatwootBridge.withAccount(scope.accountId, async () => {
+  const persisted = await chatwootBridge.listPersistedGroupContacts(scope.inboxId);
+  const knownJids = new Set(persisted.map(group => group.groupJid));
+  // A brand-new Kopla installation has no group Contacts yet. Discover the
+  // session's existing silent groups in the background and create only their
+  // persistence shells; metadata remains the backfill worker's responsibility.
+  try {
+    for (let offset = 0; ; offset += 500) {
+      const chats = await wahaTransport.listChats(scope.sessionName, { limit: 500, offset });
+      for (const chat of chats) {
+        if (!chat.id.endsWith('@g.us') || knownJids.has(chat.id)) continue;
+        const created = await chatwootBridge.ensureGroupConversation(scope.inboxId, chat.id, chat.name || chat.id, 'waha');
+        persisted.push({ contactId: created.contactId, groupJid: chat.id, subject: chat.name, participants: [], historicalParticipants: [] });
+        knownJids.add(chat.id);
+      }
+      if (chats.length < 500) break;
+    }
+  } catch (error) {
+    // Existing persisted groups can still be repaired if chat discovery is
+    // temporarily unavailable. A later periodic pass retries unseen groups.
+    console.warn('[groups] WAHA chat discovery deferred', { ...scope, error: error instanceof Error ? error.message : 'unknown' });
+  }
+  return persisted;
+});
+
 const groupMetadataBackfill = new GroupMetadataBackfill({
-  discover: scope => chatwootBridge.withAccount(scope.accountId, () => chatwootBridge.listPersistedGroupContacts(scope.inboxId)),
+  discover: discoverWahaGroupBackfillTargets,
   stillPending: (scope, target) => chatwootBridge.withAccount(scope.accountId, async () => {
     const attributes = await Promise.all((target.contactIds || [target.contactId]).map(contactId => chatwootBridge.groupContactAttributes(contactId)));
     return attributes.some(value => !validPersistedGroupSnapshot({ ...target, participants: Array.isArray(value.whatsapp_group_participants) ? value.whatsapp_group_participants : [], syncedAt: typeof value.whatsapp_group_metadata_synced_at === 'string' ? value.whatsapp_group_metadata_synced_at : undefined }));
@@ -455,6 +481,30 @@ const groupMetadataBackfill = new GroupMetadataBackfill({
 
 const scheduleGroupMetadataBackfill = (scope: GroupBackfillScope) => {
   void groupMetadataBackfill.reconcile(scope).catch(error => console.warn('[groups] metadata backfill discovery failed', { ...scope, error: error instanceof Error ? error.message : 'unknown' }));
+};
+
+const configuredWahaGroupScopes = () => discoverConfiguredWahaGroupScopes({
+  listAccountIds: () => chatwootBridge.listServiceAccountIds(),
+  listInboxes: accountId => chatwootBridge.listAccountInboxes(accountId),
+  log: console,
+});
+
+const ensureConfiguredWahaOwnership = async (scope: GroupBackfillScope) => {
+  if (!validWahaSessionName(scope.sessionName)) throw new WahaSessionOwnershipError('not_found');
+  const existing = await wahaSessions.get(scope.sessionName);
+  if (existing) {
+    if (existing.accountId !== scope.accountId || existing.inboxId !== scope.inboxId || existing.status === 'cleanup_pending') throw new WahaSessionOwnershipError('conflict');
+    return existing;
+  }
+  return wahaSessions.reserve(scope);
+};
+
+const adoptConfiguredWahaOwnershipBySession = async (sessionName: string) => {
+  const matches = (await configuredWahaGroupScopes()).filter(scope => scope.sessionName === sessionName);
+  // A WAHA session name is provider-global. Refuse an ambiguous Chatwoot
+  // configuration instead of allowing an event to cross tenant boundaries.
+  if (matches.length !== 1) throw new WahaSessionOwnershipError(matches.length ? 'conflict' : 'not_found');
+  return ensureConfiguredWahaOwnership(matches[0]);
 };
 
 // Timeline identity bootstrap is deliberately persistence-only. Unlike the
@@ -1759,11 +1809,17 @@ app.post('/webhooks/meta', async (request, response) => {
 const wahaInboxForWebhook = async (sessionName: string) => {
   let ownership = await wahaSessions.get(sessionName);
   if (!ownership) {
-    // Legacy adoption is available only when a one-account fallback was
-    // explicitly configured. New sessions always have durable ownership.
-    if (!config.chatwootDefaultAccountId) throw new WahaSessionOwnershipError('not_found');
-    const inbox = await chatwootBridge.withAccount(config.chatwootDefaultAccountId, () => chatwootBridge.findWahaInbox(sessionName));
-    ownership = await adoptLegacyWahaOwnership(config.chatwootDefaultAccountId, inbox.id);
+    // Recover ownership from the durable account/inbox/session binding in
+    // Chatwoot. This also handles a fresh bridge volume and a status/group
+    // event racing the periodic startup reconciliation.
+    try { ownership = await adoptConfiguredWahaOwnershipBySession(sessionName); }
+    catch (error) {
+      // Keep the explicit one-account migration fallback for old inboxes that
+      // predate persisted transport attributes.
+      if (!config.chatwootDefaultAccountId || !(error instanceof WahaSessionOwnershipError) || error.code !== 'not_found') throw error;
+      const inbox = await chatwootBridge.withAccount(config.chatwootDefaultAccountId, () => chatwootBridge.findWahaInbox(sessionName));
+      ownership = await adoptLegacyWahaOwnership(config.chatwootDefaultAccountId, inbox.id);
+    }
   }
   if (!ownership) throw new WahaSessionOwnershipError('not_found');
   const inbox = await chatwootBridge.withAccount(ownership.accountId, () => chatwootBridge.findWahaInbox(sessionName));
@@ -2003,21 +2059,31 @@ app.post('/webhooks/waha', (request, response) => {
         if (ownership) {
           const scopeKey = groupScopeKey(ownership.accountId, ownership.inboxId, groupLifecycle.groupId);
           staleGroups.add(scopeKey); groupMetadataCache.invalidate('waha', groupLifecycle.groupId);
-          const contactId = Number(await identities.find([`group-contact:${scopeKey}`]));
-          if (Number.isInteger(contactId) && contactId > 0) {
-            await chatwootBridge.withAccount(ownership.accountId, async () => {
+          await chatwootBridge.withAccount(ownership.accountId, async () => {
+            // Resolve every persisted copy by account+inbox+JID. The identity
+            // file is only a cache and may be absent after a bridge restart.
+            const persisted = (await chatwootBridge.listPersistedGroupContacts(ownership.inboxId)).filter(group => group.groupJid === groupLifecycle.groupId);
+            if (persisted.length) {
+              const richest = persisted.reduce((left, right) => right.participants.length > left.participants.length ? right : left);
               const metadata = await loadGroupMetadata('waha', { evolutionInstanceName: null, wahaSessionName: groupLifecycle.session }, groupLifecycle.groupId);
+              if ((!metadata.participants.length || (metadata.participants.length < richest.participants.length && !groupLifecycle.participantAction)) && richest.participants.length) {
+                throw new Error('WAHA returned partial group metadata.');
+              }
               const participants = await syncGroupParticipants({ id: ownership.inboxId }, metadata.participants, 'waha');
-              const attributes = await chatwootBridge.groupContactAttributes(contactId);
-              const previous = persistedGroupMetadata(groupLifecycle.groupId, 'waha', { participants: Array.isArray(attributes.whatsapp_group_participants) ? attributes.whatsapp_group_participants : [], historicalParticipants: Array.isArray(attributes.whatsapp_group_participant_history) ? attributes.whatsapp_group_participant_history : [] });
+              const previous = persistedGroupMetadata(groupLifecycle.groupId, 'waha', richest);
               const historicalParticipants = mergeParticipantHistory(previous?.historicalParticipants || previous?.participants || [], participants);
-              const refreshed = groupMetadataCache.set({ ...metadata, participants, historicalParticipants });
-              await chatwootBridge.saveEvolutionGroup(contactId, groupLifecycle.groupId, refreshed.subject || groupLifecycle.groupId, { avatarUrl: refreshed.avatarUrl, description: refreshed.description, participants, historicalParticipants, participantAction: groupLifecycle.participantAction });
+              const refreshed = groupMetadataCache.set({
+                ...metadata, participants, historicalParticipants,
+                ...(metadata.subject || richest.subject ? { subject: metadata.subject || richest.subject } : {}),
+                ...(metadata.avatarUrl || richest.avatarUrl ? { avatarUrl: metadata.avatarUrl || richest.avatarUrl } : {}),
+                ...(metadata.description !== undefined || richest.description !== undefined ? { description: metadata.description ?? richest.description } : {}),
+              });
+              await Promise.all(persisted.map(group => chatwootBridge.saveEvolutionGroup(group.contactId, groupLifecycle.groupId, refreshed.subject || group.subject || groupLifecycle.groupId, { avatarUrl: refreshed.avatarUrl, description: refreshed.description, participants, historicalParticipants, participantAction: groupLifecycle.participantAction })));
+              await identities.save([`group-contact:${scopeKey}`], String(richest.contactId));
               staleGroups.delete(scopeKey);
-            });
-            await dedup.commit(key);
-            return;
-          }
+            }
+          });
+          if (!staleGroups.has(scopeKey)) { await dedup.commit(key); return; }
         }
         const inbox = await wahaInboxForWebhook(groupLifecycle.session);
         await chatwootBridge.withAccount(inbox.accountId, async () => {
@@ -2538,14 +2604,23 @@ app.post('/webhooks/chatwoot', async (request, response) => {
 });
 const retryPendingWahaCleanups = () => retryPendingWahaCleanup({ sessions: wahaSessions, waha: wahaTransport, log: console }).catch(error => console.warn('[KOPLA_WAHA_CLEANUP] worker_failed', { kind: error instanceof Error ? error.name : 'unknown' }));
 const reconcileWorkingWahaGroups = async () => {
-  const ownerships = (await wahaSessions.listAll()).filter(item => item.status !== 'cleanup_pending');
-  await Promise.all(ownerships.map(async ownership => {
+  // Rebuild scopes from Chatwoot on every pass. The bridge ownership store is
+  // an authorization index, not the discovery source, and may be empty after
+  // a clean install, volume replacement or Redis flush.
+  let scopes: GroupBackfillScope[];
+  try { scopes = await configuredWahaGroupScopes(); }
+  catch (error) {
+    console.warn('[groups] configured scope discovery failed', { error: error instanceof Error ? error.message : 'unknown' });
+    return;
+  }
+  await Promise.all(scopes.map(async scope => {
     try {
-      const session = await wahaTransport.getSession(ownership.sessionName);
-      await wahaSessions.update(ownership.sessionName, { status: session.status, engine: session.engine, phone: session.me?.id });
-      if (session.status === 'WORKING') scheduleGroupMetadataBackfill({ accountId: ownership.accountId, inboxId: ownership.inboxId, sessionName: ownership.sessionName });
+      await ensureConfiguredWahaOwnership(scope);
+      const session = await wahaTransport.getSession(scope.sessionName);
+      await wahaSessions.update(scope.sessionName, { status: session.status, engine: session.engine, phone: session.me?.id });
+      if (session.status === 'WORKING') scheduleGroupMetadataBackfill(scope);
     } catch (error) {
-      console.warn('[groups] WAHA reconciliation skipped', { accountId: ownership.accountId, inboxId: ownership.inboxId, sessionName: ownership.sessionName, error: error instanceof Error ? error.message : 'unknown' });
+      console.warn('[groups] WAHA reconciliation skipped', { ...scope, error: error instanceof Error ? error.message : 'unknown' });
     }
   }));
 };

@@ -4,6 +4,18 @@ import { chatwootBridge } from './chatwoot';
 afterEach(() => vi.unstubAllGlobals());
 
 describe('chatwootBridge media messages', () => {
+  it('descobre dinamicamente todas as accounts da credencial técnica', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ accounts: [{ id: 47 }, { id: 73 }, { id: 47 }, { id: 'invalid' }] }), { status: 200 })));
+    await expect(chatwootBridge.listServiceAccountIds()).resolves.toEqual([47, 73]);
+    expect(vi.mocked(fetch).mock.calls.at(-1)?.[0]).toContain('/api/v1/profile');
+  });
+
+  it('lista inboxes pelo endpoint estritamente account-scoped', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ payload: [{ id: 608, channel_type: 'Channel::Api' }] }), { status: 200 })));
+    await expect(chatwootBridge.listAccountInboxes(47)).resolves.toEqual([{ id: 608, channel_type: 'Channel::Api' }]);
+    expect(vi.mocked(fetch).mock.calls[0][0]).toContain('/api/v1/accounts/47/inboxes');
+  });
+
   it('descobre somente grupos persistidos da inbox e pagina sem misturar contas/inboxes', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: { payload: [

@@ -6,6 +6,7 @@ import { bridgeRedis } from './redis.js';
 export class IdentityStore {
   private values: Record<string, string> = {};
   private loaded = false;
+  private localQueue = Promise.resolve();
 
   constructor(private readonly file: string) {}
 
@@ -20,8 +21,10 @@ export class IdentityStore {
       if (legacy) await this.save(keys, legacy);
       return legacy;
     }
-    await this.load();
-    return keys.map(key => this.values[key]).find((value): value is string => typeof value === 'string');
+    return this.locked(async () => {
+      await this.load();
+      return keys.map(key => this.values[key]).find((value): value is string => typeof value === 'string');
+    });
   }
 
   async save(keys: string[], sourceId: string) {
@@ -29,12 +32,22 @@ export class IdentityStore {
       await Promise.all(keys.filter(Boolean).map(key => bridgeRedis.set(`bridge:identity:${key}`, sourceId)));
       return;
     }
-    await this.load();
-    keys.filter(Boolean).forEach(key => { this.values[key] = sourceId; });
-    await mkdir(dirname(this.file), { recursive: true });
-    const temporary = `${this.file}.tmp`;
-    await writeFile(temporary, JSON.stringify(this.values), 'utf8');
-    await rename(temporary, this.file);
+    await this.locked(async () => {
+      await this.load();
+      keys.filter(Boolean).forEach(key => { this.values[key] = sourceId; });
+      await mkdir(dirname(this.file), { recursive: true });
+      const temporary = `${this.file}.tmp`;
+      await writeFile(temporary, JSON.stringify(this.values), 'utf8');
+      await rename(temporary, this.file);
+    });
+  }
+
+  private async locked<T>(operation: () => Promise<T>) {
+    const previous = this.localQueue;
+    let release!: () => void;
+    this.localQueue = new Promise(resolve => { release = resolve; });
+    await previous;
+    try { return await operation(); } finally { release(); }
   }
 
   private async load() {

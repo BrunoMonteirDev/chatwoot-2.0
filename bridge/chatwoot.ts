@@ -247,6 +247,13 @@ export const chatwootBridge = {
     if (!Number.isInteger(accountId) || accountId < 1) return Promise.reject(new Error('ID de conta Chatwoot inválido.'));
     return accountContext.run(accountId, operation);
   },
+  async listServiceAccountIds(): Promise<number[]> {
+    const profile = await request<{ accounts?: Array<{ id?: unknown }> }>('/api/v1/profile', {}, true);
+    return [...new Set((profile.accounts || []).map(account => Number(account.id)).filter(accountId => Number.isInteger(accountId) && accountId > 0))];
+  },
+  async listAccountInboxes(accountId: number): Promise<ApiInbox[]> {
+    return this.withAccount(accountId, async () => (await request<{ payload: ApiInbox[] }>(`/api/v1/accounts/${accountId}/inboxes`, {}, true)).payload || []);
+  },
   listApiInboxes: () => request<{ payload: ApiInbox[] }>(`/api/v1/accounts/${currentAccountId()}/inboxes`, {}, true).then(response => response.payload.filter(item => item.channel_type === 'Channel::Api')),
   async findApiInboxById(inboxId: number): Promise<{ id: number; identifier: string; additionalAttributes: Record<string, unknown> }> {
     const inbox = (await this.listApiInboxes()).find(item => item.id === inboxId);
