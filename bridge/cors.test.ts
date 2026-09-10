@@ -3,7 +3,8 @@ import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-const allowedOrigin = 'https://app.synthetic.example';
+const allowedOrigin = 'http://localhost:5173';
+const secondAllowedOrigin = 'https://app.synthetic.example';
 const sessionHeaders = {
   'Content-Type': 'application/json',
   'Access-Token': 'synthetic-token',
@@ -40,7 +41,7 @@ beforeAll(async () => {
     NODE_ENV: 'test',
     BRIDGE_WEBHOOK_SECRET: 'synthetic-webhook-secret',
     BRIDGE_PUBLIC_URL: 'https://bridge.synthetic.example',
-    BRIDGE_ALLOWED_ORIGINS: allowedOrigin,
+    BRIDGE_ALLOWED_ORIGINS: `${allowedOrigin}, ${secondAllowedOrigin}`,
     CHATWOOT_BASE_URL: railsBase,
     BRIDGE_REDIS_URL: '',
     WAHA_BASE_URL: 'http://waha.synthetic.test',
@@ -68,6 +69,26 @@ afterAll(async () => {
 });
 
 describe('bridge CORS for WAHA inbox deletion', () => {
+  it('accepts every explicitly configured origin without a wildcard', async () => {
+    const response = await fetch(`${base}/config`, { headers: { Origin: secondAllowedOrigin } });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('access-control-allow-origin')).toBe(secondAllowedOrigin);
+    expect(response.headers.get('access-control-allow-origin')).not.toBe('*');
+  });
+
+  it('keeps existing GET and POST routes reachable from localhost', async () => {
+    const getResponse = await fetch(`${base}/config`, { headers: { Origin: allowedOrigin } });
+    const postResponse = await fetch(`${base}/providers/waha/sessions`, {
+      method: 'POST', headers: sessionHeaders, body: JSON.stringify({}),
+    });
+
+    expect(getResponse.status).toBe(200);
+    expect(getResponse.headers.get('access-control-allow-origin')).toBe(allowedOrigin);
+    expect(postResponse.status).toBe(400);
+    expect(postResponse.headers.get('access-control-allow-origin')).toBe(allowedOrigin);
+  });
+
   it('allows DELETE in a preflight from a configured origin', async () => {
     const response = await fetch(`${base}/providers/waha/inboxes/608`, {
       method: 'OPTIONS',
