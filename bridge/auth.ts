@@ -53,7 +53,7 @@ export const bridgeCors = (request: express.Request, response: express.Response,
     response.setHeader('Vary', 'Origin');
     response.setHeader('Access-Control-Allow-Credentials', 'true');
     response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Access-Token, Token-Type, Client, Expiry, Uid, X-Chatwoot-Account-Id');
-    response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
+    response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   }
   if (request.method === 'OPTIONS') return response.sendStatus(origin && config.allowedOrigins.includes(origin) ? 204 : 403);
   return next();
