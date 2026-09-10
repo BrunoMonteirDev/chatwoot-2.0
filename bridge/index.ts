@@ -21,7 +21,7 @@ import { bridgeCors, chatwootSessionHeaders, requireChatwootSession } from './au
 import { bridgeRedis } from './redis.js';
 import { bridgeMetrics } from './metrics.js';
 import { enforceRateLimit } from './rateLimit.js';
-import { canonicalWhatsAppGroupInviteLink, wahaTransport, WahaApiError, WahaGroupInviteError } from './waha.js';
+import { canonicalWhatsAppGroupInviteLink, normalizeWahaChatId, wahaTransport, WahaApiError, WahaGroupInviteError } from './waha.js';
 import { WahaSessionOwnershipError, WahaSessionStore } from './wahaSessionStore.js';
 import { unavailableOwnedWahaSession } from './wahaSessionFallback.js';
 import { deleteWahaInbox } from './wahaInboxDeletion.js';
@@ -2395,8 +2395,14 @@ app.post('/operations/messages/:operation', async (request, response) => {
       if (!inbox.configuration.transports.includes('waha') || !inbox.configuration.wahaSessionName) return response.status(409).json({ error: 'WAHA is not available for this inbox.', category: 'transport_unavailable' });
       await adoptLegacyWahaOwnership(accountId as number, inbox.id);
       await wahaSessions.assertOwned(accountId as number, inbox.id, inbox.configuration.wahaSessionName);
-      if (operation === 'edit') await wahaTransport.editMessage(inbox.configuration.wahaSessionName, remoteJid, external.id, content as string);
-      else await wahaTransport.revokeMessage(inbox.configuration.wahaSessionName, remoteJid, external.id);
+      // GOWS requires the serialized WAHA key for revoke. Reconstructing it
+      // from the authenticated operation target also supports legacy rows and
+      // avoids trusting a provider key supplied by the browser.
+      const wahaMessageKey = /^(?:true|false)_/.test(external.id)
+        ? external.id
+        : `true_${normalizeWahaChatId(remoteJid)}_${external.id}`;
+      if (operation === 'edit') await wahaTransport.editMessage(inbox.configuration.wahaSessionName, remoteJid, wahaMessageKey, content as string);
+      else await wahaTransport.revokeMessage(inbox.configuration.wahaSessionName, remoteJid, wahaMessageKey);
       const updated = operation === 'edit' ? await chatwootBridge.editWhatsAppMessageBySourceId(inbox.id, sourceId, content as string) : await chatwootBridge.revokeWhatsAppMessageBySourceId(inbox.id, sourceId);
       return response.json(updated);
     }

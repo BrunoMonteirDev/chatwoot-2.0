@@ -100,7 +100,10 @@ const request = async (path: string, init: RequestInit = {}, context?: WahaReque
     if (!validJson && response.ok) throw new WahaApiError('invalid_response');
     if (!response.ok) {
       const root = record(body);
-      const detail = typeof root?.message === 'string' ? root.message.slice(0, 240) : response.statusText;
+      const exception = record(root?.exception);
+      const detail = typeof root?.message === 'string' ? root.message.slice(0, 240)
+        : typeof exception?.message === 'string' ? exception.message.slice(0, 240)
+        : response.statusText;
       throw new WahaApiError('api', response.status, detail);
     }
     return body;

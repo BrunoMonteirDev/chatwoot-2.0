@@ -87,9 +87,16 @@ describe('platform WhatsApp message mutations', () => {
     const response = await operation('revoke');
 
     expect(response.status).toBe(200);
-    expect(waha.revokeMessage).toHaveBeenCalledWith('synthetic-session', '5500000000001@c.us', 'SYNTHETIC');
+    expect(waha.revokeMessage).toHaveBeenCalledWith('synthetic-session', '5500000000001@c.us', 'true_5500000000001@c.us_SYNTHETIC');
     expect(chatwoot.revokeWhatsAppMessageBySourceId).toHaveBeenCalledWith(608, 'waha:SYNTHETIC');
     expect(vi.mocked(waha.revokeMessage).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(chatwoot.revokeWhatsAppMessageBySourceId).mock.invocationCallOrder[0]);
+  });
+
+  it('reconstructs the serialized WAHA key when the remote JID is a bare phone number', async () => {
+    const response = await operation('revoke', { remoteJid: '5500000000001' });
+
+    expect(response.status).toBe(200);
+    expect(waha.revokeMessage).toHaveBeenCalledWith('synthetic-session', '5500000000001', 'true_5500000000001@c.us_SYNTHETIC');
   });
 
   it('keeps persistence untouched and returns clear feedback when revoke is refused', async () => {
