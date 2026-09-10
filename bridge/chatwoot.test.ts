@@ -4,6 +4,23 @@ import { chatwootBridge } from './chatwoot';
 afterEach(() => vi.unstubAllGlobals());
 
 describe('chatwootBridge media messages', () => {
+  it('descobre somente grupos persistidos da inbox e pagina sem misturar contas/inboxes', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { payload: [
+        { id: 1, inbox_id: 20, status: 'open', meta: { sender: { id: 55, name: 'Pendente', additional_attributes: {} } }, contact_inbox: { source_id: 'legacy-uuid' }, messages: [{ content_attributes: { whatsapp_remote_jid: '222@g.us' } }] },
+        { id: 2, inbox_id: 21, status: 'open', meta: { sender: { id: 56, name: 'Outra inbox', additional_attributes: { whatsapp_group_jid: '333@g.us' } } } },
+        { id: 3, inbox_id: 20, status: 'open', meta: { sender: { id: 57, name: 'Privado' } }, contact_inbox: { source_id: 'whatsapp:5511999999999' } },
+      ] } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { payload: [{ id: 4, inbox_id: 20, status: 'open', meta: { sender: { id: 58, name: 'Sincronizado', additional_attributes: { whatsapp_group_jid: '444@g.us', whatsapp_group_participants: [{ jid: '1@lid' }], whatsapp_group_metadata_synced_at: '2026-01-01T00:00:00.000Z' } } } }] } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { payload: [] } }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(chatwootBridge.withAccount(7, () => chatwootBridge.listPersistedGroupContacts(20))).resolves.toEqual([
+      expect.objectContaining({ contactId: 55, groupJid: '222@g.us', participants: [] }),
+      expect.objectContaining({ contactId: 58, groupJid: '444@g.us', participants: [{ jid: '1@lid' }], syncedAt: '2026-01-01T00:00:00.000Z' }),
+    ]);
+    expect(fetchMock.mock.calls.every(call => String(call[0]).includes('/accounts/7/conversations?inbox_id=20'))).toBe(true);
+  });
+
   it('aceita uma API inbox WAHA no lookup account-scoped de grupos', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ payload: [{ id: 5, channel_type: 'Channel::Api', inbox_identifier: 'api-5', additional_attributes: { whatsapp_transports: ['waha'], waha_session_name: 'web-5' } }] }), { status: 200 })));
     await expect(chatwootBridge.findWhatsAppInboxByIdForSession(1, 5, new Headers())).resolves.toMatchObject({ id: 5, configuration: { transports: ['waha'], wahaSessionName: 'web-5' } });
@@ -67,6 +84,19 @@ describe('chatwootBridge media messages', () => {
     const createCall = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'POST');
     expect(createCall).toBeDefined();
     expect(JSON.parse((createCall?.[1] as RequestInit).body as string)).toMatchObject({ inbox_id: 7, phone_number: '+5544888888888' });
+  });
+
+  it('reconsulta e reutiliza Contact quando duas sincronizações criam o mesmo telefone', async () => {
+    const empty = new Response(JSON.stringify({ payload: [] }), { status: 200 });
+    const found = new Response(JSON.stringify({ payload: [{ id: 46, name: 'Maria existente', phone_number: '+554484532595' }] }), { status: 200 });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(empty.clone()).mockResolvedValueOnce(empty.clone())
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: 'Phone number has already been taken' }), { status: 422 }))
+      .mockResolvedValueOnce(found.clone()).mockResolvedValueOnce(found.clone());
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(chatwootBridge.withAccount(2, () => chatwootBridge.findOrCreateGroupParticipantContact(7, { phoneNumber: '+554484532595', name: 'Maria' })))
+      .resolves.toMatchObject({ id: 46, name: 'Maria existente', existing: true });
+    expect(fetchMock).toHaveBeenCalledTimes(5);
   });
 
   it('reutiliza por E.164 exato no quick create e preserva o Contact existente', async () => {

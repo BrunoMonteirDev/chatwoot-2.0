@@ -8,7 +8,7 @@ import type { EvolutionGroupParticipant } from './evolutionEvent.js';
 
 export type ApiInbox = { id: number; name?: string; channel_type: string; inbox_identifier?: string; additional_attributes?: Record<string, unknown>; secret?: string };
 type Contact = { id: number; source_id: string; name?: string; phone_number?: string; thumbnail?: string | null };
-type Conversation = { id: number; internal_id?: number; status: string; inbox_id?: number; last_activity_at?: number; meta?: { sender?: { id?: number } } };
+type Conversation = { id: number; internal_id?: number; status: string; inbox_id?: number; last_activity_at?: number; meta?: { sender?: { id?: number; name?: string; thumbnail?: string | null; additional_attributes?: Record<string, unknown> | null } }; contact_inbox?: { source_id?: string | null }; messages?: Array<{ content_attributes?: Record<string, unknown> | null }> };
 type ConversationTarget = { id: number; inbox_id: number; meta?: { sender?: { id?: number; name?: string; thumbnail?: string | null; phone_number?: string | null; additional_attributes?: Record<string, unknown> | null } }; contact_inbox?: { source_id?: string | null } };
 type AccountContact = {
   id: number;
@@ -19,6 +19,10 @@ type AccountContact = {
   // Chatwoot's account API serializes the inbox as a nested object, while
   // older responses used inbox_id. Accept both during the transition.
   contact_inboxes?: Array<{ inbox_id?: number; source_id: string; inbox?: { id?: number } }>;
+};
+export type PersistedGroupContact = {
+  contactId: number; groupJid: string; subject?: string; avatarUrl?: string; description?: string;
+  participants: unknown[]; historicalParticipants: unknown[]; syncedAt?: string;
 };
 
 export interface WhatsAppReactionUpdate {
@@ -339,6 +343,41 @@ export const chatwootBridge = {
     if (!inbox?.inbox_identifier) throw new Error(`Nenhuma inbox WAHA encontrada para a sessão ${session}.`);
     return { identifier: inbox.inbox_identifier, id: inbox.id };
   },
+  async listPersistedGroupContacts(inboxId: number): Promise<PersistedGroupContact[]> {
+    const groups: PersistedGroupContact[] = [];
+    const seen = new Set<number>();
+    for (let page = 1; page <= 1_000; page += 1) {
+      const response = await request<{ data: { payload: Conversation[] } }>(`/api/v1/accounts/${currentAccountId()}/conversations?inbox_id=${inboxId}&status=all&page=${page}`, {}, true);
+      const conversations = response.data?.payload;
+      if (!Array.isArray(conversations) || !conversations.length) break;
+      let discovered = 0;
+      for (const conversation of conversations) {
+        if (seen.has(conversation.id)) continue;
+        seen.add(conversation.id); discovered += 1;
+        if (conversation.inbox_id !== inboxId) continue;
+        const contactId = conversation.meta?.sender?.id;
+        if (!contactId) continue;
+        const attributes = conversation.meta?.sender?.additional_attributes || {};
+        const encoded = conversation.contact_inbox?.source_id?.match(/^whatsapp:group:(.+)$/)?.[1];
+        const declared = typeof attributes.whatsapp_group_jid === 'string' ? attributes.whatsapp_group_jid : '';
+        const messageJid = conversation.messages?.map(message => message.content_attributes?.whatsapp_remote_jid).find((value): value is string => typeof value === 'string' && value.endsWith('@g.us')) || '';
+        let groupJid = declared || messageJid;
+        try { groupJid = decodeURIComponent(encoded || declared || messageJid); } catch { continue; }
+        if (!groupJid.endsWith('@g.us')) continue;
+        groups.push({
+          contactId, groupJid, subject: conversation.meta?.sender?.name,
+          ...(conversation.meta?.sender?.thumbnail ? { avatarUrl: conversation.meta.sender.thumbnail } : {}),
+          ...(typeof attributes.whatsapp_group_description === 'string' ? { description: attributes.whatsapp_group_description } : {}),
+          participants: Array.isArray(attributes.whatsapp_group_participants) ? attributes.whatsapp_group_participants : [],
+          historicalParticipants: Array.isArray(attributes.whatsapp_group_participant_history) ? attributes.whatsapp_group_participant_history : [],
+          ...(typeof attributes.whatsapp_group_metadata_synced_at === 'string' ? { syncedAt: attributes.whatsapp_group_metadata_synced_at } : {}),
+        });
+      }
+      // Protect against an API/proxy that ignores the page parameter.
+      if (!discovered) break;
+    }
+    return groups;
+  },
   async findWhatsAppInboxById(inboxId: number): Promise<{ id: number; configuration: WhatsAppTransportConfiguration }> {
     const inbox = (await this.listApiInboxes()).find(item => item.id === inboxId);
     const configuration = inbox && transportConfigurationForInbox(inbox.additional_attributes || {});
@@ -373,17 +412,25 @@ export const chatwootBridge = {
     const digits = normalizedPhoneNumber.replace(/\D/g, '');
     const search = /^55([1-9]\d)\d{8}$/.exec(digits) ? `+55${digits.slice(2, 4)}` : normalizedPhoneNumber;
     const queries = [...new Set([search, normalizedPhoneNumber])];
-    const candidates = (await Promise.all(queries.map(query => request<{ payload: AccountContact[] }>(`/api/v1/accounts/${currentAccountId()}/contacts/search?q=${encodeURIComponent(query)}`, {}, true)))).flatMap(item => item.payload);
-    const existing = candidates.find(item => item.phone_number && normalizeBrazilianPhone(item.phone_number).replace(/\D/g, '') === digits);
+    const findExisting = async () => (await Promise.all(queries.map(query => request<{ payload: AccountContact[] }>(`/api/v1/accounts/${currentAccountId()}/contacts/search?q=${encodeURIComponent(query)}`, {}, true))))
+      .flatMap(item => item.payload).find(item => item.phone_number && normalizeBrazilianPhone(item.phone_number).replace(/\D/g, '') === digits);
+    const existing = await findExisting();
     if (existing) {
       if (!existing.thumbnail && input.avatarUrl) await this.saveContactProfile(existing.id, { avatarUrl: input.avatarUrl });
       return { id: existing.id, name: existing.name, phoneNumber: existing.phone_number || normalizedPhoneNumber, avatarUrl: existing.thumbnail || input.avatarUrl, existing: true };
     }
-    const created = await request<{ payload: { contact: AccountContact; existing?: boolean } }>(`/api/v1/accounts/${currentAccountId()}/contacts`, {
-      method: 'POST', body: JSON.stringify({ name: input.name?.trim() || normalizedPhoneNumber, phone_number: normalizedPhoneNumber, inbox_id: inboxId, ...(input.avatarUrl ? { avatar_url: input.avatarUrl } : {}) }),
-    }, true);
-    const contact = created.payload.contact;
-    return { id: contact.id, name: contact.name, phoneNumber: contact.phone_number || normalizedPhoneNumber, avatarUrl: contact.thumbnail || input.avatarUrl, existing: Boolean(created.payload.existing) };
+    try {
+      const created = await request<{ payload: { contact: AccountContact; existing?: boolean } }>(`/api/v1/accounts/${currentAccountId()}/contacts`, {
+        method: 'POST', body: JSON.stringify({ name: input.name?.trim() || normalizedPhoneNumber, phone_number: normalizedPhoneNumber, inbox_id: inboxId, ...(input.avatarUrl ? { avatar_url: input.avatarUrl } : {}) }),
+      }, true);
+      const contact = created.payload.contact;
+      return { id: contact.id, name: contact.name, phoneNumber: contact.phone_number || normalizedPhoneNumber, avatarUrl: contact.thumbnail || input.avatarUrl, existing: Boolean(created.payload.existing) };
+    } catch (error) {
+      const raced = await findExisting();
+      if (!raced) throw error;
+      if (!raced.thumbnail && input.avatarUrl) await this.saveContactProfile(raced.id, { avatarUrl: input.avatarUrl });
+      return { id: raced.id, name: raced.name, phoneNumber: raced.phone_number || normalizedPhoneNumber, avatarUrl: raced.thumbnail || input.avatarUrl, existing: true };
+    }
   },
   createOrFindContact: (identifier: string, input: { sourceId: string; name: string; phoneNumber?: string; avatarUrl?: string }) => request<Contact>(`/public/api/v1/inboxes/${encodeURIComponent(identifier)}/contacts`, { method: 'POST', body: JSON.stringify({ source_id: input.sourceId, name: input.name, ...(input.phoneNumber ? { phone_number: normalizeBrazilianPhone(input.phoneNumber) } : {}), ...(input.avatarUrl ? { avatar_url: input.avatarUrl } : {}) }) }),
   updatePublicContact: (identifier: string, sourceId: string, input: { name?: string; avatarUrl?: string }) => {

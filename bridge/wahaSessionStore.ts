@@ -46,6 +46,7 @@ export class WahaSessionStore {
     await previous; try { return await callback(); } finally { release(); }
   }
   async get(sessionName: string) { return (await this.read())[sessionName] || null; }
+  async listAll() { return Object.values(await this.read()); }
   async list(accountId: number, inboxId: number) { return Object.values(await this.read()).filter(item => item.accountId === accountId && item.inboxId === inboxId); }
   async listCleanupPending() { return Object.values(await this.read()).filter(item => item.status === 'cleanup_pending'); }
   async assertOwned(accountId: number, inboxId: number, sessionName: string) {

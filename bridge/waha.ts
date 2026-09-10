@@ -240,7 +240,15 @@ export const wahaTransport = {
     return phoneFromJid(payload?.pn);
   },
   async getGroupMetadata(session: string, groupId: string) {
-    return groupMetadata(await request(`/api/${namePath(session)}/groups/${encodeURIComponent(groupId)}`), groupId);
+    const path = `/api/${namePath(session)}/groups/${encodeURIComponent(groupId)}`;
+    const raw = await request(path);
+    const metadata = groupMetadata(raw, groupId);
+    if (metadata.participants.length) return metadata;
+    // GOWS exposes group info and participants through separate endpoints.
+    // Older engines include participants in the group payload, so keep that
+    // fast path and use the dedicated endpoint only when they are absent.
+    const participants = await request(`${path}/participants`);
+    return groupMetadata({ ...record(raw), Participants: Array.isArray(participants) ? participants : [] }, groupId);
   },
   async createGroup(session: string, name: string, participants: string[] = []): Promise<CreatedWahaGroup> {
     const raw = await request(`/api/${namePath(session)}/groups`, { method: 'POST', body: JSON.stringify({ name, participants: participants.map(id => ({ id: normalizeWahaChatId(id) })) }) });

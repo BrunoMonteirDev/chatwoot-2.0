@@ -119,6 +119,15 @@ describe('WAHA session transport', () => {
     await expect(wahaTransport.getGroupMetadata('empresa', '1@g.us')).resolves.toMatchObject({ participants: [{ jid: '19696904601705@lid', lid: '19696904601705@lid', phoneJid: '554497755329@c.us', phoneNumber: '554497755329', name: 'Maria' }] });
   });
 
+  it('busca participantes no endpoint separado quando o GOWS retorna apenas group info', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ JID: '1@g.us', Name: 'Equipe', Topic: 'Descrição' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ JID: '123@lid', LID: '123@lid', PhoneNumber: '5511999999999@s.whatsapp.net', DisplayName: 'Maria', IsAdmin: true }]), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(wahaTransport.getGroupMetadata('empresa', '1@g.us')).resolves.toMatchObject({ id: '1@g.us', subject: 'Equipe', description: 'Descrição', participants: [{ jid: '123@lid', lid: '123@lid', phoneJid: '5511999999999@s.whatsapp.net', phoneNumber: '5511999999999', name: 'Maria', admin: 'admin' }] });
+    expect(fetchMock.mock.calls[1][0]).toBe('http://waha.test/api/empresa/groups/1%40g.us/participants');
+  });
+
   it('uses the WAHA GOWS reaction endpoint and payload', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('{}'));
     vi.stubGlobal('fetch', fetchMock);
