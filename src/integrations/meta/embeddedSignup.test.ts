@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { parseEmbeddedSignupEvent } from './embeddedSignup';
 
 describe('Embedded Signup browser events', () => {
-  it('aceita somente FINISH originado pelos domínios da Meta', () => {
-    const event = { origin: 'https://www.facebook.com', data: JSON.stringify({ type: 'WA_EMBEDDED_SIGNUP', event: 'FINISH', data: { waba_id: 'waba-1', phone_number_id: 'phone-1', business_id: 'business-1' } }) } as MessageEvent;
-    expect(parseEmbeddedSignupEvent(event)).toEqual({ kind: 'finished', result: { onboardingMode: 'standard', wabaId: 'waba-1', phoneNumberId: 'phone-1', businessId: 'business-1' } });
+  it('aceita FINISH sem business_id originado pelos domínios da Meta', () => {
+    const event = { origin: 'https://www.facebook.com', data: JSON.stringify({ type: 'WA_EMBEDDED_SIGNUP', event: 'FINISH', data: { waba_id: 'waba-1', phone_number_id: 'phone-1' } }) } as MessageEvent;
+    expect(parseEmbeddedSignupEvent(event)).toEqual({ kind: 'finished', result: { onboardingMode: 'standard', wabaId: 'waba-1', phoneNumberId: 'phone-1', businessId: null } });
   });
 
   it('ignora origem e payload inválidos sem executar conteúdo', () => {

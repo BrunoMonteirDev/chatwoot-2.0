@@ -67,11 +67,14 @@ export const MetaCloudSetup = ({ accountId, isDarkMode, inbox: existingInbox, on
     completingRef.current = true;
     setEmbeddedStage('creating');
     try {
-      const input = { code, businessId: result.businessId || '', wabaId: result.wabaId, phoneNumberId: result.phoneNumberId, onboardingMode: result.onboardingMode };
+      console.info('[meta-embedded-signup] authorization request started', { accountId, onboardingMode: result.onboardingMode, wabaId: result.wabaId, phoneNumberId: result.phoneNumberId || null });
+      const input = { code, businessId: result.businessId, wabaId: result.wabaId, phoneNumberId: result.phoneNumberId, onboardingMode: result.onboardingMode };
       const saved = nativeInbox
         ? await inboxService.reauthorizeNativeWhatsAppInbox(accountId, existingInbox.id, input)
         : await inboxService.createNativeWhatsAppInbox(accountId, input);
+      console.info('[meta-embedded-signup] inbox created', { accountId, inboxId: saved.id, wabaId: result.wabaId, phoneNumberId: result.phoneNumberId || null });
       setEmbeddedStage('connected'); setSaving(false); reset(); await onSaved(saved);
+      console.info('[meta-embedded-signup] inbox list updated', { accountId, inboxId: saved.id });
     } catch (cause) {
       setEmbeddedStage('error'); setSaving(false); completingRef.current = false; setError(errorMessageForUser(cause));
     }
@@ -81,6 +84,7 @@ export const MetaCloudSetup = ({ accountId, isDarkMode, inbox: existingInbox, on
     if (!event || !saving) return;
     if (event.kind === 'cancelled') { reset(); setSaving(false); setEmbeddedStage('idle'); setError('O Cadastro Incorporado foi cancelado.'); return; }
     if (event.kind === 'error') { reset(); setSaving(false); setEmbeddedStage('error'); setError('A Meta retornou dados incompletos para o Cadastro Incorporado.'); return; }
+    console.info('[meta-embedded-signup] finish received', { accountId, onboardingMode: event.result.onboardingMode, wabaId: event.result.wabaId, phoneNumberId: event.result.phoneNumberId || null });
     resultRef.current = event.result;
     setEmbeddedStage('authorizing');
     void completeRef.current();

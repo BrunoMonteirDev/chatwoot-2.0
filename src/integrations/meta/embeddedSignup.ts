@@ -43,7 +43,7 @@ export const parseEmbeddedSignupEvent = (event: MessageEvent<unknown>): { kind: 
   const onboardingMode: MetaOnboardingMode | null = payload.event === 'FINISH' ? 'standard' : payload.event === 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING' ? 'coexistence' : null;
   if (!onboardingMode || !payload.data || typeof payload.data !== 'object') return null;
   const result = payload.data as { waba_id?: unknown; phone_number_id?: unknown; business_id?: unknown };
-  if (typeof result.business_id !== 'string' || !result.business_id || typeof result.waba_id !== 'string' || !result.waba_id || (onboardingMode === 'standard' && (typeof result.phone_number_id !== 'string' || !result.phone_number_id))) return { kind: 'error' };
+  if (typeof result.waba_id !== 'string' || !result.waba_id || (onboardingMode === 'standard' && (typeof result.phone_number_id !== 'string' || !result.phone_number_id))) return { kind: 'error' };
   return { kind: 'finished', result: { onboardingMode, wabaId: result.waba_id, phoneNumberId: typeof result.phone_number_id === 'string' ? result.phone_number_id : null, businessId: typeof result.business_id === 'string' ? result.business_id : null } };
 };
 
