@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client';
 import './index.css';
 import { AuthProvider } from './features/auth/AuthContext.tsx';
 import { AppBootstrap } from './components/auth/AppBootstrap.tsx';
+import { loadRuntimeConfig } from './config/runtime.ts';
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -18,10 +19,10 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   });
 }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <AuthProvider>
-      <AppBootstrap />
-    </AuthProvider>
-  </StrictMode>,
+const render = () => createRoot(document.getElementById('root')!).render(
+  <StrictMode><AuthProvider><AppBootstrap /></AuthProvider></StrictMode>,
 );
+
+void loadRuntimeConfig()
+  .catch(error => console.warn('Não foi possível carregar a configuração runtime.', error))
+  .finally(render);

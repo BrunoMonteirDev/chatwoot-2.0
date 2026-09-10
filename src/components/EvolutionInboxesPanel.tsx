@@ -10,6 +10,7 @@ import { MetaCloudSetup } from './MetaCloudSetup';
 import { WahaSetup } from './WahaSetup';
 import { hasWahaTransport, isNativeWhatsAppInbox, metaCloudMetadataForInbox, transportDisplayStatusesForInbox, transportStatusLabel, whatsappConfigurationForInbox } from '../integrations/whatsapp/provider';
 import { settingsInboxRouteState } from '../features/inboxes/settingsInboxRoute';
+import { bridgePublicUrl } from '../config/runtime';
 
 interface Props {
   accountId: number | null;
@@ -28,7 +29,7 @@ const instanceOf = (inbox: Inbox) => evolutionMetadataForInbox(inbox)?.evolution
 const formatNumber = (number: string | null) => number ? `+${number}` : 'Número ainda não disponível';
 const instanceNameFor = (accountId: number, name: string) => `cw-${accountId}-${name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 36) || 'whatsapp'}-${Date.now()}`;
 const bridgeWebhookUrl = () => {
-  const configured = (import.meta.env.VITE_BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
+  const configured = bridgePublicUrl();
   if (!configured) return null;
   try {
     // `/bridge` is a browser-only proxy. Chatwoot delivers outgoing-message

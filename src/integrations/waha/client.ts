@@ -1,5 +1,6 @@
 import { authenticatedBridgeHeaders } from '../bridge/auth';
 import { BridgeApiError } from '../chatwoot/errors';
+import { bridgePublicUrl } from '../../config/runtime';
 
 export type WahaConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error';
 export interface WahaSession { name: string; linked?: boolean; status: string; connectionStatus: WahaConnectionStatus; engine?: string; me?: { id?: string; pushName?: string }; }
@@ -15,8 +16,8 @@ const query = ({ accountId, inboxId }: Context) => `?${new URLSearchParams({ acc
 
 // The browser talks only to the authenticated bridge. WAHA's API key and its
 // private address intentionally never appear in Vite configuration.
-const bridgeUrl = (import.meta.env.VITE_BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
 const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
+  const bridgeUrl = bridgePublicUrl();
   if (!bridgeUrl) throw new BridgeApiError(503, null, 'O endereço seguro do bridge não está configurado.');
   try {
     const response = await fetch(`${bridgeUrl}${path}`, { ...init, headers: { ...authenticatedBridgeHeaders(), ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...init.headers } });

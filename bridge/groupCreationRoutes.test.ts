@@ -20,7 +20,7 @@ beforeAll(async () => {
   railsServer = createServer((_request, response) => { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ account_id: 1, role: 'administrator', accounts: [{ id: 1, role: 'administrator' }] })); });
   railsServer.listen(0, '127.0.0.1'); await new Promise<void>(resolve => railsServer.once('listening', resolve));
   const railsBase = `http://127.0.0.1:${(railsServer.address() as { port: number }).port}`;
-  for (const [key, value] of Object.entries({ NODE_ENV: 'test', BRIDGE_WEBHOOK_SECRET: 'test', CHATWOOT_BASE_URL: railsBase, BRIDGE_REDIS_URL: '', WAHA_BASE_URL: 'http://waha.test', WAHA_API_KEY: 'key', WAHA_WEBHOOK_SECRET: 'synthetic-waha-secret', BRIDGE_DEDUP_FILE: `${dir}/dedup.json`, BRIDGE_IDENTITY_FILE: `${dir}/identities.json`, BRIDGE_GROUP_CREATION_FILE: `${dir}/creations.json`, BRIDGE_WAHA_SESSION_OWNERSHIP_FILE: `${dir}/sessions.json` })) vi.stubEnv(key, value);
+  for (const [key, value] of Object.entries({ NODE_ENV: 'test', BRIDGE_WEBHOOK_SECRET: 'test', BRIDGE_PUBLIC_URL: 'https://bridge.synthetic.example', CHATWOOT_BASE_URL: railsBase, BRIDGE_REDIS_URL: '', WAHA_BASE_URL: 'http://waha.test', WAHA_API_KEY: 'key', WAHA_WEBHOOK_SECRET: 'synthetic-waha-secret', BRIDGE_DEDUP_FILE: `${dir}/dedup.json`, BRIDGE_IDENTITY_FILE: `${dir}/identities.json`, BRIDGE_GROUP_CREATION_FILE: `${dir}/creations.json`, BRIDGE_WAHA_SESSION_OWNERSHIP_FILE: `${dir}/sessions.json` })) vi.stubEnv(key, value);
   const Store = (await import('./wahaSessionStore')).WahaSessionStore; const store = new Store(`${dir}/sessions.json`);
   await store.reserve({ accountId: 1, inboxId: 10, sessionName: 'session-a' }); await store.reserve({ accountId: 1, inboxId: 20, sessionName: 'session-b' }); await store.reserve({ accountId: 1, inboxId: 30, sessionName: 'hybrid-a1-i30' });
   const imported = await import('./index'); groupMetadataBackfill = imported.groupMetadataBackfill; waha = (await import('./waha')).wahaTransport; evolution = (await import('./evolution')).evolutionBridge; chatwoot = (await import('./chatwoot')).chatwootBridge;
@@ -46,6 +46,12 @@ beforeEach(() => {
 });
 
 describe('group creation routing and idempotency', () => {
+  it('expõe somente a URL pública runtime configurada pelo ambiente', async () => {
+    const response = await fetch(`${base}/config`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ bridgePublicUrl: 'https://bridge.synthetic.example' });
+  });
+
   it('descobre grupos silenciosos da primeira conexão sem persistence prévia', async () => {
     vi.spyOn(chatwoot, 'listPersistedGroupContacts').mockResolvedValue([]);
     vi.mocked(waha.listChats).mockResolvedValue([

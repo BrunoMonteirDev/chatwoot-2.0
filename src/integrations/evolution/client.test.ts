@@ -8,7 +8,7 @@ describe('evolutionService', () => {
   it('falha explicitamente quando a URL pública do bridge não existe', async () => {
     vi.stubEnv('VITE_BRIDGE_PUBLIC_URL', '');
     const { evolutionService } = await import('./client');
-    await expect(evolutionService.createInstance('teste')).rejects.toThrow('VITE_BRIDGE_PUBLIC_URL');
+    await expect(evolutionService.createInstance('teste')).rejects.toThrow('URL pública do bridge');
   });
 
   it('extrai a imagem base64 aninhada em qrcode', async () => {

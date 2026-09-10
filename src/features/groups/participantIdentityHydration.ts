@@ -4,13 +4,13 @@ import { BridgeApiError } from '../../integrations/chatwoot/errors';
 import { cacheContactProfiles } from '../contacts/useContactDetails';
 import { participantIdentityKeys, validParticipantName } from './participant';
 import type { GroupParticipant } from './metadata';
+import { bridgePublicUrl } from '../../config/runtime';
 
 export interface GroupParticipantIdentityQuery {
   contactId?: number;
   aliases: string[];
 }
 
-const bridgeUrl = (import.meta.env.VITE_BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
 const stringAttribute = (message: ConversationMessage, key: string) => typeof message.contentAttributes[key] === 'string'
   ? String(message.contentAttributes[key]).trim()
   : '';
@@ -112,6 +112,7 @@ export class GroupParticipantIdentityClient {
   clear() { this.identities.clear(); this.inFlight.clear(); }
 
   private async request(accountId: number, inboxId: number, conversationId: number, identifiers: GroupParticipantIdentityQuery[]) {
+    const bridgeUrl = bridgePublicUrl();
     if (!bridgeUrl) throw new BridgeApiError(503, null, 'O endereço seguro do bridge não está configurado.');
     const response = await fetch(`${bridgeUrl}/groups/participant-identities`, {
       method: 'POST',

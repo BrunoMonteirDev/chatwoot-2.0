@@ -1,6 +1,6 @@
-const bridgeUrl = (import.meta.env.VITE_BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
 import { authenticatedBridgeHeaders } from '../bridge/auth';
 import { chatwootApiClient } from '../chatwoot/client';
+import { bridgePublicUrl } from '../../config/runtime';
 
 export type WhatsAppReactionTransport = 'evolution' | 'waha' | 'meta_cloud';
 
@@ -21,6 +21,7 @@ export class WhatsAppReactionError extends Error {}
 
 export const whatsappReactionService = {
   async send(input: SendWhatsAppReactionInput): Promise<void> {
+    const bridgeUrl = bridgePublicUrl();
     if (!bridgeUrl) throw new WhatsAppReactionError('Ações do WhatsApp exigem um bridge configurado para este ambiente.');
     const response = await fetch(`${bridgeUrl}/operations/reactions`, {
       method: 'POST',

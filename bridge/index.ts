@@ -725,6 +725,10 @@ const replyTargetId = async (conversationId: number, transport: 'evolution' | 'w
 // App ID and Configuration ID are browser-safe inputs required by Facebook
 // Login for Business. App Secret and every access token intentionally remain
 // absent from this response.
+app.get('/config', (_request, response) => config.publicUrl
+  ? response.json({ bridgePublicUrl: config.publicUrl })
+  : response.status(503).json({ error: 'Bridge public URL is not configured.' }));
+
 app.get('/meta/embedded-signup/config', (_request, response) => {
   if (!config.metaAppId || !config.metaEmbeddedSignupConfigId) return response.status(503).json({ error: 'Embedded Signup is not configured on this bridge.' });
   return response.json({ appId: config.metaAppId, configurationId: config.metaEmbeddedSignupConfigId, graphApiVersion: config.metaGraphVersion, embeddedSignupVersion: 4 });

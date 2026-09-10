@@ -1,12 +1,14 @@
 import { authenticatedBridgeHeaders } from '../../integrations/bridge/auth';
 import { BridgeApiError } from '../../integrations/chatwoot/errors';
+import { bridgePublicUrl } from '../../config/runtime';
 
 export interface GroupCreationInbox { id: number; name: string; transport: 'waha' | 'evolution'; }
 export interface GroupCreationContact { id: number; name: string; phoneNumber: string; avatarUrl: string | null; }
 export interface GroupInvitationResult { contactId: number; ok: boolean; error?: string; }
 export interface GroupCreationResult { created: boolean; creationRequestId: string; conversationId?: number; groupId: string; groupJid: string; inbox: { id: number; name: string }; provider: { transport: 'waha' | 'evolution'; session: string }; inviteLink?: string; inviteStatus: 'not_requested' | 'pending' | 'complete' | 'partial' | 'failed'; results: GroupInvitationResult[]; warnings: Array<{ code: string }>; }
-const bridgeUrl = (import.meta.env.VITE_BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
 const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
+  const bridgeUrl = bridgePublicUrl();
+  if (!bridgeUrl) throw new BridgeApiError(503, null, 'O endereço seguro do bridge não está configurado.');
   const response = await fetch(`${bridgeUrl}${path}`, { ...init, headers: { ...authenticatedBridgeHeaders(), ...init.headers } });
   const body = await response.json().catch(() => null);
   if (!response.ok) throw new BridgeApiError(response.status, body, body?.error || 'Não foi possível concluir a operação.');

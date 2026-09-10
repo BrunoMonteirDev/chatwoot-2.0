@@ -1,6 +1,5 @@
 import { authenticatedBridgeHeaders } from '../bridge/auth';
-
-const bridgeUrl = (import.meta.env.VITE_BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
+import { bridgePublicUrl } from '../../config/runtime';
 
 export class EvolutionApiError extends Error {
   constructor(message: string, public readonly status?: number) {
@@ -10,11 +9,13 @@ export class EvolutionApiError extends Error {
 }
 
 const requireBridge = () => {
-  if (!bridgeUrl) throw new EvolutionApiError('Configure VITE_BRIDGE_PUBLIC_URL para administrar a Evolution pelo bridge seguro.');
+  const bridgeUrl = bridgePublicUrl();
+  if (!bridgeUrl) throw new EvolutionApiError('A URL pública do bridge não está configurada neste ambiente.');
+  return bridgeUrl;
 };
 
 const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
-  requireBridge();
+  const bridgeUrl = requireBridge();
   const response = await fetch(`${bridgeUrl}${path}`, { ...init, headers: { ...authenticatedBridgeHeaders(), ...init.headers } });
   const text = await response.text();
   const body: unknown = text ? (() => { try { return JSON.parse(text); } catch { return text; } })() : undefined;

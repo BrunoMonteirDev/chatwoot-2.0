@@ -1,6 +1,7 @@
 import { authenticatedBridgeHeaders } from '../../integrations/bridge/auth';
 import { BridgeApiError } from '../../integrations/chatwoot/errors';
 import type { WhatsAppTransport } from '../../integrations/whatsapp/provider';
+import { bridgePublicUrl } from '../../config/runtime';
 import { IndexedDbGroupMetadataPersistence, type GroupMetadataPersistence } from './GroupMetadataPersistence';
 
 // This is the canonical participant identity returned by Group Details. The
@@ -33,9 +34,9 @@ export const persistedGroupMetadata = (attributes: Record<string, unknown>, tran
   if (!id || !participants.length || !resolvedTransport) return null;
   return { id, transport: resolvedTransport, participants, historicalParticipants: storedParticipants(attributes.whatsapp_group_participant_history), memberCount: participants.length, canEditDescription: resolvedTransport !== 'meta_cloud', ...(subject ? { subject } : {}), ...(typeof attributes.whatsapp_group_avatar_url === 'string' ? { avatarUrl: attributes.whatsapp_group_avatar_url } : {}), ...(typeof attributes.whatsapp_group_description === 'string' ? { description: attributes.whatsapp_group_description } : {}) };
 };
-const bridgeUrl = (import.meta.env.VITE_BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
 const GROUP_METADATA_TTL_MS = 5 * 60_000;
 const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
+  const bridgeUrl = bridgePublicUrl();
   if (!bridgeUrl) throw new BridgeApiError(503, null, 'O endereço seguro do bridge não está configurado.');
   const response = await fetch(`${bridgeUrl}${path}`, { ...init, headers: { ...authenticatedBridgeHeaders(), ...init.headers } });
   const body = await response.json().catch(() => null);

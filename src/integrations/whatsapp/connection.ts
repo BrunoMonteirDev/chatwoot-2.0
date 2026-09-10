@@ -1,6 +1,7 @@
 import { authenticatedBridgeHeaders } from '../bridge/auth';
 import { chatwootApiClient } from '../chatwoot/client';
 import type { Inbox } from '../../domain/currentUser';
+import { bridgePublicUrl } from '../../config/runtime';
 import { WHATSAPP_TRANSPORT_STATUSES, whatsappConfigurationForInbox } from './provider';
 
 export type OperationalWhatsAppConnection = {
@@ -53,14 +54,12 @@ export const persistedWhatsAppConnection = (inbox: Inbox, chatType: 'private' | 
   return { applicable: true, transport, status, sendAllowed: status === 'connected' || status === 'unknown' || status === 'pending' };
 };
 
-const bridgeUrl = () => (import.meta.env.VITE_BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
-
 export const whatsappConnectionService = {
   get(accountId: number, inboxId: number, chatType: 'private' | 'group' = 'private'): Promise<OperationalWhatsAppConnection> {
     const key = `${accountId}:${inboxId}:${chatType}`;
     const existing = connectionRequests.get(key);
     if (existing) return existing;
-    const url = bridgeUrl();
+    const url = bridgePublicUrl();
     if (!url) return Promise.resolve({ applicable: false, sendAllowed: true });
     const query = new URLSearchParams({ accountId: String(accountId), chatType });
     const pending = fetch(`${url}/providers/whatsapp/inboxes/${inboxId}/connection?${query}`, { headers: authenticatedBridgeHeaders() })

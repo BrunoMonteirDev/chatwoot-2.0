@@ -2,8 +2,8 @@ import { authenticatedBridgeHeaders } from '../../integrations/bridge/auth';
 import { BridgeApiError } from '../../integrations/chatwoot/errors';
 import type { WhatsAppTransport } from '../../integrations/whatsapp/provider';
 import { normalizeBrazilianPhone } from '../../../phone';
+import { bridgePublicUrl } from '../../config/runtime';
 
-const bridgeUrl = (import.meta.env.VITE_BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
 const canonicalPhoneDigits = (value: string | null | undefined) => {
   const raw = value?.replace(/\D/g, '') || '';
   return normalizeBrazilianPhone(/^(?:[1-9]\d{9}|[1-9]\d{10})$/.test(raw) ? `55${raw}` : raw).replace(/\D/g, '');
@@ -21,6 +21,7 @@ export const isPhoneDefaultContactName = (name: string | null | undefined, phone
 
 export const providerProfileClient = {
   async get(accountId: number, inboxId: number, conversationId: number, transport?: WhatsAppTransport | null, force = false): Promise<{ name?: string; avatarUrl?: string }> {
+    const bridgeUrl = bridgePublicUrl();
     if (!bridgeUrl) throw new BridgeApiError(503, null, 'O endereço seguro do bridge não está configurado.');
     const query = new URLSearchParams({ accountId: String(accountId), inboxId: String(inboxId), conversationId: String(conversationId), ...(transport ? { transport } : {}), ...(force ? { force: 'true' } : {}) });
     const response = await fetch(`${bridgeUrl}/contacts/profile?${query}`, { headers: authenticatedBridgeHeaders() });

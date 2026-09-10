@@ -1,7 +1,7 @@
 import { authenticatedBridgeHeaders } from '../bridge/auth';
 import { chatwootApiClient } from '../chatwoot/client';
+import { bridgePublicUrl } from '../../config/runtime';
 
-const bridgeUrl = (import.meta.env.VITE_BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
 
 export interface WhatsAppTemplate {
   id: string | null;
@@ -17,6 +17,7 @@ export interface WhatsAppTemplate {
 export type MetaTemplateSendInput = { name: string; language: string; category?: string | null; namespace?: string | null; components?: Array<Record<string, unknown>>; processedParams?: Record<string, unknown>; content?: string };
 
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
+  const bridgeUrl = bridgePublicUrl();
   if (!bridgeUrl) throw new Error('O bridge WhatsApp não está configurado neste ambiente.');
   const response = await fetch(`${bridgeUrl}${path}`, { ...init, headers: { ...authenticatedBridgeHeaders(), ...(init?.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...(init?.headers || {}) } });
   const body: unknown = await response.json().catch(() => ({}));
