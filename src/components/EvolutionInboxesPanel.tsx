@@ -18,6 +18,7 @@ interface Props {
   inboxesStatus: 'idle' | 'loading' | 'ready' | 'error';
   inboxesError: string | null;
   onRefresh: () => Promise<void> | void;
+  onInboxDeleted?: (accountId: number, inboxId: number) => void;
   isDarkMode: boolean;
   selectedInboxId?: number | null;
   onOpenInbox?: (inboxId: number) => void;
@@ -29,7 +30,7 @@ const instanceOf = (inbox: Inbox) => evolutionMetadataForInbox(inbox)?.evolution
 const formatNumber = (number: string | null) => number ? `+${number}` : 'Número ainda não disponível';
 const instanceNameFor = (accountId: number, name: string) => `cw-${accountId}-${name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 36) || 'whatsapp'}-${Date.now()}`;
 
-export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inboxesStatus, inboxesError, onRefresh, isDarkMode, selectedInboxId = null, onOpenInbox, onCloseInbox }) => {
+export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inboxesStatus, inboxesError, onRefresh, onInboxDeleted, isDarkMode, selectedInboxId = null, onOpenInbox, onCloseInbox }) => {
   const runtimeBridgeAvailable = Boolean(bridgePublicUrl());
   const chatwootWebhookUrl = bridgeChatwootWebhookUrl();
   const [screen, setScreen] = useState<Screen>('list');
@@ -139,13 +140,16 @@ export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inb
   const toggleMember = (id: number) => setMembers(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
   const deleteInbox = async () => {
     if (!accountId || !inboxPendingDeletion || deletingInbox) return;
+    const deletedInbox = inboxPendingDeletion;
     setDeletingInbox(true); setError(null);
     try {
-      if (hasWahaTransport(inboxPendingDeletion)) await wahaClient.deleteInboxAndSession({ accountId, inboxId: inboxPendingDeletion.id });
-      else await inboxService.delete(accountId, inboxPendingDeletion.id);
-      if (selectedInbox?.id === inboxPendingDeletion.id) { setSelectedInbox(null); setScreen('list'); }
+      if (hasWahaTransport(deletedInbox)) await wahaClient.deleteInboxAndSession({ accountId, inboxId: deletedInbox.id });
+      else await inboxService.delete(accountId, deletedInbox.id);
+      onInboxDeleted?.(accountId, deletedInbox.id);
+      if (selectedInbox?.id === deletedInbox.id || selectedInboxId === deletedInbox.id) {
+        setSelectedInbox(null); setScreen('list'); onCloseInbox?.();
+      }
       setInboxPendingDeletion(null);
-      await onRefresh();
     } catch (cause) { setError(errorMessageForUser(cause)); }
     finally { setDeletingInbox(false); }
   };

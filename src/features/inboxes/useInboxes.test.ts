@@ -1,9 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { mergeRealtimeInbox } from './useInboxes';
+import { mergeRealtimeInbox, removeInboxForAccount } from './useInboxes';
 
 const inbox = (id: number, name: string, status: string) => ({
   id, name, avatarUrl: null, channelType: 'Channel::Api', channelId: id, webhookUrl: null, inboxIdentifier: `token-${id}`,
   additionalAttributes: { waha_connection_status: status },
+});
+
+describe('removeInboxForAccount', () => {
+  const current = [inbox(41, 'Synthetic One', 'connected'), inbox(42, 'Synthetic Two', 'connected')];
+
+  it('remove somente a inbox confirmada da conta ativa', () => {
+    const updated = removeInboxForAccount(current, 7, 7, 41);
+    expect(updated.map(item => item.id)).toEqual([42]);
+  });
+
+  it('preserva a lista para outra conta ou outro id de inbox', () => {
+    expect(removeInboxForAccount(current, 7, 8, 41)).toBe(current);
+    expect(removeInboxForAccount(current, 7, 7, 99)).toBe(current);
+  });
 });
 
 describe('mergeRealtimeInbox', () => {

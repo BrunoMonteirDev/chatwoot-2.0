@@ -111,6 +111,7 @@ interface Props {
   inboxesStatus?: 'idle' | 'loading' | 'ready' | 'error';
   inboxesError?: string | null;
   onRefreshInboxes?: () => Promise<void> | void;
+  onInboxDeleted?: (accountId: number, inboxId: number) => void;
   profile?: CurrentUser | null;
   onSaveProfile?: (profile: { name: string; displayName: string; email: string; phoneNumber: string; messageSignature: string; showSystemMessages: boolean; sendMessageShortcut: SendMessageShortcut; currentPassword?: string; password?: string; passwordConfirmation?: string }) => Promise<void>;
   onResetAccessToken?: () => Promise<void>;
@@ -139,6 +140,7 @@ export const SettingsView: React.FC<Props> = ({
   inboxesStatus = 'idle',
   inboxesError = null,
   onRefreshInboxes = () => undefined,
+  onInboxDeleted,
   profile = null,
   onSaveProfile,
   onResetAccessToken,
@@ -816,7 +818,7 @@ export const SettingsView: React.FC<Props> = ({
 
           {/* ==================== 4. CAIXAS DE ENTRADA ==================== */}
           {activeTab === 'caixas' && (
-            <EvolutionInboxesPanel accountId={accountId} inboxes={chatwootInboxes} inboxesStatus={inboxesStatus} inboxesError={inboxesError} onRefresh={onRefreshInboxes} isDarkMode={isDarkMode} selectedInboxId={selectedInboxId} onOpenInbox={onOpenInbox} onCloseInbox={onCloseInbox} />
+            <EvolutionInboxesPanel accountId={accountId} inboxes={chatwootInboxes} inboxesStatus={inboxesStatus} inboxesError={inboxesError} onRefresh={onRefreshInboxes} onInboxDeleted={onInboxDeleted} isDarkMode={isDarkMode} selectedInboxId={selectedInboxId} onOpenInbox={onOpenInbox} onCloseInbox={onCloseInbox} />
           )}
 
           {/* ==================== 5. ETIQUETAS ==================== */}

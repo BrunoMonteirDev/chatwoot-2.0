@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Inbox } from '../../domain/currentUser';
 import { inboxService } from '../../integrations/chatwoot/inboxes';
 import { errorMessageForUser } from '../../integrations/chatwoot/errors';
@@ -27,10 +27,22 @@ export const mergeRealtimeInbox = (current: Inbox[], updated: Inbox): Inbox[] =>
   return [...current.filter((inbox) => inbox.id !== updated.id), next].sort((left, right) => left.name.localeCompare(right.name));
 };
 
+export const removeInboxForAccount = (
+  current: Inbox[],
+  currentAccountId: number | null,
+  removedAccountId: number,
+  removedInboxId: number,
+): Inbox[] => {
+  if (currentAccountId !== removedAccountId || !current.some(inbox => inbox.id === removedInboxId)) return current;
+  return current.filter(inbox => inbox.id !== removedInboxId);
+};
+
 export const useInboxes = (accountId: number | null) => {
   const [inboxes, setInboxes] = useState<Inbox[]>([]);
   const [status, setStatus] = useState<InboxesStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  const activeAccountId = useRef(accountId);
+  activeAccountId.current = accountId;
 
   const load = useCallback(async () => {
     if (!accountId) {
@@ -95,5 +107,9 @@ export const useInboxes = (accountId: number | null) => {
     setStatus('ready');
   }, []);
 
-  return { inboxes, status, error, retry: load, upsertRealtimeInbox };
+  const removeInbox = useCallback((removedAccountId: number, removedInboxId: number) => {
+    setInboxes(current => removeInboxForAccount(current, activeAccountId.current, removedAccountId, removedInboxId));
+  }, []);
+
+  return { inboxes, status, error, retry: load, upsertRealtimeInbox, removeInbox };
 };

@@ -81,7 +81,7 @@ export default function App() {
   const { user: authenticatedUser, currentAccount, selectAccount, logout, retryBootstrap } = useAuth();
   const initialRoute = appRouteFromUrl(new URL(window.location.href));
   const superAdminUrl = import.meta.env.VITE_SUPER_ADMIN_URL || '/super_admin';
-  const { inboxes, status: inboxesStatus, error: inboxesError, retry: retryInboxes, upsertRealtimeInbox } = useInboxes(currentAccount?.id ?? null);
+  const { inboxes, status: inboxesStatus, error: inboxesError, retry: retryInboxes, upsertRealtimeInbox, removeInbox } = useInboxes(currentAccount?.id ?? null);
   const [whatsappConnection, setWhatsappConnection] = useState<OperationalWhatsAppConnection | null>(null);
   const [whatsappSendCapability, setWhatsappSendCapability] = useState<WhatsAppSendCapability | null>(null);
   const [contactPanelState, setContactPanelState] = useState<{ open: boolean; tab: 'contact' | 'attributes' | 'content' }>({ open: false, tab: 'contact' });
@@ -1176,6 +1176,7 @@ export default function App() {
             inboxesStatus={inboxesStatus}
             inboxesError={inboxesError}
             onRefreshInboxes={retryInboxes}
+            onInboxDeleted={removeInbox}
             profile={authenticatedUser}
             onSaveProfile={async (profile) => {
               await authService.updateProfile({ name: profile.name, display_name: profile.displayName, email: profile.email, phone_number: profile.phoneNumber, message_signature: profile.messageSignature, ui_settings: uiSettingsWithSendMessageShortcut(uiSettingsWithSystemMessageVisibility(authenticatedUser?.uiSettings, profile.showSystemMessages), profile.sendMessageShortcut), ...(profile.password ? { current_password: profile.currentPassword, password: profile.password, password_confirmation: profile.passwordConfirmation } : {}) });
