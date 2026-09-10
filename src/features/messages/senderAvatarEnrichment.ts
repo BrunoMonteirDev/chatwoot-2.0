@@ -8,6 +8,8 @@ export const senderContactId = (message: ConversationMessage) => {
 export const missingSenderContactIds = (messages: ConversationMessage[]) => [...new Set(messages.flatMap(message => {
   if (message.kind !== 'incoming' || message.senderAvatarUrl) return [];
   const contactId = senderContactId(message);
+  const remoteJid = message.contentAttributes.whatsapp_remote_jid;
+  if ((typeof remoteJid === 'string' && remoteJid.endsWith('@g.us')) || message.contentAttributes.whatsapp_chat_type === 'group') return [];
   return contactId ? [contactId] : [];
 }))];
 

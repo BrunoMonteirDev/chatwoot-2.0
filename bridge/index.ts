@@ -30,7 +30,7 @@ import { normalizeWahaMessageId, parseIncomingWahaGroupLifecycle, parseIncomingW
 import { createTrackId } from './track.js';
 import { WahaHistoryStore, type WahaHistoryJob, type WahaHistoryRange } from './wahaHistoryStore.js';
 import { connectionStatusPatch, evolutionConnectionStatus, metaConnectionStatus, type ConnectionStatus } from './connectionStatus.js';
-import { groupMetadataCache, mergeParticipantHistory, persistedGroupMetadata, type GroupMetadata } from './groupMetadata.js';
+import { groupMetadataCache, mergeParticipantHistory, persistedGroupMetadata, selectPersistedParticipantIdentities, type GroupMetadata } from './groupMetadata.js';
 import { bestEffortContactProfile, contactProfileSyncPlan } from './contactProfile.js';
 import { linkGroupParticipantContacts, resolveGroupParticipantIdentity } from './groupParticipantIdentity.js';
 import { GroupCreationStore, type StoredGroupCreation } from './groupCreationStore.js';
@@ -400,6 +400,52 @@ const loadGroupMetadata = async (transport: 'evolution' | 'waha', configuration:
   if (!configuration.evolutionInstanceName) throw new Error('A instância Evolution desta inbox não está configurada.');
   return { ...(await evolutionBridge.getGroupMetadata(configuration.evolutionInstanceName, groupJid)), transport, canEditDescription: true };
 };
+
+// Timeline identity bootstrap is deliberately persistence-only. Unlike the
+// full Group Details endpoint, this route never determines a transport and
+// never touches WAHA/Evolution. It returns only authors requested by the page.
+app.post('/groups/participant-identities', async (request, response) => {
+  if (!(await requireBridgeUser(request, response))) return;
+  const body = request.body as Record<string, unknown>;
+  const accountId = Number(body.accountId); const inboxId = Number(body.inboxId); const conversationId = Number(body.conversationId);
+  const sessionHeaders = chatwootSessionHeaders(request);
+  const rawIdentifiers = Array.isArray(body.identifiers) ? body.identifiers : [];
+  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || !Number.isInteger(conversationId) || !sessionHeaders || !rawIdentifiers.length || rawIdentifiers.length > 50) {
+    return response.status(422).json({ error: 'Identificadores de participantes inválidos.' });
+  }
+  const identifiers = rawIdentifiers.flatMap(raw => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+    const item = raw as Record<string, unknown>; const contactId = Number(item.contactId);
+    const aliases = Array.isArray(item.aliases) ? item.aliases.filter((alias): alias is string => typeof alias === 'string' && alias.trim().length > 0 && alias.length <= 128).slice(0, 8) : [];
+    const validContactId = Number.isInteger(contactId) && contactId > 0 ? contactId : undefined;
+    return validContactId || aliases.length ? [{ ...(validContactId ? { contactId: validContactId } : {}), aliases }] : [];
+  });
+  if (!identifiers.length) return response.status(422).json({ error: 'Identificadores de participantes inválidos.' });
+  try {
+    const target = await chatwootBridge.conversationGroupTargetDetailsForSession(accountId, conversationId, inboxId, sessionHeaders);
+    const persisted = target.persistedMetadata;
+    const selected = persisted
+      ? selectPersistedParticipantIdentities(persisted.participants, persisted.historicalParticipants || [], identifiers)
+      : [];
+    const contactIds = [...new Set(selected.map(participant => participant.contactId).filter((id): id is number => Boolean(id)))];
+    const contacts = contactIds.length
+      ? await chatwootBridge.contactsByIdsForSession(accountId, contactIds, sessionHeaders).catch(() => [])
+      : [];
+    const contactsById = new Map(contacts.map(contact => [contact.id, contact]));
+    const participants = selected.map(participant => {
+      const contact = participant.contactId ? contactsById.get(participant.contactId) : undefined;
+      return contact ? {
+        ...participant,
+        ...(contact.name ? { displayName: contact.name } : {}),
+        ...(contact.phone_number ? { phoneNumber: contact.phone_number } : {}),
+        ...(contact.thumbnail ? { avatarUrl: contact.thumbnail } : {}),
+      } : participant;
+    });
+    return response.json({ participants });
+  } catch (error) {
+    return response.status(502).json({ error: error instanceof Error ? error.message : 'Não foi possível resolver participantes persistidos.' });
+  }
+});
 
 app.get('/groups/metadata', async (request, response) => {
   if (!(await requireBridgeUser(request, response))) return;

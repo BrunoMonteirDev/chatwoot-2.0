@@ -10,6 +10,7 @@ import type { GroupParticipant } from '../groups/metadata';
 import { conversationOpeningMetrics } from './conversationOpeningMetrics';
 import { cachedContactProfile, resolveContactProfile } from '../contacts/useContactDetails';
 import { missingSenderContactIds } from './senderAvatarEnrichment';
+import { groupParticipantIdentityClient, visibleGroupParticipantIdentityQueries } from '../groups/participantIdentityHydration';
 
 export const mergeRealtimeMessage = mergeMessage;
 
@@ -67,6 +68,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
   const hasRenderableHistoryRef = useRef(false);
   const renderedConversationKeyRef = useRef<string | null>(null);
   const avatarEnrichmentRef = useRef(new Set<string>());
+  const participantEnrichmentRef = useRef(new Set<string>());
 
   const load = useCallback(async (before?: number, prepend = false, silent = false) => {
     if (!accountId || !conversationId) return;
@@ -154,6 +156,27 @@ export const useConversationMessages = (accountId: number | null, conversationId
       .catch(() => undefined);
     return () => { active = false; };
   }, [accountId, conversationId, messages, status]);
+
+  useEffect(() => {
+    const activeKey = `${accountId}:${conversationId}`;
+    if (status !== 'ready' || renderedConversationKeyRef.current !== activeKey || !accountId || !conversationId || !inboxId) return;
+    const queries = visibleGroupParticipantIdentityQueries(messages);
+    const pending = queries.filter(query => {
+      const key = `${activeKey}:${query.contactId || ''}:${query.aliases.slice().sort().join('|')}`;
+      if (participantEnrichmentRef.current.has(key)) return false;
+      participantEnrichmentRef.current.add(key);
+      return true;
+    });
+    if (!pending.length) return;
+    let active = true;
+    void groupParticipantIdentityClient.resolve(accountId, inboxId, conversationId, pending)
+      .then(participants => {
+        const enriched = messageHistoryCache.enrichParticipants(accountId, conversationId, participants);
+        if (active && renderedConversationKeyRef.current === activeKey && enriched) setMessages(enriched);
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [accountId, conversationId, inboxId, messages, status]);
 
   const loadOlder = useCallback(() => {
     const first = messages[0];

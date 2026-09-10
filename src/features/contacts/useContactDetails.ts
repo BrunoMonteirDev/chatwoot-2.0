@@ -11,6 +11,17 @@ const contactDetailsRequests = new Map<string, Promise<ContactDetailsEntry>>();
 const contactNotesRequests = new Map<string, Promise<ContactNote[]>>();
 let contactCacheGeneration = 0;
 const contactKey = (accountId: number, contactId: number) => `${accountId}:${contactId}`;
+const usableContactName = (name: string) => Boolean(name.trim() && !/^participante$/i.test(name.trim()) && !/@(lid|g\.us|c\.us|s\.whatsapp\.net)$/i.test(name.trim()));
+const preserveRichContact = (current: ContactProfile | undefined, incoming: ContactProfile): ContactProfile => current ? {
+  ...current,
+  ...incoming,
+  name: usableContactName(incoming.name) ? incoming.name : current.name,
+  phoneNumber: incoming.phoneNumber || current.phoneNumber,
+  email: incoming.email || current.email,
+  avatarUrl: incoming.avatarUrl || current.avatarUrl,
+  additionalAttributes: { ...current.additionalAttributes, ...incoming.additionalAttributes },
+  customAttributes: { ...current.customAttributes, ...incoming.customAttributes },
+} : incoming;
 const cachedContactDetails = (accountId: number, contactId: number) => contactDetailsCache.get(contactKey(accountId, contactId));
 const requestContactDetails = (accountId: number, contactId: number) => {
   const key = contactKey(accountId, contactId);
@@ -20,7 +31,7 @@ const requestContactDetails = (accountId: number, contactId: number) => {
   if (!pending) {
     const generation = contactCacheGeneration;
     pending = contactService.get(accountId, contactId).then(contact => {
-      const entry = { contact, updatedAt: Date.now(), detailed: true };
+      const entry = { contact: preserveRichContact(cached?.contact, contact), updatedAt: Date.now(), detailed: true };
       if (generation === contactCacheGeneration) contactDetailsCache.set(key, entry);
       return entry;
     }).finally(() => contactDetailsRequests.delete(key));
@@ -35,7 +46,7 @@ export const cacheContactProfiles = (accountId: number, contacts: ContactProfile
   contacts.forEach(contact => {
     const key = contactKey(accountId, contact.id);
     const existing = contactDetailsCache.get(key);
-    if (!existing?.detailed) contactDetailsCache.set(key, { contact, updatedAt, detailed: false });
+    contactDetailsCache.set(key, { contact: preserveRichContact(existing?.contact, contact), updatedAt, detailed: existing?.detailed || false });
   });
 };
 const requestContactNotes = (accountId: number, contactId: number) => {
@@ -116,7 +127,7 @@ export const useContactDetails = (accountId: number | null, contactId: number | 
       const updated = await contactService.update(accountId, contact, updateData);
       setContact(updated);
       const key = contactKey(accountId, updated.id); const cached = contactDetailsCache.get(key);
-      if (cached) contactDetailsCache.set(key, { ...cached, contact: updated, updatedAt: Date.now() });
+      if (cached) contactDetailsCache.set(key, { ...cached, contact: preserveRichContact(cached.contact, updated), updatedAt: Date.now() });
       return updated;
     } finally { setIsSaving(false); }
   }, [accountId, contact, isSaving]);
@@ -136,7 +147,7 @@ export const useContactDetails = (accountId: number | null, contactId: number | 
 
   const applyRealtimeUpdate = useCallback((updated: ContactProfile) => {
     if (updated.id === contactId) setContact(updated);
-    if (accountId) { const key = contactKey(accountId, updated.id); const cached = contactDetailsCache.get(key); if (cached) contactDetailsCache.set(key, { ...cached, contact: updated, updatedAt: Date.now() }); }
+    if (accountId) { const key = contactKey(accountId, updated.id); const cached = contactDetailsCache.get(key); contactDetailsCache.set(key, { contact: preserveRichContact(cached?.contact, updated), detailed: cached?.detailed || false, updatedAt: Date.now() }); }
   }, [accountId, contactId]);
 
   const remove = useCallback(async () => {

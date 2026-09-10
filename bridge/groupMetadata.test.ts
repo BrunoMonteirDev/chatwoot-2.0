@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { GroupMetadataCache, mergeParticipantHistory, persistedGroupMetadata } from './groupMetadata';
+import { GroupMetadataCache, mergeParticipantHistory, persistedGroupMetadata, selectPersistedParticipantIdentities } from './groupMetadata';
 
 describe('GroupMetadataCache', () => {
   it('reutiliza metadados durante o TTL e expira após cinco minutos', () => {
@@ -42,5 +42,15 @@ describe('GroupMetadataCache', () => {
   it('normaliza aliases e identidade persistida para fallback quando o WAHA está indisponível', () => {
     expect(persistedGroupMetadata('1@g.us', 'waha', { subject: 'Equipe', avatarUrl: 'group.jpg', description: 'Descrição', participants: [{ jid: '19696904601705@lid', lid: '19696904601705@lid', phone_jid: '554497755329@c.us', phone: '554497755329', name: 'Maria', display_name: 'Maria editada', avatar_url: 'maria.jpg', contact_id: 9, admin: 'admin' }] }))
       .toMatchObject({ subject: 'Equipe', avatarUrl: 'group.jpg', description: 'Descrição', canEditDescription: false, participants: [{ jid: '19696904601705@lid', phoneJid: '554497755329@c.us', displayName: 'Maria editada', contactId: 9, avatarUrl: 'maria.jpg' }] });
+  });
+
+  it('seleciona somente autores pedidos por contact_id, LID ou telefone, incluindo histórico', () => {
+    const participants = [
+      { jid: '123@lid', lid: '123', phone_jid: '5511999999999@c.us', display_name: 'Maria', avatar_url: 'maria.jpg', contact_id: 91 },
+      { jid: '456@lid', display_name: 'Membro não visível', contact_id: 92 },
+    ];
+    const history = [{ jid: '789@lid', phone: '+5521888888888', display_name: 'Antigo', contact_id: 93 }];
+    expect(selectPersistedParticipantIdentities(participants, history, [{ contactId: 800, aliases: ['123@lid'] }, { aliases: ['+5521888888888'] }]))
+      .toEqual([expect.objectContaining({ jid: '789@lid', contactId: 93 }), expect.objectContaining({ jid: '123@lid', contactId: 91, avatarUrl: 'maria.jpg' })]);
   });
 });

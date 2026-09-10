@@ -43,6 +43,18 @@ describe('ChatArea group metadata opening', () => {
     expect(get).not.toHaveBeenCalled();
   });
 
+  it('abrir Dados do grupo depois não degrada a identidade já resolvida na timeline', async () => {
+    const resolved = { ...chat, messages: [{ ...chat.messages[0], senderIdentity: 'contact:44', senderName: 'Maria atual', senderPhone: '+5544999999999', senderAvatarUrl: 'maria-atual.jpg' }] };
+    const stalePanelContact = { ...contact, additionalAttributes: { ...contact.additionalAttributes, whatsapp_group_participants: [{ jid: '123@lid', display_name: 'Maria antiga', contact_id: 44 }] } };
+    await act(async () => { root.render(<ChatArea chat={resolved} conversation={conversation} accountId={1} historyStatus="ready" onSendMessage={() => undefined} onImageClick={() => undefined} onSearchInChat={() => undefined} />); });
+    expect(container.textContent).toContain('Maria atual');
+    expect(container.querySelector('img[src="maria-atual.jpg"]')).toBeTruthy();
+    await act(async () => { root.render(<ChatArea chat={resolved} conversation={conversation} contact={stalePanelContact} accountId={1} historyStatus="ready" onSendMessage={() => undefined} onImageClick={() => undefined} onSearchInChat={() => undefined} />); });
+    expect(container.textContent).toContain('Maria atual');
+    expect(container.textContent).not.toContain('Maria antiga');
+    expect(container.querySelector('img[src="maria-atual.jpg"]')).toBeTruthy();
+  });
+
   it('switches A → B → C from selected conversation data without stale provider responses', async () => {
     for (const [id, name] of [[81, 'Grupo A'], [82, 'Grupo B'], [83, 'Contato C']] as const) {
       const selected = { ...conversation, id, contactName: name, contactId: id, isGroup: id !== 83 };

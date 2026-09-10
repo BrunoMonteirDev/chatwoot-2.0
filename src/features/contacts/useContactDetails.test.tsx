@@ -3,7 +3,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { contactService } from '../../integrations/chatwoot/contacts';
-import { clearContactDetailsCache, useContactDetails } from './useContactDetails';
+import { cacheContactProfiles, cachedContactProfile, clearContactDetailsCache, useContactDetails } from './useContactDetails';
 
 const profile = { id: 3, name: 'Ana', avatarUrl: null, phoneNumber: '+5511999999999', email: null, identifier: null, companyName: null, city: null, country: null, blocked: false, lastActivityAt: null, createdAt: null, additionalAttributes: {}, customAttributes: {} };
 const Probe = ({ accountId = 1, contactId = 3, enabled = true, notesEnabled = enabled }: { accountId?: number; contactId?: number; enabled?: boolean; notesEnabled?: boolean }) => {
@@ -53,5 +53,11 @@ describe('useContactDetails secondary cache', () => {
     await act(async () => { root.render(<Probe notesEnabled={false}/>); await Promise.resolve(); });
     expect(contactService.get).toHaveBeenCalledTimes(1);
     expect(contactService.listNotes).not.toHaveBeenCalled();
+  });
+
+  it('não degrada nome, telefone ou thumbnail ricos com identidade posterior incompleta', () => {
+    cacheContactProfiles(1, [{ ...profile, name: 'João', avatarUrl: 'joao.jpg', phoneNumber: '+5544999999999' }]);
+    cacheContactProfiles(1, [{ ...profile, name: '123@lid', avatarUrl: null, phoneNumber: null }]);
+    expect(cachedContactProfile(1, 3)).toMatchObject({ name: 'João', avatarUrl: 'joao.jpg', phoneNumber: '+5544999999999' });
   });
 });

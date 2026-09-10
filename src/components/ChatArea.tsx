@@ -1976,9 +1976,10 @@ export const ChatArea: React.FC<Props> = ({
           const hasVisualMedia = Boolean(msg.attachments?.some(attachment => attachment.type === 'image' || attachment.type === 'video'));
           const isVisualMediaBubble = hasVisualMedia && !msg.isPrivate && !msg.replyTo;
           const groupParticipant = msg.senderIdentity ? groupParticipantIdentities[msg.senderIdentity] : undefined;
-          const participantAvatar = groupParticipant?.avatarUrl;
+          const participantAvatar = msg.senderAvatarUrl || groupParticipant?.avatarUrl;
           const resolvedSenderName = groupParticipant
-            ? participantLabel(groupParticipant.displayName || groupParticipant.name, groupParticipant.phoneJid || groupParticipant.jid, groupParticipant.phoneNumber || groupParticipant.phone, chat.name)
+            ? participantLabel(msg.senderName, undefined, msg.senderPhone, chat.name)
+              || participantLabel(groupParticipant.displayName || groupParticipant.name, groupParticipant.phoneJid || groupParticipant.jid, groupParticipant.phoneNumber || groupParticipant.phone, chat.name)
             : participantLabel(msg.senderName, undefined, msg.senderPhone, chat.name);
           const senderName = isGroupMessage ? resolvedSenderName || undefined : undefined;
           const senderPhone = msg.senderPhone || (groupParticipant ? participantPhone(groupParticipant.phoneJid || groupParticipant.jid, groupParticipant.phoneNumber || groupParticipant.phone) : undefined);
@@ -2016,7 +2017,7 @@ export const ChatArea: React.FC<Props> = ({
               >
                 <div className={`flex w-full items-end gap-1.5 ${isMe ? 'justify-end' : 'justify-start'}`}>
                 {!isMe && isGroupMessage && senderName && <button type="button" disabled={!senderContactId} aria-label={`Abrir contato de ${senderName}`} onClick={() => openGroupParticipant(senderContactId, senderName, senderPhone, participantAvatar || msg.senderAvatarUrl)} className="mb-0.5 grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-full text-[9px] font-bold text-white enabled:cursor-pointer enabled:ring-offset-1 enabled:hover:ring-2 enabled:hover:ring-[#00a884] disabled:cursor-default" style={{ backgroundColor: msg.senderColor || participantColor(msg.senderIdentity || senderName) }}>
-                  {participantAvatar || msg.senderAvatarUrl ? <img src={participantAvatar || msg.senderAvatarUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : senderName.split('·')[0].trim().split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toUpperCase()}
+                  {participantAvatar ? <img src={participantAvatar} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : senderName.split('·')[0].trim().split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toUpperCase()}
                 </button>}
                 <div
                   onContextMenu={(e) => handleMessageContextMenu(e, msg)}
@@ -2072,7 +2073,7 @@ export const ChatArea: React.FC<Props> = ({
                       audioAuthor={isGroupMessage ? msg.audioAuthor || (msg.sender === 'them' ? senderName : undefined) : undefined}
                       audioPhone={isGroupMessage ? msg.audioPhone || (msg.sender === 'them' ? senderPhone : undefined) : undefined}
                       audioDuration={msg.audioDuration}
-                      audioAvatar={msg.audioAvatar || (msg.sender === 'them' ? participantAvatar || msg.senderAvatarUrl : undefined)}
+                      audioAvatar={msg.audioAvatar || (msg.sender === 'them' ? participantAvatar : undefined)}
                       audioUrl={msg.attachments?.find((attachment) => attachment.type === 'audio')?.url}
                       isDarkMode={isDarkMode}
                       isMe={isMe}

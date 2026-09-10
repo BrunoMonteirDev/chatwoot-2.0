@@ -9,11 +9,38 @@ export interface GroupMetadata {
   transport: WhatsAppTransport;
   canEditDescription: boolean;
 }
-const persistedParticipants = (values: unknown[]) => values.flatMap(value => {
+export const persistedParticipants = (values: unknown[]) => values.flatMap(value => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
     const item = value as Record<string, unknown>; const jid = typeof item.jid === 'string' ? item.jid : '';
     return jid ? [{ jid, ...(typeof item.lid === 'string' ? { lid: item.lid } : {}), ...(typeof item.phone_jid === 'string' ? { phoneJid: item.phone_jid } : {}), ...(typeof item.phone === 'string' ? { phoneNumber: item.phone } : {}), ...(typeof item.name === 'string' ? { name: item.name } : {}), ...(typeof item.display_name === 'string' ? { displayName: item.display_name } : {}), ...(typeof item.avatar_url === 'string' ? { avatarUrl: item.avatar_url } : {}), ...(typeof item.contact_id === 'number' ? { contactId: item.contact_id } : {}), ...(typeof item.admin === 'string' || item.admin === null ? { admin: item.admin as string | null } : {}) }] : [];
   });
+
+export interface PersistedParticipantIdentityQuery { contactId?: number; aliases: string[] }
+const participantIdentityKeys = (participant: GroupMetadata['participants'][number]) => {
+  const values = [participant.jid, participant.lid, participant.phoneJid, participant.phoneNumber].filter((value): value is string => Boolean(value));
+  const keys = new Set(values.flatMap(value => {
+    const normalized = value.trim().toLowerCase();
+    const digits = normalized.replace(/\D/g, '');
+    return [normalized, normalized.replace(/@lid$/, ''), ...(digits ? [digits, `${digits}@c.us`, `${digits}@s.whatsapp.net`] : [])];
+  }));
+  return keys;
+};
+export const selectPersistedParticipantIdentities = (
+  participants: unknown[],
+  historicalParticipants: unknown[],
+  identifiers: PersistedParticipantIdentityQuery[],
+) => {
+  const selected = new Map<string, GroupMetadata['participants'][number]>();
+  [...persistedParticipants(historicalParticipants), ...persistedParticipants(participants)].forEach(participant => {
+    const keys = participantIdentityKeys(participant);
+    const matches = identifiers.some(identifier => (identifier.contactId && identifier.contactId === participant.contactId)
+      || identifier.aliases.some(alias => keys.has(alias.trim().toLowerCase()) || keys.has(alias.trim().toLowerCase().replace(/@lid$/, ''))));
+    if (!matches) return;
+    const key = String(participant.contactId || participant.phoneJid || participant.lid || participant.jid);
+    selected.set(key, { ...selected.get(key), ...participant });
+  });
+  return [...selected.values()];
+};
 export const persistedGroupMetadata = (groupJid: string, transport: WhatsAppTransport, persisted: { subject?: string; avatarUrl?: string; description?: string; participants: unknown[]; historicalParticipants?: unknown[] }): GroupMetadata | null => {
   const participants = persistedParticipants(persisted.participants);
   if (!participants.length) return null;

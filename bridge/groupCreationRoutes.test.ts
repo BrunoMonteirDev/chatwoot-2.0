@@ -38,6 +38,28 @@ beforeEach(() => {
 });
 
 describe('group creation routing and idempotency', () => {
+  it('resolves only requested persisted participant identities without provider access', async () => {
+    const avatarLookup = vi.spyOn(waha, 'getChatAvatarUrl');
+    const evolutionMetadata = vi.spyOn(evolution, 'getGroupMetadata');
+    vi.mocked(chatwoot.contactsByIdsForSession).mockResolvedValue([{ id: 91, name: 'Maria atual', phone_number: '+5511999999999', thumbnail: 'maria-atual.jpg' }] as never);
+    vi.mocked(chatwoot.conversationGroupTargetDetailsForSession).mockResolvedValue({
+      groupJid: '222@g.us', contactId: 55, persistedMetadata: {
+        participants: [
+          { jid: '123@lid', phone_jid: '5511999999999@c.us', display_name: 'Maria', avatar_url: 'maria.jpg', contact_id: 91 },
+          { jid: '456@lid', display_name: 'Outro membro', contact_id: 92 },
+        ],
+        historicalParticipants: [],
+      },
+    } as never);
+    const response = await post('/groups/participant-identities', { accountId: 1, inboxId: 20, conversationId: 81, identifiers: [{ contactId: 800, aliases: ['123@lid'] }] });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ participants: [expect.objectContaining({ jid: '123@lid', contactId: 91, displayName: 'Maria atual', avatarUrl: 'maria-atual.jpg', phoneNumber: '+5511999999999' })] });
+    expect(chatwoot.contactsByIdsForSession).toHaveBeenCalledWith(1, [91], expect.any(Headers));
+    expect(waha.getGroupMetadata).not.toHaveBeenCalled();
+    expect(avatarLookup).not.toHaveBeenCalled();
+    expect(evolutionMetadata).not.toHaveBeenCalled();
+  });
+
   it('selecting inbox B calls only session B', async () => {
     const response = await post('/groups/creation', { accountId: 1, inboxId: 20, creationRequestId: 'routing-b-001', name: 'Equipe B', description: '', mode: 'invite', contactIds: [1] });
     expect(response.status).toBe(201); expect(await response.json()).toMatchObject({ created: true, conversationId: 91, groupJid: '222@g.us', inbox: { id: 20 }, provider: { session: 'session-b' } });
