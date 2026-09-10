@@ -85,6 +85,9 @@ export default function App() {
   const [whatsappConnection, setWhatsappConnection] = useState<OperationalWhatsAppConnection | null>(null);
   const [whatsappSendCapability, setWhatsappSendCapability] = useState<WhatsAppSendCapability | null>(null);
   const [contactPanelState, setContactPanelState] = useState<{ open: boolean; tab: 'contact' | 'attributes' | 'content' }>({ open: false, tab: 'contact' });
+  const handleContactPanelStateChange = useCallback((open: boolean, tab: 'contact' | 'attributes' | 'content') => {
+    setContactPanelState(current => current.open === open && current.tab === tab ? current : { open, tab });
+  }, []);
   const [managementCatalogInboxId, setManagementCatalogInboxId] = useState<number | null>(null);
   const contactDirectory = useContacts(currentAccount?.id ?? null);
   useEffect(() => {
@@ -1451,7 +1454,7 @@ export default function App() {
                   isSidebarCollapsed={isSidebarCollapsed}
                   onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
                   onMobileBack={() => navigateToTab('chats')}
-                  onContactPanelStateChange={(open, tab) => setContactPanelState({ open, tab })}
+                  onContactPanelStateChange={handleContactPanelStateChange}
                 /></ConversationErrorBoundary> : (
                   <div className={`h-full flex items-center justify-center text-center p-8 ${isDarkMode ? 'bg-[#0b141a] text-[#8696a0]' : 'bg-[#f0f2f5] text-[#667781]'}`}>
                     <div>

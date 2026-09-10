@@ -36,6 +36,17 @@ describe('ChatArea group metadata opening', () => {
     expect(get).not.toHaveBeenCalled();
   });
 
+  it('não entra em loop quando o parent recria o callback do estado do painel', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined); let notifications = 0;
+    const Harness = () => {
+      const [, setPanelState] = React.useState({ open: false, tab: 'contact' as const });
+      return <ChatArea chat={chat} conversation={conversation} accountId={1} historyStatus="ready" onSendMessage={() => undefined} onImageClick={() => undefined} onSearchInChat={() => undefined} onContactPanelStateChange={(open, tab) => { notifications += 1; setPanelState({ open, tab }); }} />;
+    };
+    await act(async () => { root.render(<Harness />); });
+    expect(notifications).toBe(1);
+    expect(consoleError.mock.calls.flat().join(' ')).not.toContain('Maximum update depth exceeded');
+  });
+
   it('renders the sender thumbnail carried by the message without opening group data', async () => {
     const withSenderAvatar = { ...chat, messages: [{ ...chat.messages[0], senderName: 'Maria', senderAvatarUrl: 'https://example.test/maria.jpg' }] };
     await act(async () => { root.render(<ChatArea chat={withSenderAvatar} conversation={conversation} accountId={1} historyStatus="ready" onSendMessage={() => undefined} onImageClick={() => undefined} onSearchInChat={() => undefined} />); });

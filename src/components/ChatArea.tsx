@@ -710,6 +710,10 @@ export const ChatArea: React.FC<Props> = ({
   const [isContactPanelOpen, setIsContactPanelOpen] = useState(false);
   const [selectedGroupParticipant, setSelectedGroupParticipant] = useState<{ id: string; name: string; phone: string; avatar?: string; contactId?: number } | null>(null);
   const [contactPanelTab, setContactPanelTab] = useState<'contact' | 'attributes' | 'content'>('contact');
+  const onContactPanelStateChangeRef = useRef(onContactPanelStateChange);
+  const contactPanelTabRef = useRef(contactPanelTab);
+  onContactPanelStateChangeRef.current = onContactPanelStateChange;
+  contactPanelTabRef.current = contactPanelTab;
   const [conversationParticipants, setConversationParticipants] = useState<AssignableAgent[]>([]);
   const [inputText, setInputText] = useState('');
   const [messageMode, setMessageMode] = useState<'responder' | 'privada'>('responder');
@@ -722,9 +726,9 @@ export const ChatArea: React.FC<Props> = ({
     if (accountId && conversation) conversationOpeningMetrics.headerRendered(accountId, conversation.id);
   }, [accountId, conversation?.id]);
   useEffect(() => {
-    onContactPanelStateChange?.(isContactPanelOpen, contactPanelTab);
-    return () => onContactPanelStateChange?.(false, contactPanelTab);
-  }, [contactPanelTab, isContactPanelOpen, onContactPanelStateChange]);
+    onContactPanelStateChangeRef.current?.(isContactPanelOpen, contactPanelTab);
+  }, [contactPanelTab, isContactPanelOpen]);
+  useEffect(() => () => onContactPanelStateChangeRef.current?.(false, contactPanelTabRef.current), []);
   useEffect(() => {
     if (isContactPanelOpen && contactPanelTab === 'attributes') onManagementCatalogsNeeded?.();
   }, [contactPanelTab, isContactPanelOpen, onManagementCatalogsNeeded]);
