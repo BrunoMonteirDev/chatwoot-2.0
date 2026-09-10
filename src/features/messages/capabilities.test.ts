@@ -12,17 +12,22 @@ describe('message capabilities', () => {
     expect(capabilitiesForMessage(message({ sourceId: 'waha:ABC', whatsappTransport: 'evolution' }))).toMatchObject({ transport: 'waha', canReact: true, canEdit: true, canRevoke: true });
   });
 
-  it('allows reactions for Meta but does not expose edit or revoke', () => {
-    expect(capabilitiesForMessage(message({ sourceId: 'meta:wamid.1', whatsappTransport: 'meta_cloud' }))).toMatchObject({ canReact: true, canEdit: false, canRevoke: false });
+  it('disables edit and revoke only when the provider reports them as unsupported', () => {
+    const unsupported = { edit: 'unsupported', revoke: 'unsupported' } as const;
+    expect(capabilitiesForMessage(message({ sourceId: 'meta:wamid.1', whatsappTransport: 'meta_cloud' }), unsupported)).toMatchObject({ canReact: true, canEdit: false, canRevoke: false });
   });
 
   it('recognizes a native Chatwoot WAMID without legacy bridge metadata', () => {
-    expect(capabilitiesForMessage(message({ sourceId: 'wamid.HBgTnative', whatsappTransport: null, whatsappRemoteJid: null }))).toMatchObject({ transport: 'meta_cloud', canReact: true, canEdit: false, canRevoke: false });
+    expect(capabilitiesForMessage(message({ sourceId: 'wamid.HBgTnative', whatsappTransport: null, whatsappRemoteJid: null }))).toMatchObject({ transport: 'meta_cloud', canReact: true, canEdit: true, canRevoke: true });
   });
 
   it('requires an original provider identity and allows only compatible own messages to mutate', () => {
     expect(capabilitiesForMessage(message({ sourceId: null }))).toMatchObject({ canReact: false, canEdit: false, canRevoke: false });
     expect(capabilitiesForMessage(message({ sender: 'them', whatsappFromMe: false }))).toMatchObject({ canReact: true, canEdit: false, canRevoke: false });
-    expect(capabilitiesForMessage(message({ attachments: [{ id: 'a', type: 'file', url: '/a' }] }))).toMatchObject({ canEdit: false, canRevoke: true });
+    expect(capabilitiesForMessage(message({ attachments: [{ id: 'a', type: 'file', url: '/a' }] }))).toMatchObject({ canEdit: true, canRevoke: true });
+  });
+
+  it('does not infer an expiry from missing historical target metadata', () => {
+    expect(capabilitiesForMessage(message({ whatsappRemoteJid: null, time: 'há muito tempo' }))).toMatchObject({ canEdit: true, canRevoke: true });
   });
 });

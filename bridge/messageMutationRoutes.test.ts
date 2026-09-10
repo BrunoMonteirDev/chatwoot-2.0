@@ -62,7 +62,27 @@ const operation = (name: 'edit' | 'revoke', extra: Record<string, unknown> = {})
   method: 'POST', headers, body: JSON.stringify({ accountId: 47, inboxId: 608, sourceId: 'waha:SYNTHETIC', remoteJid: '5500000000001@c.us', targetFromMe: true, transport: 'waha', ...extra }),
 });
 
+const capabilities = (extra: Record<string, unknown> = {}) => fetch(`${base}/operations/messages/capabilities`, {
+  method: 'POST', headers, body: JSON.stringify({ accountId: 47, inboxId: 608, sourceId: 'waha:SYNTHETIC', targetFromMe: true, ...extra }),
+});
+
 describe('platform WhatsApp message mutations', () => {
+  it('reports only explicit provider support without calculating a message-age window', async () => {
+    const response = await capabilities({ createdAt: 1 });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ edit: 'supported', revoke: 'supported' });
+  });
+
+  it('reports an explicitly unsupported provider capability', async () => {
+    vi.mocked(chatwoot.findWhatsAppInboxById).mockResolvedValue({ id: 608, configuration: { mode: 'official', transports: ['meta_cloud'], evolutionInstanceName: null, wahaSessionName: null } });
+
+    const response = await capabilities({ sourceId: 'meta:wamid.SYNTHETIC' });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ edit: 'unsupported', revoke: 'unsupported' });
+  });
+
   it('persists revoke only after the provider accepts it', async () => {
     const response = await operation('revoke');
 

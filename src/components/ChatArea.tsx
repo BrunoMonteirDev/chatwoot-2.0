@@ -56,6 +56,7 @@ import { ContextMenu } from './ContextMenu';
 import { useContextMenu } from '../hooks/useContextMenu';
 import { getMessageContextMenuItems } from '../utils/contextMenuActions';
 import { capabilitiesForMessage } from '../features/messages/capabilities';
+import { whatsappMessageMutationService } from '../integrations/whatsapp/messageMutations';
 import { ConversationManagementMenu } from './ConversationManagementMenu';
 import { ContactDetailsPanel } from './ContactDetailsPanel';
 import { conversationManagementService, type ConversationManagementCatalogs } from '../integrations/chatwoot/conversationManagement';
@@ -860,7 +861,7 @@ export const ChatArea: React.FC<Props> = ({
   const canUseMetaTemplates = nativeMetaTemplatesAvailable || (!externalSendBlocked && Boolean(conversationInbox && metaCloudMetadataForInbox(conversationInbox)));
 
   // Context Menu State
-  const { menuState, openContextMenu, closeContextMenu } = useContextMenu();
+  const { menuState, openContextMenuAt, closeContextMenu } = useContextMenu();
   const [messagePendingRevoke, setMessagePendingRevoke] = useState<Message | null>(null);
   const [isRevokingMessage, setIsRevokingMessage] = useState(false);
   const [revokeFailure, setRevokeFailure] = useState<string | null>(null);
@@ -872,12 +873,17 @@ export const ChatArea: React.FC<Props> = ({
   const [messageToForward, setMessageToForward] = useState<Message | null>(null);
   const [isForwardingMessage, setIsForwardingMessage] = useState(false);
   const [forwardError, setForwardError] = useState<string | null>(null);
+  const messageCapabilityRequestRef = useRef(0);
 
   // Actions are reflected directly in the UI; avoid persistent pop-up notices.
   const addToast = (_title: string, _type: 'success' | 'info' | 'error' = 'success') => undefined;
 
   const handleMessageContextMenu = (e: React.MouseEvent, msg: Message) => {
-    const items = getMessageContextMenuItems(msg, {
+    e.preventDefault();
+    e.stopPropagation();
+    const { clientX, clientY } = e;
+    const requestId = ++messageCapabilityRequestRef.current;
+    const options: Parameters<typeof getMessageContextMenuItems>[1] = {
       onReply: (m) => {
         setReplyTo({ id: m.id, senderName: m.sender === 'me' ? 'Você' : m.senderName || 'Contato', text: m.text || (m.attachments?.length ? 'Mídia' : 'Mensagem') });
         addToast('Respondendo à mensagem selecionada', 'info');
@@ -895,9 +901,16 @@ export const ChatArea: React.FC<Props> = ({
       onRevokeMessage: (m) => { setMessagePendingRevoke(m); setRevokeFailure(null); },
       onReact: (m, emoji) => void handleReaction(m, emoji),
       onForward: (m) => { setMessageToForward(m); setForwardError(null); },
-    });
-
-    openContextMenu(e, items, 'Ações da Mensagem');
+    };
+    const show = (providerCapabilities: Awaited<ReturnType<typeof whatsappMessageMutationService.capabilities>>) => {
+      if (requestId !== messageCapabilityRequestRef.current) return;
+      openContextMenuAt(clientX, clientY, getMessageContextMenuItems(msg, options, providerCapabilities), 'Ações da Mensagem');
+    };
+    if (!accountId || !conversation?.inboxId || !msg.sourceId) return show(null);
+    void whatsappMessageMutationService.capabilities({
+      accountId, inboxId: conversation.inboxId, sourceId: msg.sourceId,
+      targetFromMe: msg.whatsappFromMe !== false && msg.sender === 'me',
+    }).then(show);
   };
 
   const handleReaction = async (message: Message, emoji: string) => {

@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import { ContextMenuItem } from '../components/ContextMenu';
 import { Chat, Message } from '../types';
-import { capabilitiesForMessage } from '../features/messages/capabilities';
+import { capabilitiesForMessage, type ProviderMessageMutationCapabilities } from '../features/messages/capabilities';
 
 export const QUICK_REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'] as const;
 
@@ -147,9 +147,10 @@ export function getMessageContextMenuItems(
     onRevokeMessage?: (msg: Message) => void;
     onReact?: (msg: Message, emoji: string) => void;
     onForward?: (msg: Message) => void;
-  }
+  },
+  providerCapabilities?: ProviderMessageMutationCapabilities | null
 ): ContextMenuItem[] {
-  const capabilities = capabilitiesForMessage(msg);
+  const capabilities = capabilitiesForMessage(msg, providerCapabilities);
   return [
     {
       label: 'Responder Mensagem',

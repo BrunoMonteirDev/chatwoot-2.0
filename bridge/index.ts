@@ -2349,6 +2349,31 @@ app.post('/webhooks/evolution', async (request, response) => {
   }
 });
 
+app.post('/operations/messages/capabilities', async (request, response) => {
+  if (!(await enforceRateLimit(request, response, 'message-capabilities', 120, 60))) return;
+  if (!(await requireBridgeUser(request, response))) return;
+  const { accountId, inboxId, sourceId, targetFromMe } = request.body as Record<string, unknown>;
+  if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || typeof sourceId !== 'string' || typeof targetFromMe !== 'boolean') {
+    return response.status(400).json({ error: 'Invalid WhatsApp message capability request' });
+  }
+  const external = parseExternalMessageId(sourceId);
+  if (!external || !targetFromMe) return response.json({ edit: 'unsupported', revoke: 'unsupported' });
+  try {
+    return await chatwootBridge.withAccount(accountId as number, async () => {
+      const inbox = await chatwootBridge.findWhatsAppInboxById(inboxId as number);
+      const capability = (operation: 'edit' | 'revoke') => {
+        const route = resolveTransportRoute({ configuration: inbox.configuration, operation, target: { sourceId } });
+        if ('reason' in route) return route.reason === 'unsupported_operation' ? 'unsupported' : 'unknown';
+        return route.transport === external.provider ? 'supported' : 'unsupported';
+      };
+      return response.json({ edit: capability('edit'), revoke: capability('revoke') });
+    });
+  } catch (error) {
+    console.error('[evolution-bridge] message capability lookup failed', { inboxId, sourceId, error: error instanceof Error ? error.message : 'unknown error' });
+    return response.json({ edit: 'unknown', revoke: 'unknown' });
+  }
+});
+
 app.post('/operations/messages/:operation', async (request, response) => {
   const operation = request.params.operation;
   if (operation !== 'edit' && operation !== 'revoke') return response.status(404).json({ error: 'Unknown WhatsApp message operation' });

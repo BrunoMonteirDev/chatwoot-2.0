@@ -3,6 +3,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Chat, Message } from '../types';
+import { whatsappMessageMutationService } from '../integrations/whatsapp/messageMutations';
 import { ChatArea } from './ChatArea';
 
 let container: HTMLDivElement;
@@ -27,7 +28,7 @@ describe('ChatArea WhatsApp message mutations', () => {
     root = createRoot(container);
   });
 
-  afterEach(() => { act(() => root.unmount()); container.remove(); });
+  afterEach(() => { act(() => root.unmount()); container.remove(); vi.restoreAllMocks(); });
 
   it('shows a durable revoked marker and expands the preserved original', async () => {
     await render(message({ isRevoked: true, whatsappPreviousContent: 'Conteúdo original' }));
@@ -43,6 +44,27 @@ describe('ChatArea WhatsApp message mutations', () => {
 
     expect(document.body.textContent).not.toContain('Excluir do Chatwoot');
     expect(document.body.textContent).toContain('Apagar para todos');
+  });
+
+  it('offers mutations for an old message without legacy remote-JID metadata', async () => {
+    await render(message({ whatsappRemoteJid: null, time: '01/01/2020' }));
+    await act(async () => container.querySelector('[id="msg-42"] > div > div')?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })));
+
+    expect(document.body.textContent).toContain('Editar no WhatsApp');
+    expect(document.body.textContent).toContain('Apagar para todos');
+  });
+
+  it('hides mutations when the bridge reports explicit provider unsupported capability', async () => {
+    vi.spyOn(whatsappMessageMutationService, 'capabilities').mockResolvedValue({ edit: 'unsupported', revoke: 'unsupported' });
+    await render(message(), { accountId: 47, conversation: { id: 81, inboxId: 608 } as never });
+    await act(async () => {
+      container.querySelector('[id="msg-42"] > div > div')?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(whatsappMessageMutationService.capabilities).toHaveBeenCalledWith({ accountId: 47, inboxId: 608, sourceId: 'waha:SYNTHETIC', targetFromMe: true });
+    expect(document.body.textContent).not.toContain('Editar no WhatsApp');
+    expect(document.body.textContent).not.toContain('Apagar para todos');
   });
 
   it('keeps the message and reports the provider rejection for revoke', async () => {

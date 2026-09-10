@@ -303,7 +303,7 @@ export const useConversationMessages = (accountId: number | null, conversationId
     const target = messages.find(message => message.id === messageId);
     const external = parseExternalMessageId(target?.sourceId);
     const transport = external?.provider;
-    if (!target?.sourceId || !external || (transport !== 'evolution' && transport !== 'waha') || target.kind !== 'outgoing' || target.contentAttributes.whatsapp_from_me === false) return false;
+    if (!target?.sourceId || !external || target.kind !== 'outgoing' || target.contentAttributes.whatsapp_from_me === false) return false;
     const remoteJid = typeof target.contentAttributes.whatsapp_remote_jid === 'string' ? target.contentAttributes.whatsapp_remote_jid : fallbackRemoteJid(fallbackPhoneNumber);
     if (!remoteJid) return false;
     try {

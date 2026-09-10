@@ -17,19 +17,17 @@ export function useContextMenu() {
     items: [],
   });
 
+  const openContextMenuAt = useCallback((x: number, y: number, items: ContextMenuItem[], title?: string) => {
+    setMenuState({ x, y, isOpen: true, title, items });
+  }, []);
+
   const openContextMenu = useCallback(
     (e: React.MouseEvent, items: ContextMenuItem[], title?: string) => {
       e.preventDefault();
       e.stopPropagation();
-      setMenuState({
-        x: e.clientX,
-        y: e.clientY,
-        isOpen: true,
-        title,
-        items,
-      });
+      openContextMenuAt(e.clientX, e.clientY, items, title);
     },
-    []
+    [openContextMenuAt]
   );
 
   const closeContextMenu = useCallback(() => {
@@ -39,6 +37,7 @@ export function useContextMenu() {
   return {
     menuState,
     openContextMenu,
+    openContextMenuAt,
     closeContextMenu,
   };
 }
