@@ -3,7 +3,7 @@ import multer from 'multer';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { normalizeBrazilianPhone } from '../phone.ts';
 import { chatwootBridge } from './chatwoot.js';
-import { config } from './config.js';
+import { chatwootWebhookUrl, config } from './config.js';
 import { verifyInternalHybridRequest } from './internalHybridAuth.js';
 import { PersistentDedupStore } from './dedupStore.js';
 import { evolutionGroupSourceId, parseIncomingEvolutionEdit, parseIncomingEvolutionGroupLifecycle, parseIncomingEvolutionMessage, parseIncomingEvolutionReaction, parseIncomingEvolutionRevoke, type IncomingEvolutionMessage, type IncomingEvolutionReaction } from './evolutionEvent.js';
@@ -926,7 +926,7 @@ const configureWahaInbox = async (accountId: number, inboxId: number, sessionNam
   const inbox = await chatwootBridge.findApiInboxById(inboxId);
   const configuration = transportConfigurationForInbox(inbox.additionalAttributes);
   const transports = [...new Set([...(configuration?.transports || []), 'waha'])];
-  await chatwootBridge.updateInboxAdditionalAttributes(inboxId, { waha_session_name: sessionName, waha_provider: 'waha', ...(status ? connectionStatusPatch('waha', status as ConnectionStatus) : {}), whatsapp_transports: transports, whatsapp_mode: transports.length > 1 ? 'hybrid' : 'web' });
+  await chatwootBridge.updateInboxAdditionalAttributes(inboxId, { waha_session_name: sessionName, waha_provider: 'waha', ...(status ? connectionStatusPatch('waha', status as ConnectionStatus) : {}), whatsapp_transports: transports, whatsapp_mode: transports.length > 1 ? 'hybrid' : 'web' }, chatwootWebhookUrl());
 });
 const clearWahaInbox = async (accountId: number, inboxId: number) => chatwootBridge.withAccount(accountId, async () => {
   const inbox = await chatwootBridge.findApiInboxById(inboxId);
@@ -2627,6 +2627,10 @@ const reconcileWorkingWahaGroups = async () => {
   await Promise.all(scopes.map(async scope => {
     try {
       await ensureConfiguredWahaOwnership(scope);
+      // Channel::Api inboxes deliver outgoing messages through this callback.
+      // Reconcile it from server-side runtime configuration so old installs
+      // self-heal and the browser never has to guess a Docker/private DNS name.
+      await chatwootBridge.withAccount(scope.accountId, () => chatwootBridge.ensureApiInboxWebhook(scope.inboxId, chatwootWebhookUrl()));
       const session = await wahaTransport.getSession(scope.sessionName);
       await wahaSessions.update(scope.sessionName, { status: session.status, engine: session.engine, phone: session.me?.id });
       if (session.status === 'WORKING') scheduleGroupMetadataBackfill(scope);

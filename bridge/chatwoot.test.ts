@@ -16,6 +16,25 @@ describe('chatwootBridge media messages', () => {
     expect(vi.mocked(fetch).mock.calls[0][0]).toContain('/api/v1/accounts/47/inboxes');
   });
 
+  it('corrige o callback WAHA da inbox no escopo da account sem hardcode de domínio', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ payload: [{ id: 608, channel_type: 'Channel::Api', webhook_url: 'http://unreachable.invalid/webhooks/chatwoot' }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 608 }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(chatwootBridge.withAccount(47, () => chatwootBridge.ensureApiInboxWebhook(608, 'http://docker-gateway.test:3100/webhooks/chatwoot'))).resolves.toBe(true);
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/v1/accounts/47/inboxes');
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/api/v1/accounts/47/inboxes/608');
+    expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toEqual({ channel: { webhook_url: 'http://docker-gateway.test:3100/webhooks/chatwoot' } });
+  });
+
+  it('não regrava callback WAHA que já está correto', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ payload: [{ id: 608, channel_type: 'Channel::Api', webhook_url: 'https://bridge.synthetic.example/webhooks/chatwoot' }] }), { status: 200 })));
+    await expect(chatwootBridge.withAccount(47, () => chatwootBridge.ensureApiInboxWebhook(608, 'https://bridge.synthetic.example/webhooks/chatwoot'))).resolves.toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('descobre somente grupos persistidos da inbox e pagina sem misturar contas/inboxes', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: { payload: [

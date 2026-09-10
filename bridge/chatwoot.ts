@@ -6,7 +6,7 @@ import { externalMessageId, transportConfigurationForInbox, type WhatsAppTranspo
 import type { StagedMetaHistoryMessage } from './metaHistoryStore.js';
 import type { EvolutionGroupParticipant } from './evolutionEvent.js';
 
-export type ApiInbox = { id: number; name?: string; channel_type: string; inbox_identifier?: string; additional_attributes?: Record<string, unknown>; secret?: string };
+export type ApiInbox = { id: number; name?: string; channel_type: string; inbox_identifier?: string; webhook_url?: string | null; additional_attributes?: Record<string, unknown>; secret?: string };
 type Contact = { id: number; source_id: string; name?: string; phone_number?: string; thumbnail?: string | null };
 type Conversation = { id: number; internal_id?: number; status: string; inbox_id?: number; last_activity_at?: number; meta?: { sender?: { id?: number; name?: string; thumbnail?: string | null; additional_attributes?: Record<string, unknown> | null } }; contact_inbox?: { source_id?: string | null }; messages?: Array<{ content_attributes?: Record<string, unknown> | null }> };
 type ConversationTarget = { id: number; inbox_id: number; meta?: { sender?: { id?: number; name?: string; thumbnail?: string | null; phone_number?: string | null; additional_attributes?: Record<string, unknown> | null } }; contact_inbox?: { source_id?: string | null } };
@@ -321,12 +321,21 @@ export const chatwootBridge = {
   async isApiInbox(inboxId: number) {
     return (await this.listApiInboxes()).some(inbox => inbox.id === inboxId);
   },
-  async updateInboxAdditionalAttributes(inboxId: number, patch: Record<string, unknown>) {
+  async updateInboxAdditionalAttributes(inboxId: number, patch: Record<string, unknown>, webhookUrl?: string) {
     const inbox = (await this.listApiInboxes()).find(item => item.id === inboxId);
     if (!inbox) throw new Error(`A inbox ${inboxId} não é uma API inbox.`);
     return request(`/api/v1/accounts/${currentAccountId()}/inboxes/${inboxId}`, {
-      method: 'PATCH', body: JSON.stringify({ channel: { additional_attributes: { ...(inbox.additional_attributes || {}), ...patch } } }),
+      method: 'PATCH', body: JSON.stringify({ channel: { additional_attributes: { ...(inbox.additional_attributes || {}), ...patch }, ...(webhookUrl ? { webhook_url: webhookUrl } : {}) } }),
     }, true);
+  },
+  async ensureApiInboxWebhook(inboxId: number, webhookUrl: string) {
+    const inbox = (await this.listApiInboxes()).find(item => item.id === inboxId);
+    if (!inbox) return false;
+    if (inbox.webhook_url === webhookUrl) return false;
+    await request(`/api/v1/accounts/${currentAccountId()}/inboxes/${inboxId}`, {
+      method: 'PATCH', body: JSON.stringify({ channel: { webhook_url: webhookUrl } }),
+    }, true);
+    return true;
   },
   async deleteInbox(inboxId: number) {
     await request(`/api/v1/accounts/${currentAccountId()}/inboxes/${inboxId}`, { method: 'DELETE' }, true);

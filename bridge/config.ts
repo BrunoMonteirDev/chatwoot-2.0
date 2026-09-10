@@ -70,6 +70,12 @@ export const config = {
   metaAppSecret: process.env.META_APP_SECRET || '',
 };
 
+export const chatwootWebhookUrl = () => {
+  const baseUrl = config.internalUrl || config.publicUrl;
+  if (!baseUrl) throw new Error('BRIDGE_INTERNAL_URL ou BRIDGE_PUBLIC_URL é obrigatório para configurar o webhook do Chatwoot.');
+  return `${baseUrl}/webhooks/chatwoot`;
+};
+
 if (config.chatwootDefaultAccountId !== null && (!Number.isInteger(config.chatwootDefaultAccountId) || config.chatwootDefaultAccountId < 1)) throw new Error('CHATWOOT_ACCOUNT_ID deve ser um número positivo.');
 if (!Number.isFinite(config.metaEmbeddedSignupSessionTtlMs) || config.metaEmbeddedSignupSessionTtlMs < 60_000) throw new Error('META_EMBEDDED_SIGNUP_SESSION_TTL_SECONDS deve ser pelo menos 60.');
 if (!Number.isInteger(config.historyImportBatchSize) || config.historyImportBatchSize < 1 || config.historyImportBatchSize > 1_000) throw new Error('HISTORY_IMPORT_BATCH_SIZE deve estar entre 1 e 1000.');

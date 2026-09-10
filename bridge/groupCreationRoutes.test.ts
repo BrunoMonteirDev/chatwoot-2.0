@@ -20,7 +20,7 @@ beforeAll(async () => {
   railsServer = createServer((_request, response) => { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ account_id: 1, role: 'administrator', accounts: [{ id: 1, role: 'administrator' }] })); });
   railsServer.listen(0, '127.0.0.1'); await new Promise<void>(resolve => railsServer.once('listening', resolve));
   const railsBase = `http://127.0.0.1:${(railsServer.address() as { port: number }).port}`;
-  for (const [key, value] of Object.entries({ NODE_ENV: 'test', BRIDGE_WEBHOOK_SECRET: 'test', BRIDGE_PUBLIC_URL: 'https://bridge.synthetic.example', CHATWOOT_BASE_URL: railsBase, BRIDGE_REDIS_URL: '', WAHA_BASE_URL: 'http://waha.test', WAHA_API_KEY: 'key', WAHA_WEBHOOK_SECRET: 'synthetic-waha-secret', BRIDGE_DEDUP_FILE: `${dir}/dedup.json`, BRIDGE_IDENTITY_FILE: `${dir}/identities.json`, BRIDGE_GROUP_CREATION_FILE: `${dir}/creations.json`, BRIDGE_WAHA_SESSION_OWNERSHIP_FILE: `${dir}/sessions.json` })) vi.stubEnv(key, value);
+  for (const [key, value] of Object.entries({ NODE_ENV: 'test', BRIDGE_WEBHOOK_SECRET: 'test', BRIDGE_PUBLIC_URL: 'https://bridge.synthetic.example', BRIDGE_INTERNAL_URL: '', CHATWOOT_BASE_URL: railsBase, BRIDGE_REDIS_URL: '', WAHA_BASE_URL: 'http://waha.test', WAHA_API_KEY: 'key', WAHA_WEBHOOK_SECRET: 'synthetic-waha-secret', BRIDGE_DEDUP_FILE: `${dir}/dedup.json`, BRIDGE_IDENTITY_FILE: `${dir}/identities.json`, BRIDGE_GROUP_CREATION_FILE: `${dir}/creations.json`, BRIDGE_WAHA_SESSION_OWNERSHIP_FILE: `${dir}/sessions.json` })) vi.stubEnv(key, value);
   const Store = (await import('./wahaSessionStore')).WahaSessionStore; const store = new Store(`${dir}/sessions.json`);
   await store.reserve({ accountId: 1, inboxId: 10, sessionName: 'session-a' }); await store.reserve({ accountId: 1, inboxId: 20, sessionName: 'session-b' }); await store.reserve({ accountId: 1, inboxId: 30, sessionName: 'hybrid-a1-i30' });
   const imported = await import('./index'); groupMetadataBackfill = imported.groupMetadataBackfill; waha = (await import('./waha')).wahaTransport; evolution = (await import('./evolution')).evolutionBridge; chatwoot = (await import('./chatwoot')).chatwootBridge;
@@ -33,6 +33,7 @@ beforeEach(() => {
   vi.spyOn(chatwoot, 'listInboxesForSession').mockResolvedValue([inbox(10, 'A', 'session-a'), inbox(20, 'B', 'session-b')] as never);
   vi.spyOn(chatwoot, 'listServiceAccountIds').mockResolvedValue([1]);
   vi.spyOn(chatwoot, 'listAccountInboxes').mockResolvedValue([inbox(10, 'A', 'session-a'), inbox(20, 'B', 'session-b'), { id: 30, name: 'Hybrid', channel_type: 'Channel::Whatsapp', additional_attributes: { hybrid_enabled: true, hybrid_waha_session: 'hybrid-a1-i30' } }] as never);
+  vi.spyOn(chatwoot, 'ensureApiInboxWebhook').mockResolvedValue(false);
   vi.spyOn(chatwoot, 'contactsByIdsForSession').mockImplementation(async (_accountId, ids) => ids.map(id => ({ id, name: `Contact ${id}`, phone_number: `+55119999999${id}` })) as never);
   vi.spyOn(chatwoot, 'ensureGroupConversation').mockResolvedValue({ conversationId: 91, contactId: 55, sourceId: 'whatsapp:group:group@g.us' });
   vi.spyOn(chatwoot, 'conversationGroupTargetDetailsForSession').mockResolvedValue({ groupJid: '222@g.us', contactId: 55, persistedMetadata: { participants: [] } } as never);
@@ -50,6 +51,17 @@ describe('group creation routing and idempotency', () => {
     const response = await fetch(`${base}/config`);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ bridgePublicUrl: 'https://bridge.synthetic.example' });
+  });
+
+  it('persiste o callback server-side ao associar uma inbox WAHA', async () => {
+    vi.spyOn(chatwoot, 'findApiInboxByIdForSession').mockResolvedValue({ id: 10, identifier: 'api-10', additionalAttributes: { whatsapp_transports: ['waha'], waha_session_name: 'session-a' } });
+    vi.spyOn(chatwoot, 'findApiInboxById').mockResolvedValue({ id: 10, identifier: 'api-10', additionalAttributes: { whatsapp_transports: ['waha'], waha_session_name: 'session-a' } });
+    vi.spyOn(chatwoot, 'updateInboxAdditionalAttributes').mockResolvedValue({} as never);
+
+    const response = await post('/providers/waha/sessions/session-a/associate', { accountId: 1, inboxId: 10 });
+
+    expect(response.status).toBe(200);
+    expect(chatwoot.updateInboxAdditionalAttributes).toHaveBeenCalledWith(10, expect.objectContaining({ waha_session_name: 'session-a', whatsapp_transports: ['waha'] }), 'https://bridge.synthetic.example/webhooks/chatwoot');
   });
 
   it('descobre grupos silenciosos da primeira conexão sem persistence prévia', async () => {
@@ -123,6 +135,8 @@ describe('group creation routing and idempotency', () => {
     expect(reconcile).toHaveBeenCalledWith({ accountId: 1, inboxId: 10, sessionName: 'session-a' });
     expect(reconcile).toHaveBeenCalledWith({ accountId: 1, inboxId: 30, sessionName: 'hybrid-a1-i30' });
     expect(reconcile).not.toHaveBeenCalledWith(expect.objectContaining({ inboxId: 20 }));
+    expect(chatwoot.ensureApiInboxWebhook).toHaveBeenCalledWith(10, 'https://bridge.synthetic.example/webhooks/chatwoot');
+    expect(chatwoot.ensureApiInboxWebhook).toHaveBeenCalledWith(20, 'https://bridge.synthetic.example/webhooks/chatwoot');
   });
 
   it('adota o binding persistido quando o primeiro evento chega antes do índice local', async () => {

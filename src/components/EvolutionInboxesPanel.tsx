@@ -32,18 +32,18 @@ const bridgeWebhookUrl = () => {
   const configured = bridgePublicUrl();
   if (!configured) return null;
   try {
-    // `/bridge` is a browser-only proxy. Chatwoot delivers outgoing-message
-    // webhooks from its own container, where `localhost` points at Rails, not
-    // at the frontend proxy. Persist the Docker-network address instead.
-    if (configured.startsWith('/')) return 'http://bridge:3100/webhooks/chatwoot';
+    // Relative URLs are browser-only proxies and are never valid server-side
+    // callbacks. The runtime bridge configuration must provide the absolute
+    // installation URL instead of making the browser guess private DNS.
+    if (configured.startsWith('/')) return null;
     const url = new URL(configured, window.location.origin);
     if (url.protocol === 'https:' || url.protocol === 'http:') return `${url.toString().replace(/\/$/, '')}/webhooks/chatwoot`;
   } catch { /* A mensagem abaixo orienta a configuração inválida. */ }
   return null;
 };
-const chatwootWebhookUrl = bridgeWebhookUrl();
 
 export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inboxesStatus, inboxesError, onRefresh, isDarkMode, selectedInboxId = null, onOpenInbox, onCloseInbox }) => {
+  const chatwootWebhookUrl = bridgeWebhookUrl();
   const [screen, setScreen] = useState<Screen>('list');
   const [selectedInbox, setSelectedInbox] = useState<Inbox | null>(null);
   const [name, setName] = useState('');
