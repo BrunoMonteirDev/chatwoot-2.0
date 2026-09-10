@@ -68,7 +68,7 @@ import { persistedWhatsAppConnection, usesLegacyWhatsAppConnection, whatsappSend
 import { authService } from './integrations/chatwoot/auth';
 import { browserNotifications } from './features/notifications/browserNotifications';
 import type { ConversationMessage, ConversationSummary } from './domain/currentUser';
-import { appRouteFromUrl, urlForAppRoute, type AppRoute } from './routing/appRoute';
+import { appRouteFromUrl, urlForAppRoute, type AppRoute, type InboxCreationRoute } from './routing/appRoute';
 
 const emptyUser: UserProfile = { name: '', phone: '', about: '', avatar: '' };
 const emptyAccount: MultiTenantAccount = { id: '', name: '', role: '' };
@@ -391,6 +391,7 @@ export default function App() {
   } | null>(null);
   const [selectedSettingsTab, setSelectedSettingsTab] = useState<SettingsTab>(() => isSettingsTab(initialRoute.settingsTab) ? initialRoute.settingsTab : 'conta');
   const [selectedSettingsInboxId, setSelectedSettingsInboxId] = useState<string | null>(() => initialRoute.settingsInboxId || null);
+  const [inboxCreationRoute, setInboxCreationRoute] = useState<InboxCreationRoute | null>(() => initialRoute.inboxCreation || null);
   const [showContactsModal, setShowContactsModal] = useState<boolean>(false);
   const [showNewConversationModal, setShowNewConversationModal] = useState<boolean>(false);
   const [showNewGroupModal, setShowNewGroupModal] = useState<boolean>(false);
@@ -403,6 +404,7 @@ export default function App() {
     setSelectedInbox(route.inbox || 'todas');
     if (isSettingsTab(route.settingsTab)) setSelectedSettingsTab(route.settingsTab);
     setSelectedSettingsInboxId(route.settingsInboxId || null);
+    setInboxCreationRoute(route.inboxCreation || null);
     setActiveDashboardAppId(route.appId || '');
     setShowContactsModal(false);
     setShowMobileChat(Boolean(route.conversationId));
@@ -441,6 +443,7 @@ export default function App() {
 
   const navigateToSettings = useCallback((tab: SettingsTab) => navigate({ tab: 'settings', settingsTab: tab }), [navigate]);
   const navigateToSettingsInbox = useCallback((inboxId: number) => navigate({ tab: 'settings', settingsTab: 'caixas', settingsInboxId: String(inboxId) }), [navigate]);
+  const navigateToInboxCreation = useCallback((creation: InboxCreationRoute, replace = false) => navigate({ tab: 'settings', settingsTab: 'caixas', inboxCreation: creation }, replace), [navigate]);
 
   const selectInboxRoute = useCallback((inbox: string) => {
     navigate({ tab: 'chats', ...(inbox !== 'todas' ? { inbox } : {}) });
@@ -465,9 +468,16 @@ export default function App() {
     // Canonicalize legacy/local links only after authentication determines the
     // account. Every operational route is then isolated by account ID.
     if (routeAccountId !== String(currentAccount.id)) {
-      navigate({ tab: activeNavTab, ...(activeChatId ? { conversationId: activeChatId } : {}), ...(selectedInbox !== 'todas' ? { inbox: selectedInbox } : {}), ...(activeNavTab === 'settings' ? { settingsTab: selectedSettingsTab, ...(selectedSettingsInboxId ? { settingsInboxId: selectedSettingsInboxId } : {}) } : {}), ...(activeNavTab === 'media' && activeDashboardAppId ? { appId: activeDashboardAppId } : {}), accountId: String(currentAccount.id) }, true);
+      navigate({ tab: activeNavTab, ...(activeChatId ? { conversationId: activeChatId } : {}), ...(selectedInbox !== 'todas' ? { inbox: selectedInbox } : {}), ...(activeNavTab === 'settings' ? { settingsTab: selectedSettingsTab, ...(selectedSettingsInboxId ? { settingsInboxId: selectedSettingsInboxId } : {}), ...(inboxCreationRoute ? { inboxCreation: inboxCreationRoute } : {}) } : {}), ...(activeNavTab === 'media' && activeDashboardAppId ? { appId: activeDashboardAppId } : {}), accountId: String(currentAccount.id) }, true);
+      return;
     }
-  }, [activeChatId, activeDashboardAppId, activeNavTab, authenticatedUser, currentAccount, navigate, routeAccountId, selectAccount, selectedInbox, selectedSettingsInboxId, selectedSettingsTab]);
+    if (inboxCreationRoute) {
+      const canonicalWizardUrl = urlForAppRoute({ accountId: String(currentAccount.id), tab: 'settings', settingsTab: 'caixas', inboxCreation: inboxCreationRoute });
+      if (`${window.location.pathname}${window.location.search}` !== canonicalWizardUrl) {
+        navigate({ accountId: String(currentAccount.id), tab: 'settings', settingsTab: 'caixas', inboxCreation: inboxCreationRoute }, true);
+      }
+    }
+  }, [activeChatId, activeDashboardAppId, activeNavTab, authenticatedUser, currentAccount, inboxCreationRoute, navigate, routeAccountId, selectAccount, selectedInbox, selectedSettingsInboxId, selectedSettingsTab]);
 
   // Selected Chat Object
   const listChats = useMemo(() => conversations.map((conversation) => toChatListItem(conversation, inboxes, accountLabels.labels)), [accountLabels.labels, conversations, inboxes]);
@@ -1158,7 +1168,9 @@ export default function App() {
             activeTab={selectedSettingsTab}
             onTabChange={navigateToSettings}
             selectedInboxId={selectedSettingsInboxId ? Number(selectedSettingsInboxId) : null}
+            inboxCreationRoute={inboxCreationRoute}
             onOpenInbox={navigateToSettingsInbox}
+            onNavigateInboxCreation={navigateToInboxCreation}
             onCloseInbox={() => navigateToSettings('caixas')}
             accountId={currentAccount?.id ?? null}
             canManageDashboardApps={currentAccount?.permissions.includes('administrator') || currentAccount?.permissions.includes('integrations_manage')}

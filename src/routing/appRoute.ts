@@ -1,5 +1,11 @@
 import type { NavTab } from '../types';
 
+export type InboxCreationProvider = 'waha' | 'meta' | 'hybrid';
+export type InboxCreationRoute =
+  | { step: 'channel' }
+  | { step: 'whatsapp'; provider?: InboxCreationProvider }
+  | { step: 'agents'; inboxId: string };
+
 export type AppRoute = {
   accountId?: string;
   tab: NavTab;
@@ -7,6 +13,7 @@ export type AppRoute = {
   inbox?: string;
   settingsTab?: string;
   settingsInboxId?: string;
+  inboxCreation?: InboxCreationRoute;
   appId?: string;
 };
 
@@ -35,6 +42,16 @@ export const appRouteFromUrl = (url: Pick<URL, 'pathname' | 'searchParams'>): Ap
   const inboxList = suffix.match(/^inbox\/(\d+)\/conversations$/);
   if (accountId && inboxList) return { accountId, tab: 'chats', inbox: inboxList[1] };
   if (accountId && (suffix === '' || suffix === 'conversations')) return { accountId, tab: 'chats' };
+  const settingsInboxAgents = accountId && suffix.match(/^settings\/caixas\/new\/([1-9]\d*)\/agents$/);
+  if (accountId && settingsInboxAgents) return { accountId, tab: 'settings', settingsTab: 'caixas', inboxCreation: { step: 'agents', inboxId: settingsInboxAgents[1] } };
+  if (accountId && suffix === 'settings/caixas/new/whatsapp') {
+    const requestedProvider = url.searchParams.get('provider');
+    const provider = requestedProvider === 'waha' || requestedProvider === 'meta' || requestedProvider === 'hybrid' ? requestedProvider : undefined;
+    return { accountId, tab: 'settings', settingsTab: 'caixas', inboxCreation: { step: 'whatsapp', ...(provider ? { provider } : {}) } };
+  }
+  if (accountId && suffix === 'settings/caixas/new') return { accountId, tab: 'settings', settingsTab: 'caixas', inboxCreation: { step: 'channel' } };
+  // A malformed creation URL must never be interpreted as an existing inbox.
+  if (accountId && suffix.startsWith('settings/caixas/new/')) return { accountId, tab: 'settings', settingsTab: 'caixas', inboxCreation: { step: 'channel' } };
   const settingsInbox = accountId && suffix.match(/^settings\/(?:inboxes|caixas)\/(\d+)$/);
   if (accountId && settingsInbox) return { accountId, tab: 'settings', settingsTab: 'caixas', settingsInboxId: settingsInbox[1] };
   const settings = accountId && suffix.match(/^settings(?:\/([^/]+))?$/);
@@ -61,7 +78,12 @@ export const urlForAppRoute = (route: AppRoute) => {
     pathname = route.inbox && route.inbox !== 'todas' && !route.conversationId
       ? `${base}/inbox/${encodeURIComponent(route.inbox)}`
       : `${base}${inbox}/conversations${route.conversationId ? `/${encodeURIComponent(route.conversationId)}` : ''}`;
-  } else if (route.tab === 'settings') pathname = route.settingsInboxId ? `${base}/settings/caixas/${encodeURIComponent(route.settingsInboxId)}` : `${base}/settings${route.settingsTab ? `/${encodeURIComponent(route.settingsTab)}` : ''}`;
+  } else if (route.tab === 'settings') {
+    if (route.inboxCreation?.step === 'channel') pathname = `${base}/settings/caixas/new`;
+    else if (route.inboxCreation?.step === 'whatsapp') pathname = `${base}/settings/caixas/new/whatsapp${route.inboxCreation.provider ? `?provider=${encodeURIComponent(route.inboxCreation.provider)}` : ''}`;
+    else if (route.inboxCreation?.step === 'agents') pathname = `${base}/settings/caixas/new/${encodeURIComponent(route.inboxCreation.inboxId)}/agents`;
+    else pathname = route.settingsInboxId ? `${base}/settings/caixas/${encodeURIComponent(route.settingsInboxId)}` : `${base}/settings${route.settingsTab ? `/${encodeURIComponent(route.settingsTab)}` : ''}`;
+  }
   else if (route.tab === 'status') pathname = `${base}/status`;
   else if (route.tab === 'calls') pathname = `${base}/calls`;
   else if (route.tab === 'communities') pathname = `${base}/contacts`;

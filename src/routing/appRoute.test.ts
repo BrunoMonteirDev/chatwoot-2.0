@@ -34,6 +34,45 @@ describe('app routes', () => {
     expect(route('/app/accounts/42/settings/caixas/not-an-inbox')).toEqual({ tab: 'chats' });
   });
 
+  it('maps every inbox creation step and preserves it across a fresh parse', () => {
+    const channel = route('/app/accounts/42/settings/caixas/new');
+    const whatsapp = route('/app/accounts/42/settings/caixas/new/whatsapp');
+    const waha = route('/app/accounts/42/settings/caixas/new/whatsapp?provider=waha');
+    const meta = route('/app/accounts/42/settings/caixas/new/whatsapp?provider=meta');
+    const hybrid = route('/app/accounts/42/settings/caixas/new/whatsapp?provider=hybrid');
+    const agents = route('/app/accounts/42/settings/caixas/new/731/agents');
+
+    expect(channel.inboxCreation).toEqual({ step: 'channel' });
+    expect(whatsapp.inboxCreation).toEqual({ step: 'whatsapp' });
+    expect(waha.inboxCreation).toEqual({ step: 'whatsapp', provider: 'waha' });
+    expect(meta.inboxCreation).toEqual({ step: 'whatsapp', provider: 'meta' });
+    expect(hybrid.inboxCreation).toEqual({ step: 'whatsapp', provider: 'hybrid' });
+    expect(agents.inboxCreation).toEqual({ step: 'agents', inboxId: '731' });
+    expect(urlForAppRoute(waha)).toBe('/app/accounts/42/settings/caixas/new/whatsapp?provider=waha');
+    expect(urlForAppRoute(agents)).toBe('/app/accounts/42/settings/caixas/new/731/agents');
+    for (const creationRoute of [channel, whatsapp, waha, meta, hybrid, agents]) {
+      expect(route(urlForAppRoute(creationRoute))).toEqual(creationRoute);
+    }
+  });
+
+  it('isolates wizard state by account and safely normalizes invalid creation routes', () => {
+    expect(route('/app/accounts/84/settings/caixas/new/whatsapp?provider=waha').accountId).toBe('84');
+    expect(route('/app/accounts/85/settings/caixas/new').inboxCreation).toEqual({ step: 'channel' });
+    expect(route('/app/accounts/84/settings/caixas/new/whatsapp?provider=unknown').inboxCreation).toEqual({ step: 'whatsapp' });
+    expect(route('/app/accounts/84/settings/caixas/new/not-an-inbox/agents').inboxCreation).toEqual({ step: 'channel' });
+  });
+
+  it('restores the correct wizard step from browser back and forward entries', () => {
+    const entries = [
+      '/app/accounts/42/settings/caixas/new',
+      '/app/accounts/42/settings/caixas/new/whatsapp',
+      '/app/accounts/42/settings/caixas/new/whatsapp?provider=waha',
+    ];
+    expect(route(entries[1]).inboxCreation).toEqual({ step: 'whatsapp' });
+    expect(route(entries[0]).inboxCreation).toEqual({ step: 'channel' });
+    expect(route(entries[2]).inboxCreation).toEqual({ step: 'whatsapp', provider: 'waha' });
+  });
+
   it('generates a stable canonical conversation link without inboxId', () => {
     expect(canonicalConversationPath(42, 698)).toBe('/app/accounts/42/conversations/698');
     expect(absoluteConversationUrl('https://kopla.example.test', 42, 698)).toBe('https://kopla.example.test/app/accounts/42/conversations/698');

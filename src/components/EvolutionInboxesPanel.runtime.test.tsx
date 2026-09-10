@@ -28,22 +28,20 @@ describe('WAHA inbox creation with runtime bridge configuration', () => {
     vi.spyOn(wahaClient, 'createSession').mockResolvedValue({ session });
     vi.spyOn(wahaClient, 'getQrCode').mockResolvedValue({ mimetype: 'image/png', data: 'c3ludGhldGljLXFy' });
     vi.spyOn(wahaClient, 'getCurrentHistoryImport').mockResolvedValue({ job: null, running: false });
-    const onOpenInbox = vi.fn(); const onRefresh = vi.fn();
+    const onOpenInbox = vi.fn(); const onRefresh = vi.fn(); const onNavigateInboxCreation = vi.fn();
     const element = document.createElement('div'); document.body.append(element); const root = createRoot(element);
-    const props = { accountId: 47, inboxes: [], inboxesStatus: 'ready' as const, inboxesError: null, onRefresh, isDarkMode: true, onOpenInbox };
+    const props = { accountId: 47, inboxes: [], inboxesStatus: 'ready' as const, inboxesError: null, onRefresh, isDarkMode: true, onOpenInbox, onNavigateInboxCreation };
 
-    await act(async () => { root.render(<EvolutionInboxesPanel {...props} />); });
-    await act(async () => { (Array.from(element.querySelectorAll('button')).find(button => button.textContent?.includes('Adicionar caixa')) as HTMLButtonElement).click(); });
-    await act(async () => { (Array.from(element.querySelectorAll('button')).find(button => button.textContent?.includes('API não oficial')) as HTMLButtonElement).click(); });
+    await act(async () => { root.render(<EvolutionInboxesPanel {...props} inboxCreationRoute={{ step: 'whatsapp', provider: 'waha' }} />); });
     const input = element.querySelector('input[placeholder="Ex.: WhatsApp Vendas"]') as HTMLInputElement;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Synthetic WAHA'); input.dispatchEvent(new Event('input', { bubbles: true })); });
-    await act(async () => { (Array.from(element.querySelectorAll('button')).find(button => button.textContent?.includes('Continuar para conectar WAHA')) as HTMLButtonElement).click(); });
+    await act(async () => { (Array.from(element.querySelectorAll('button')).find(button => button.textContent?.includes('Criar caixa e adicionar agentes')) as HTMLButtonElement).click(); });
 
     expect(inboxService.createWhatsAppApiInbox).toHaveBeenCalledWith(47, { name: 'Synthetic WAHA' });
-    expect(onOpenInbox).toHaveBeenCalledWith(701);
+    expect(onNavigateInboxCreation).toHaveBeenCalledWith({ step: 'agents', inboxId: '701' });
     expect(element.textContent).not.toContain('Configure antes de conectar');
 
-    await act(async () => { root.render(<EvolutionInboxesPanel {...props} inboxes={[created]} selectedInboxId={701} />); });
+    await act(async () => { root.render(<EvolutionInboxesPanel {...props} inboxes={[created]} selectedInboxId={701} inboxCreationRoute={null} />); });
     expect(element.textContent).toContain('Configurações da caixa de entrada');
     expect(element.textContent).toContain('WhatsApp não oficial');
     await act(async () => { (Array.from(element.querySelectorAll('button')).find(button => button.textContent === 'WhatsApp não oficial') as HTMLButtonElement).click(); });

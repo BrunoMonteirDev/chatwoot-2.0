@@ -11,6 +11,8 @@ import { WahaSetup } from './WahaSetup';
 import { hasWahaTransport, isNativeWhatsAppInbox, metaCloudMetadataForInbox, transportDisplayStatusesForInbox, transportStatusLabel, whatsappConfigurationForInbox } from '../integrations/whatsapp/provider';
 import { settingsInboxRouteState } from '../features/inboxes/settingsInboxRoute';
 import { bridgeChatwootWebhookUrl, bridgePublicUrl } from '../config/runtime';
+import type { InboxCreationRoute } from '../routing/appRoute';
+import { InboxCollaboratorsPanel } from './InboxCollaboratorsPanel';
 
 interface Props {
   accountId: number | null;
@@ -21,16 +23,18 @@ interface Props {
   onInboxDeleted?: (accountId: number, inboxId: number) => void;
   isDarkMode: boolean;
   selectedInboxId?: number | null;
+  inboxCreationRoute?: InboxCreationRoute | null;
   onOpenInbox?: (inboxId: number) => void;
+  onNavigateInboxCreation?: (route: InboxCreationRoute, replace?: boolean) => void;
   onCloseInbox?: () => void;
 }
 
-type Screen = 'list' | 'provider' | 'create' | 'configure' | 'adopt' | 'meta' | 'waha';
+type Screen = 'list' | 'configure' | 'adopt' | 'meta' | 'waha';
 const instanceOf = (inbox: Inbox) => evolutionMetadataForInbox(inbox)?.evolution_instance_name ?? null;
 const formatNumber = (number: string | null) => number ? `+${number}` : 'Número ainda não disponível';
 const instanceNameFor = (accountId: number, name: string) => `cw-${accountId}-${name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 36) || 'whatsapp'}-${Date.now()}`;
 
-export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inboxesStatus, inboxesError, onRefresh, onInboxDeleted, isDarkMode, selectedInboxId = null, onOpenInbox, onCloseInbox }) => {
+export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inboxesStatus, inboxesError, onRefresh, onInboxDeleted, isDarkMode, selectedInboxId = null, inboxCreationRoute = null, onOpenInbox, onNavigateInboxCreation, onCloseInbox }) => {
   const runtimeBridgeAvailable = Boolean(bridgePublicUrl());
   const chatwootWebhookUrl = bridgeChatwootWebhookUrl();
   const [screen, setScreen] = useState<Screen>('list');
@@ -51,13 +55,27 @@ export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inb
   const [deletingInbox, setDeletingInbox] = useState(false);
 
   useEffect(() => {
+    setName(''); setExistingInstanceName(''); setCreateInstanceForExistingInbox(false);
+    setError(null); setInboxPendingDeletion(null); setSelectedInbox(null); setScreen('list');
+  }, [accountId]);
+
+  useEffect(() => {
+    if (inboxCreationRoute) { setSelectedInbox(null); setScreen('list'); return; }
     const routeState = settingsInboxRouteState(selectedInboxId, inboxes, inboxesStatus);
     if (routeState === 'pending') { setSelectedInbox(null); setScreen('list'); return; }
     if (routeState === 'list') { setSelectedInbox(null); setScreen('list'); return; }
     const inbox = inboxes.find(item => item.id === selectedInboxId);
     if (!inbox) { setSelectedInbox(null); setScreen('list'); onCloseInbox?.(); return; }
     setSelectedInbox(inbox); setScreen(isNativeWhatsAppInbox(inbox) ? 'meta' : 'waha');
-  }, [inboxes, inboxesStatus, onCloseInbox, selectedInboxId]);
+  }, [inboxCreationRoute, inboxes, inboxesStatus, onCloseInbox, selectedInboxId]);
+
+  const creationInbox = inboxCreationRoute?.step === 'agents'
+    ? inboxes.find(inbox => String(inbox.id) === inboxCreationRoute.inboxId) || null
+    : null;
+  useEffect(() => {
+    if (inboxCreationRoute?.step !== 'agents' || inboxesStatus !== 'ready' || creationInbox) return;
+    onNavigateInboxCreation?.({ step: 'channel' }, true);
+  }, [creationInbox, inboxCreationRoute, inboxesStatus, onNavigateInboxCreation]);
 
   const selectedInstance = selectedInbox ? instanceOf(selectedInbox) : null;
   const selectedConfiguration = selectedInbox ? whatsappConfigurationForInbox(selectedInbox) : null;
@@ -111,7 +129,7 @@ export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inb
     setCreating(true); setError(null);
     try {
       const inbox = await inboxService.createWhatsAppApiInbox(accountId, { name: name.trim() });
-      await onRefresh(); onOpenInbox?.(inbox.id); setName('');
+      await onRefresh(); onNavigateInboxCreation?.({ step: 'agents', inboxId: String(inbox.id) }); setName('');
     } catch (cause) { setError(errorMessageForUser(cause)); }
     finally { setCreating(false); }
   };
@@ -156,15 +174,21 @@ export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inb
   const status = connection?.status ?? 'disconnected';
   const statusLabel: Record<EvolutionConnectionStatus, string> = { connected: 'Conectado', connecting: 'Conectando', disconnected: 'Desconectado', error: 'Erro' };
   const statusIcon = status === 'connected' ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />;
+  const closeWizard = () => {
+    if (inboxCreationRoute?.step === 'agents') { onCloseInbox?.(); return; }
+    if (inboxCreationRoute?.step === 'whatsapp' && inboxCreationRoute.provider) { onNavigateInboxCreation?.({ step: 'whatsapp' }); return; }
+    if (inboxCreationRoute?.step === 'whatsapp') { onNavigateInboxCreation?.({ step: 'channel' }); return; }
+    onCloseInbox?.();
+  };
 
   return <div className={`p-6 rounded-2xl border shadow-xl space-y-6 ${isDarkMode ? 'bg-[#111b21] border-[#222d34]' : 'bg-white border-[#d1d7db]'}`}>
     <div className="flex items-center justify-between border-b pb-4 border-white/10">
       <div><h3 className="text-lg font-bold">Caixas de Entrada</h3><p className="text-xs text-[#8696a0]">Cada inbox pode vincular API oficial, não oficial e coexistência.</p></div>
-      {screen !== 'list' && <button type="button" onClick={() => { setSelectedInbox(null); setScreen('list'); setError(null); onCloseInbox?.(); }} className="px-3 py-2 text-xs font-bold rounded-xl border border-[#00a884]/40 text-[#00a884] flex gap-1 items-center"><ChevronLeft className="w-4 h-4" /> Voltar à lista</button>}
+      {(inboxCreationRoute || screen !== 'list') && <button type="button" onClick={() => { setSelectedInbox(null); setScreen('list'); setError(null); if (inboxCreationRoute) closeWizard(); else onCloseInbox?.(); }} className="px-3 py-2 text-xs font-bold rounded-xl border border-[#00a884]/40 text-[#00a884] flex gap-1 items-center"><ChevronLeft className="w-4 h-4" /> {inboxCreationRoute ? 'Voltar' : 'Voltar à lista'}</button>}
     </div>
     {error && <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-500 flex gap-2"><AlertCircle className="w-4 h-4 shrink-0" />{error}</div>}
-    {screen === 'list' && <>
-      <div className="flex justify-end"><button type="button" disabled={!accountId} onClick={() => { setName(''); setError(null); setScreen('provider'); }} className="px-3.5 py-2 bg-[#00a884] hover:bg-[#008069] disabled:opacity-40 text-white text-xs font-bold rounded-xl flex items-center gap-1.5"><Plus className="w-4 h-4" />Adicionar caixa de entrada</button></div>
+    {!inboxCreationRoute && screen === 'list' && <>
+      <div className="flex justify-end"><button type="button" disabled={!accountId} onClick={() => { setName(''); setError(null); onNavigateInboxCreation?.({ step: 'channel' }); }} className="px-3.5 py-2 bg-[#00a884] hover:bg-[#008069] disabled:opacity-40 text-white text-xs font-bold rounded-xl flex items-center gap-1.5"><Plus className="w-4 h-4" />Adicionar caixa de entrada</button></div>
       {inboxesStatus === 'loading' && <div className="py-12 text-center text-xs text-[#8696a0]"><Loader2 className="w-5 h-5 animate-spin mx-auto mb-2" />Carregando caixas de entrada…</div>}
       {inboxesStatus === 'error' && <div className="py-10 text-center text-xs text-red-500">{inboxesError}<button type="button" onClick={() => void onRefresh()} className="block mx-auto mt-3 text-[#00a884] font-bold">Tentar novamente</button></div>}
       {inboxesStatus === 'ready' && !inboxes.length && <div className="py-12 text-center text-xs text-[#8696a0]">Nenhuma caixa de entrada configurada nesta conta.</div>}
@@ -179,12 +203,13 @@ export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inb
       })}</div>
       <p className="text-[11px] text-[#8696a0]">Outros canais permanecem indisponíveis neste MVP.</p>
     </>}
-    {screen === 'provider' && <div className="mx-auto grid max-w-3xl gap-4 md:grid-cols-2"><button type="button" onClick={() => setScreen('meta')} className={`rounded-2xl border p-5 text-left ${card}`}><p className="font-bold">Conectar API oficial Meta</p><p className="mt-2 text-xs text-[#8696a0]">{selectedInbox ? 'Vincula a API oficial a esta inbox. Você pode escolher coexistência durante o cadastro.' : 'Cria uma inbox com API oficial, por cadastro incorporado ou configuração manual.'}</p></button><button type="button" onClick={() => selectedInbox ? setScreen('waha') : setScreen('create')} className={`rounded-2xl border p-5 text-left ${card}`}><p className="font-bold">Conectar API não oficial</p><p className="mt-2 text-xs text-[#8696a0]">{selectedInbox ? 'Vincula uma sessão WAHA a esta mesma inbox por QR Code.' : 'Cria uma inbox e conecta uma sessão WAHA por QR Code.'} Evolution permanece disponível apenas para inboxes legadas.</p></button></div>}
-    {screen === 'meta' && accountId && <MetaCloudSetup accountId={accountId} inbox={selectedInbox} webhookUrl={chatwootWebhookUrl || ''} isDarkMode={isDarkMode} onSaved={async (saved) => { await onRefresh(); onOpenInbox?.(saved.id); }} />}
-    {screen === 'waha' && accountId && selectedInbox && <WahaSetup accountId={accountId} inbox={selectedInbox} webhookUrl={chatwootWebhookUrl || ''} isDarkMode={isDarkMode} onSaved={onRefresh} />}
-    {screen === 'create' && <div className="max-w-4xl mx-auto space-y-6">
+    {inboxCreationRoute?.step === 'channel' && <div className="mx-auto max-w-3xl"><button type="button" onClick={() => onNavigateInboxCreation?.({ step: 'whatsapp' })} className={`flex w-full items-start gap-4 rounded-2xl border p-5 text-left ${card}`}><span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#25d366] text-[#0b141a]"><MessageCircle className="w-6 h-6" /></span><span><span className="font-bold">WhatsApp</span><span className="mt-2 block text-xs text-[#8696a0]">Configure uma conexão oficial, não oficial ou coexistente.</span></span></button></div>}
+    {inboxCreationRoute?.step === 'whatsapp' && !inboxCreationRoute.provider && <div className="mx-auto grid max-w-3xl gap-4 md:grid-cols-3"><button type="button" onClick={() => onNavigateInboxCreation?.({ step: 'whatsapp', provider: 'waha' })} className={`rounded-2xl border p-5 text-left ${card}`}><p className="font-bold">WhatsApp não oficial</p><p className="mt-2 text-xs text-[#8696a0]">Cria uma inbox e conecta uma sessão WAHA por QR Code.</p></button><button type="button" onClick={() => onNavigateInboxCreation?.({ step: 'whatsapp', provider: 'meta' })} className={`rounded-2xl border p-5 text-left ${card}`}><p className="font-bold">WhatsApp oficial</p><p className="mt-2 text-xs text-[#8696a0]">Cria uma inbox nativa usando o cadastro incorporado da Meta.</p></button><button type="button" onClick={() => onNavigateInboxCreation?.({ step: 'whatsapp', provider: 'hybrid' })} className={`rounded-2xl border p-5 text-left ${card}`}><p className="font-bold">WhatsApp híbrido</p><p className="mt-2 text-xs text-[#8696a0]">Inicia pela conexão oficial com coexistência disponível no cadastro da Meta.</p></button></div>}
+    {!inboxCreationRoute && screen === 'meta' && accountId && <MetaCloudSetup accountId={accountId} inbox={selectedInbox} webhookUrl={chatwootWebhookUrl || ''} isDarkMode={isDarkMode} onSaved={async (saved) => { await onRefresh(); onOpenInbox?.(saved.id); }} />}
+    {!inboxCreationRoute && screen === 'waha' && accountId && selectedInbox && <WahaSetup accountId={accountId} inbox={selectedInbox} webhookUrl={chatwootWebhookUrl || ''} isDarkMode={isDarkMode} onSaved={onRefresh} />}
+    {inboxCreationRoute?.step === 'whatsapp' && inboxCreationRoute.provider === 'waha' && <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center gap-3 text-xs">
-        {[['1', 'Canal'], ['2', 'Configuração'], ['3', 'Conectar']].map(([step, label], index) => <React.Fragment key={step}><div className={`flex items-center gap-2 ${index === 0 ? 'text-[#00a884]' : 'text-[#8696a0]'}`}><span className={`w-6 h-6 rounded-full grid place-items-center font-bold ${index === 0 ? 'bg-[#00a884] text-[#0b141a]' : 'bg-[#2a3942]'}`}>{index === 0 ? <Check className="w-4 h-4" /> : step}</span>{label}</div>{index < 2 && <div className="h-px flex-1 bg-[#2a3942]" />}</React.Fragment>)}
+        {[['1', 'Canal'], ['2', 'Configuração'], ['3', 'Agentes']].map(([step, label], index) => <React.Fragment key={step}><div className={`flex items-center gap-2 ${index <= 1 ? 'text-[#00a884]' : 'text-[#8696a0]'}`}><span className={`w-6 h-6 rounded-full grid place-items-center font-bold ${index <= 1 ? 'bg-[#00a884] text-[#0b141a]' : 'bg-[#2a3942]'}`}>{index === 0 ? <Check className="w-4 h-4" /> : step}</span>{label}</div>{index < 2 && <div className="h-px flex-1 bg-[#2a3942]" />}</React.Fragment>)}
       </div>
       <div className="grid gap-5 lg:grid-cols-[1.1fr_.9fr]">
         <section className={`rounded-2xl border p-5 ${card}`}>
@@ -199,10 +224,12 @@ export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inb
           <p className="text-sm font-bold">Detalhes da caixa de entrada</p><p className="mt-1 text-xs text-[#8696a0]">Use um nome que sua equipe reconheça facilmente.</p>
           {!runtimeBridgeAvailable && <div className="mt-4 flex gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300"><AlertCircle className="h-4 w-4 shrink-0" />Não foi possível carregar a configuração runtime do bridge. Verifique <code>/bridge/config</code>.</div>}
           <label className="mt-5 block text-xs font-bold">Nome da caixa de entrada<input autoFocus value={name} onChange={event => setName(event.target.value)} placeholder="Ex.: WhatsApp Vendas" className={`mt-2 w-full px-3 py-3 rounded-xl border outline-none transition focus:border-[#00a884] ${isDarkMode ? 'bg-[#111b21] border-[#2a3942]' : 'bg-gray-50 border-gray-300'}`} /></label>
-          <button type="button" disabled={!name.trim() || creating || !runtimeBridgeAvailable} onClick={() => void create()} className="mt-5 w-full py-3 bg-[#00a884] hover:bg-[#008069] text-[#0b141a] rounded-xl text-xs font-bold disabled:opacity-40 flex justify-center gap-2">{creating && <Loader2 className="w-4 h-4 animate-spin" />}{creating ? 'Criando caixa…' : 'Continuar para conectar WAHA'}</button>
+          <button type="button" disabled={!name.trim() || creating || !runtimeBridgeAvailable} onClick={() => void create()} className="mt-5 w-full py-3 bg-[#00a884] hover:bg-[#008069] text-[#0b141a] rounded-xl text-xs font-bold disabled:opacity-40 flex justify-center gap-2">{creating && <Loader2 className="w-4 h-4 animate-spin" />}{creating ? 'Criando caixa…' : 'Criar caixa e adicionar agentes'}</button>
         </section>
       </div>
     </div>}
+    {inboxCreationRoute?.step === 'whatsapp' && (inboxCreationRoute.provider === 'meta' || inboxCreationRoute.provider === 'hybrid') && accountId && <MetaCloudSetup key={`creation-${accountId}-${inboxCreationRoute.provider}`} accountId={accountId} inbox={null} webhookUrl={chatwootWebhookUrl || ''} isDarkMode={isDarkMode} onSaved={async (saved) => { await onRefresh(); onNavigateInboxCreation?.({ step: 'agents', inboxId: String(saved.id) }); }} />}
+    {inboxCreationRoute?.step === 'agents' && accountId && creationInbox && <div className={`mx-auto max-w-3xl rounded-2xl border p-5 ${card}`}><div className="mb-5"><h4 className="font-bold">Adicionar agentes</h4><p className="mt-1 text-xs text-[#8696a0]">Defina quem poderá atender pela caixa “{creationInbox.name}”.</p></div><InboxCollaboratorsPanel accountId={accountId} inboxId={creationInbox.id} isDarkMode={isDarkMode} onSaved={() => onOpenInbox?.(creationInbox.id)} /><button type="button" onClick={() => onOpenInbox?.(creationInbox.id)} className="mt-4 w-full rounded-xl border border-[#00a884]/40 py-2.5 text-xs font-bold text-[#00a884]">Concluir sem alterar agentes</button></div>}
     {screen === 'adopt' && selectedInbox && <div className="max-w-lg mx-auto space-y-5"><div className={`p-4 rounded-xl border ${card}`}><p className="text-sm font-bold">Configurar {selectedInbox.name} como Evolution</p><p className="text-[11px] mt-1 text-[#8696a0]">A inbox atual será preservada. Apenas os metadados Evolution e o webhook do bridge serão configurados.</p></div>{!chatwootWebhookUrl && <p className="text-xs text-red-500">A configuração runtime do callback do bridge não está disponível.</p>}<label className="block text-xs font-bold">Nome da instância Evolution<input autoFocus value={existingInstanceName} onChange={event => setExistingInstanceName(event.target.value)} placeholder="Ex.: cw-suporte" className={`mt-2 w-full px-3 py-2.5 rounded-xl border outline-none ${isDarkMode ? 'bg-[#182228] border-[#2a3942]' : 'bg-gray-50 border-gray-300'}`} /></label><label className="flex gap-2 text-xs items-center cursor-pointer"><input type="checkbox" checked={createInstanceForExistingInbox} onChange={event => setCreateInstanceForExistingInbox(event.target.checked)} />Criar uma nova instância com esse nome</label><p className="text-[11px] text-[#8696a0]">Sem essa opção, o bridge valida uma instância Evolution já existente antes de salvar.</p><button type="button" disabled={!existingInstanceName.trim() || creating || !chatwootWebhookUrl} onClick={() => void configureExistingInbox()} className="w-full py-2.5 bg-[#00a884] text-white rounded-xl text-xs font-bold disabled:opacity-40 flex justify-center gap-2">{creating && <Loader2 className="w-4 h-4 animate-spin" />}{creating ? 'Configurando…' : 'Salvar e conectar Evolution'}</button></div>}
     {screen === 'configure' && selectedInbox && <div className="space-y-5"><div className={`p-4 rounded-xl border ${card}`}><div className="flex justify-between gap-3"><div><p className="font-bold text-sm">{selectedInbox.name}</p><p className="text-[11px] text-[#8696a0]">Instância Evolution: {selectedInstance}</p><p className="text-[11px] text-[#8696a0]">{formatNumber(connection?.number ?? null)}</p></div><span className={`h-fit px-2 py-1 rounded-full text-[11px] font-bold flex gap-1 items-center ${status === 'connected' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-amber-500/20 text-amber-500'}`}>{statusIcon}{statusLabel[status]}</span></div><div className="mt-4 flex gap-2"><button type="button" disabled={loadingConnection} onClick={() => void reconnect()} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#00a884] text-white flex gap-1">{loadingConnection ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}Conectar/reconectar</button><button type="button" disabled={loadingConnection || status !== 'connected'} onClick={() => void disconnect()} className="px-3 py-1.5 rounded-lg text-xs font-bold border border-red-500/40 text-red-500 flex gap-1"><Unplug className="w-3.5 h-3.5" />Desconectar</button></div></div>
       {!selectedConfiguration?.transports.includes('meta_cloud') && <div className={`p-4 rounded-xl border ${card}`}><p className="text-sm font-bold">API oficial Meta</p><p className="mt-1 text-[11px] text-[#8696a0]">Vincule a API oficial a esta inbox. Se este número usa WhatsApp Business, escolha coexistência no cadastro.</p><button type="button" onClick={() => setScreen('meta')} className="mt-3 rounded-lg bg-[#00a884] px-3 py-1.5 text-xs font-bold text-white">Conectar API oficial</button></div>}

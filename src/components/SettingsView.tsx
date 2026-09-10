@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import type { InboxCreationRoute } from '../routing/appRoute';
 import {
   X,
   User,
@@ -116,7 +117,9 @@ interface Props {
   onSaveProfile?: (profile: { name: string; displayName: string; email: string; phoneNumber: string; messageSignature: string; showSystemMessages: boolean; sendMessageShortcut: SendMessageShortcut; currentPassword?: string; password?: string; passwordConfirmation?: string }) => Promise<void>;
   onResetAccessToken?: () => Promise<void>;
   selectedInboxId?: number | null;
+  inboxCreationRoute?: InboxCreationRoute | null;
   onOpenInbox?: (inboxId: number) => void;
+  onNavigateInboxCreation?: (route: InboxCreationRoute, replace?: boolean) => void;
   onCloseInbox?: () => void;
   canManageDashboardApps?: boolean;
   canManageLabels?: boolean;
@@ -145,7 +148,9 @@ export const SettingsView: React.FC<Props> = ({
   onSaveProfile,
   onResetAccessToken,
   selectedInboxId = null,
+  inboxCreationRoute = null,
   onOpenInbox,
+  onNavigateInboxCreation,
   onCloseInbox,
   canManageDashboardApps = false,
   canManageLabels = false,
@@ -818,7 +823,7 @@ export const SettingsView: React.FC<Props> = ({
 
           {/* ==================== 4. CAIXAS DE ENTRADA ==================== */}
           {activeTab === 'caixas' && (
-            <EvolutionInboxesPanel accountId={accountId} inboxes={chatwootInboxes} inboxesStatus={inboxesStatus} inboxesError={inboxesError} onRefresh={onRefreshInboxes} onInboxDeleted={onInboxDeleted} isDarkMode={isDarkMode} selectedInboxId={selectedInboxId} onOpenInbox={onOpenInbox} onCloseInbox={onCloseInbox} />
+            <EvolutionInboxesPanel accountId={accountId} inboxes={chatwootInboxes} inboxesStatus={inboxesStatus} inboxesError={inboxesError} onRefresh={onRefreshInboxes} onInboxDeleted={onInboxDeleted} isDarkMode={isDarkMode} selectedInboxId={selectedInboxId} inboxCreationRoute={inboxCreationRoute} onOpenInbox={onOpenInbox} onNavigateInboxCreation={onNavigateInboxCreation} onCloseInbox={onCloseInbox} />
           )}
 
           {/* ==================== 5. ETIQUETAS ==================== */}
