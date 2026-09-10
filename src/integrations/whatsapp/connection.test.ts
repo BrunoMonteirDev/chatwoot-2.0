@@ -32,6 +32,28 @@ describe('operational WhatsApp connection', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('não converte status ausente em desconectado nem bloqueia por desconhecido', () => {
+    const inbox = { id: 8, name: 'WAHA', avatarUrl: null, channelType: 'Channel::Api', channelId: null, webhookUrl: null, inboxIdentifier: null, additionalAttributes: { whatsapp_transports: ['waha'], waha_session_name: 'main' } };
+    expect(persistedWhatsAppConnection(inbox, 'group')).toMatchObject({ status: 'unknown', sendAllowed: true });
+  });
+
+  it('não deixa snapshot desconectado antigo bloquear enquanto bootstrap central atualiza', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-09-10T12:10:00Z'));
+    const inbox = { id: 8, name: 'WAHA', avatarUrl: null, channelType: 'Channel::Api', channelId: null, webhookUrl: null, inboxIdentifier: null, additionalAttributes: { whatsapp_transports: ['waha'], waha_session_name: 'main', waha_connection_status: 'disconnected', waha_connection_updated_at: '2026-09-10T12:00:00Z' } };
+    expect(persistedWhatsAppConnection(inbox, 'group')).toMatchObject({ status: 'unknown', sendAllowed: true });
+    expect(persistedWhatsAppConnection({ ...inbox, additionalAttributes: { ...inbox.additionalAttributes, waha_connection_updated_at: '2026-09-10T12:09:30Z' } }, 'group')).toMatchObject({ status: 'disconnected', sendAllowed: false });
+  });
+
+  it('compartilha consulta central in-flight por conta, inbox e tipo', async () => {
+    let resolve!: (value: Response) => void;
+    vi.mocked(fetch).mockReturnValue(new Promise<Response>(next => { resolve = next; }));
+    const first = whatsappConnectionService.get(2, 9, 'group');
+    const second = whatsappConnectionService.get(2, 9, 'group');
+    resolve(new Response(JSON.stringify({ applicable: true, transport: 'waha', status: 'connected', sendAllowed: true }), { status: 200 }));
+    await expect(Promise.all([first, second])).resolves.toHaveLength(2);
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it('deduplica e reutiliza capability dentro do TTL', async () => {
     const get = vi.spyOn(chatwootApiClient, 'get').mockResolvedValue({ applicable: true, can_send_message: true } as never);
     await Promise.all([whatsappSendCapabilityService.get(2, 29), whatsappSendCapabilityService.get(2, 29)]);

@@ -6,7 +6,7 @@ export type WhatsAppTransport = typeof WHATSAPP_TRANSPORTS[number];
 export type WhatsAppProvider = WhatsAppTransport;
 export const WHATSAPP_MODES = ['official', 'web'] as const;
 export type WhatsAppMode = typeof WHATSAPP_MODES[number];
-export const WHATSAPP_TRANSPORT_STATUSES = ['connected', 'disconnected', 'pending'] as const;
+export const WHATSAPP_TRANSPORT_STATUSES = ['connected', 'connecting', 'disconnected', 'error', 'pending', 'unknown'] as const;
 export type WhatsAppTransportStatus = typeof WHATSAPP_TRANSPORT_STATUSES[number];
 export type WhatsAppTransportDisplayStatus = WhatsAppTransportStatus | 'reauthorization_required' | 'error';
 
@@ -73,13 +73,13 @@ export const transportStatusesForInbox = (inbox: Inbox): Partial<Record<WhatsApp
   const status = (transport: WhatsAppTransport, fallback: WhatsAppTransportStatus) => {
     const key = transport === 'meta_cloud' ? 'meta_connection_status' : `${transport}_connection_status`;
     const value = inbox.additionalAttributes[key];
-    return value === 'connected' || value === 'disconnected' || value === 'pending' ? value : fallback;
+    return WHATSAPP_TRANSPORT_STATUSES.includes(value as WhatsAppTransportStatus) ? value as WhatsAppTransportStatus : fallback;
   };
   return Object.fromEntries(configuration.transports.map(transport => [transport, status(transport, transport === 'meta_cloud' ? 'connected' : 'pending')])) as Partial<Record<WhatsAppTransport, WhatsAppTransportStatus>>;
 };
 
 export const transportDisplayStatusesForInbox = (inbox: Inbox): Partial<Record<WhatsAppTransport, WhatsAppTransportDisplayStatus>> => {
-  const statuses = transportStatusesForInbox(inbox);
+  const statuses: Partial<Record<WhatsAppTransport, WhatsAppTransportDisplayStatus>> = { ...transportStatusesForInbox(inbox) };
   if (statuses.meta_cloud && inbox.reauthorizationRequired) statuses.meta_cloud = 'reauthorization_required';
   return statuses;
 };

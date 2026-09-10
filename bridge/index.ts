@@ -29,10 +29,10 @@ import { retryPendingWahaCleanup } from './wahaPendingCleanup.js';
 import { normalizeWahaMessageId, parseIncomingWahaGroupLifecycle, parseIncomingWahaMessage, parseIncomingWahaMutation, parseIncomingWahaReaction, parseWahaHistoryMessage, parseWahaWebhook, wahaGroupSourceId, type IncomingWahaMessage } from './wahaEvent.js';
 import { createTrackId } from './track.js';
 import { WahaHistoryStore, type WahaHistoryJob, type WahaHistoryRange } from './wahaHistoryStore.js';
-import { connectionStatusPatch, evolutionConnectionStatus, metaConnectionStatus, type ConnectionStatus } from './connectionStatus.js';
+import { ConnectionStatusOrder, connectionStatusPatch, evolutionConnectionStatus, metaConnectionStatus, type ConnectionStatus } from './connectionStatus.js';
 import { groupMetadataCache, mergeParticipantHistory, persistedGroupMetadata, selectPersistedParticipantIdentities, type GroupMetadata } from './groupMetadata.js';
 import { bestEffortContactProfile, contactProfileSyncPlan } from './contactProfile.js';
-import { linkGroupParticipantContacts, resolveGroupParticipantIdentity } from './groupParticipantIdentity.js';
+import { incomingGroupParticipantInput, linkGroupParticipantContacts, resolveGroupParticipantIdentity } from './groupParticipantIdentity.js';
 import { GroupCreationStore, type StoredGroupCreation } from './groupCreationStore.js';
 
 const app = express();
@@ -48,6 +48,7 @@ const groupCreations = new GroupCreationStore(config.groupCreationFile);
 const historyImports = new Map<number, Promise<void>>();
 const wahaHistoryImports = new Map<number, Promise<void>>();
 const staleGroups = new Set<string>();
+const connectionStatusOrder = new ConnectionStatusOrder();
 const groupScopeKey = (accountId: number, inboxId: number, groupJid: string) => `${accountId}:${inboxId}:${groupJid}`;
 
 const syncGroupParticipantContact = async (
@@ -68,6 +69,34 @@ const syncGroupParticipantContact = async (
   if (transport === 'waha') await chatwootBridge.saveWahaIdentity(contact.id, identity.phone, identity.lid);
   else await chatwootBridge.saveEvolutionIdentity(contact.id, identity.phone, identity.lid);
   return { ...identity, contactId: contact.id, displayName: contact.name || identity.displayName, avatarUrl: contact.avatarUrl || identity.avatarUrl };
+};
+const syncIncomingGroupParticipantContact = async (
+  inbox: { id: number },
+  groupContactId: number | undefined,
+  input: Record<string, unknown>,
+  transport: 'waha' | 'evolution',
+) => {
+  const direct = await syncGroupParticipantContact(inbox, input, transport);
+  if (direct || !groupContactId) return direct;
+  const identity = resolveGroupParticipantIdentity(input);
+  const aliases = [identity.providerId, identity.lid, identity.phoneJid, identity.phone].filter((value): value is string => Boolean(value));
+  if (!aliases.length) return null;
+  const attributes = await chatwootBridge.groupContactAttributes(groupContactId).catch(() => null);
+  if (!attributes) return null;
+  const selected = selectPersistedParticipantIdentities(
+    Array.isArray(attributes.whatsapp_group_participants) ? attributes.whatsapp_group_participants : [],
+    Array.isArray(attributes.whatsapp_group_participant_history) ? attributes.whatsapp_group_participant_history : [],
+    [{ aliases }],
+  )[0];
+  if (!selected) return null;
+  return syncGroupParticipantContact(inbox, {
+    ...input,
+    participantAlt: selected.phoneJid || selected.phoneNumber || selected.jid,
+    phone: selected.phoneNumber,
+    contactId: selected.contactId,
+    name: selected.displayName || selected.name,
+    avatarUrl: selected.avatarUrl,
+  }, transport);
 };
 const syncGroupParticipants = (inbox: { id: number }, participants: GroupMetadata['participants'], transport: 'waha' | 'evolution') => linkGroupParticipantContacts(participants, input => syncGroupParticipantContact(inbox, input, transport).catch(error => {
     console.warn('[groups] participant contact sync failed', { inboxId: inbox.id, jid: input.participant, error: error instanceof Error ? error.message : 'unknown' });
@@ -647,8 +676,10 @@ app.post('/groups/leave', async (request, response) => {
     return response.status(204).end();
   } catch (error) { const message = error instanceof Error ? error.message : 'Não foi possível sair do grupo.'; return response.status(/\b(401|403)\b|admin|permission|not authorized/i.test(message) ? 403 : 502).json({ error: message }); }
 });
-const saveConnectionStatus = (accountId: number, inboxId: number, transport: 'evolution' | 'waha' | 'meta_cloud', status: ConnectionStatus) =>
-  chatwootBridge.withAccount(accountId, () => chatwootBridge.updateInboxAdditionalAttributes(inboxId, connectionStatusPatch(transport, status)));
+const saveConnectionStatus = (accountId: number, inboxId: number, transport: 'evolution' | 'waha' | 'meta_cloud', status: ConnectionStatus, observedAt: string | number | Date = Date.now()) => {
+  if (!connectionStatusOrder.accept(`${accountId}:${inboxId}:${transport}`, observedAt)) return Promise.resolve(false);
+  return chatwootBridge.withAccount(accountId, () => chatwootBridge.updateInboxAdditionalAttributes(inboxId, connectionStatusPatch(transport, status, observedAt))).then(() => true);
+};
 
 // A provider quote ID is not a Chatwoot message ID. Resolve it before message
 // creation so Chatwoot persists its native `in_reply_to` relation and the UI
@@ -901,7 +932,7 @@ app.get('/providers/whatsapp/inboxes/:inboxId/connection', async (request, respo
       if (!configuration.evolutionInstanceName) status = 'disconnected';
       else {
         try { status = evolutionConnectionStatus(await evolutionBridge.getConnection(configuration.evolutionInstanceName)); }
-        catch { status = 'error'; }
+        catch { status = 'unknown'; }
       }
     } else if (transport === 'waha') {
       if (!configuration.wahaSessionName) status = 'disconnected';
@@ -910,16 +941,17 @@ app.get('/providers/whatsapp/inboxes/:inboxId/connection', async (request, respo
           const session = await wahaTransport.getSession(configuration.wahaSessionName);
           status = session.connectionStatus;
           await wahaSessions.update(configuration.wahaSessionName, { status: session.status, engine: session.engine, phone: session.me?.id });
-        } catch { status = 'error'; }
+        } catch { status = 'unknown'; }
       }
     } else {
       status = metaConnectionStatus(inbox.additionalAttributes.meta_connection_status, Boolean(await metaConfigs.get(inboxId)));
     }
-    await saveConnectionStatus(accountId, inboxId, transport, status).catch(error => console.warn('[connection] could not persist provider status', { accountId, inboxId, transport, error: error instanceof Error ? error.message : 'unknown' }));
-    return response.json({ applicable: true, transport, status, sendAllowed: status === 'connected' });
+    const observedAt = new Date().toISOString();
+    await saveConnectionStatus(accountId, inboxId, transport, status, observedAt).catch(error => console.warn('[connection] could not persist provider status', { accountId, inboxId, transport, error: error instanceof Error ? error.message : 'unknown' }));
+    return response.json({ applicable: true, transport, status, observedAt, sendAllowed: status === 'connected' || status === 'unknown' || status === 'pending' });
   } catch (error) {
     console.warn('[connection] provider status unavailable', { accountId, inboxId, error: error instanceof Error ? error.message : 'unknown' });
-    return response.json({ applicable: true, status: 'error', sendAllowed: false });
+    return response.json({ applicable: true, status: 'unknown', sendAllowed: true });
   }
 });
 // Controlled one-time adoption for inboxes configured before ownership storage
@@ -1776,7 +1808,7 @@ const deliverOfficialHybridWahaInbound = async (message: IncomingWahaMessage) =>
   const ownership = await wahaSessions.get(message.session);
   if (!ownership || ownership.status === 'cleanup_pending') return { handled: false };
   const participantContact = !message.fromMe && message.chatType === 'group'
-    ? await chatwootBridge.withAccount(ownership.accountId, () => syncGroupParticipantContact({ id: ownership.inboxId }, { participant: message.participantJid, pushName: message.participantName, avatarUrl: message.avatarUrl }, 'waha')).catch(() => null)
+    ? await chatwootBridge.withAccount(ownership.accountId, () => syncGroupParticipantContact({ id: ownership.inboxId }, incomingGroupParticipantInput(message), 'waha')).catch(() => null)
     : null;
   const body = JSON.stringify({
     account_id: ownership.accountId, inbox_id: ownership.inboxId, waha_session: message.session,
@@ -1980,7 +2012,7 @@ app.post('/webhooks/waha', (request, response) => {
         const rawStatus = String(data.status || data.state || '').toUpperCase();
         const status: ConnectionStatus = rawStatus === 'WORKING' ? 'connected' : rawStatus === 'STARTING' || rawStatus === 'SCAN_QR_CODE' ? 'connecting' : rawStatus === 'STOPPED' ? 'disconnected' : 'error';
         await wahaSessions.update(event.session, { status: rawStatus || 'FAILED' });
-        await saveConnectionStatus(inbox.accountId, inbox.id, 'waha', status);
+        await saveConnectionStatus(inbox.accountId, inbox.id, 'waha', status, event.timestamp);
       } catch (error) { console.warn('[waha] session status ignored', { session: event.session, error: error instanceof Error ? error.message : 'unknown' }); }
       return;
     }
@@ -2071,7 +2103,7 @@ app.post('/webhooks/waha', (request, response) => {
           let participantContact = null;
           if (message.chatType === 'group') {
             await chatwootBridge.saveEvolutionGroup(contact.id, message.remoteJid, message.name);
-            participantContact = await syncGroupParticipantContact(inbox, { participant: message.participantJid, pushName: message.participantName, avatarUrl: message.avatarUrl }, 'waha');
+            participantContact = await syncIncomingGroupParticipantContact(inbox, contact.id, incomingGroupParticipantInput(message), 'waha');
           }
           // The public API message endpoint does not infer a Chatwoot internal
           // reply id from provider metadata reliably. Resolve the namespaced

@@ -78,20 +78,22 @@ describe('dashboard app launchers', () => {
     await act(async () => { accountB.resolve([app(404)]); await accountB.promise; });
   });
 
-  it('keeps the latest same-account reload when concurrent requests resolve out of order', async () => {
+  it('compartilha reloads concorrentes da mesma conta', async () => {
     const first = deferred<ReturnType<typeof app>[]>();
-    const second = deferred<ReturnType<typeof app>[]>();
     let reload: (() => Promise<void>) | undefined;
-    vi.mocked(dashboardApps.list)
-      .mockReturnValueOnce(first.promise)
-      .mockReturnValueOnce(second.promise);
+    vi.mocked(dashboardApps.list).mockReturnValueOnce(first.promise);
 
     await act(async () => { root.render(React.createElement(DashboardAppsProbe, { accountId: 505, onReload: (next) => { reload = next; } })); });
     act(() => { void reload?.(); });
-    await act(async () => { second.resolve([app(502)]); await second.promise; });
-    expect(container.textContent).toBe('App 502');
-
     await act(async () => { first.resolve([app(501)]); await first.promise; });
-    expect(container.textContent).toBe('App 502');
+    expect(container.textContent).toBe('App 501');
+    expect(dashboardApps.list).toHaveBeenCalledOnce();
+  });
+
+  it('não recarrega apps em rerender nem em focus da mesma sessão/conta', async () => {
+    vi.mocked(dashboardApps.list).mockResolvedValue([app(606)]);
+    await act(async () => { root.render(React.createElement(DashboardAppsProbe, { accountId: 606 })); });
+    await act(async () => { root.render(React.createElement(DashboardAppsProbe, { accountId: 606 })); window.dispatchEvent(new Event('focus')); });
+    expect(dashboardApps.list).toHaveBeenCalledOnce();
   });
 });

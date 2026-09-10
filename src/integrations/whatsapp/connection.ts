@@ -1,13 +1,14 @@
 import { authenticatedBridgeHeaders } from '../bridge/auth';
 import { chatwootApiClient } from '../chatwoot/client';
 import type { Inbox } from '../../domain/currentUser';
-import { transportStatusesForInbox, whatsappConfigurationForInbox } from './provider';
+import { WHATSAPP_TRANSPORT_STATUSES, whatsappConfigurationForInbox } from './provider';
 
 export type OperationalWhatsAppConnection = {
   applicable: boolean;
   sendAllowed: boolean;
   transport?: 'evolution' | 'waha' | 'meta_cloud' | null;
-  status?: 'connected' | 'connecting' | 'disconnected' | 'error' | 'pending';
+  status?: 'connected' | 'connecting' | 'disconnected' | 'error' | 'pending' | 'unknown';
+  observedAt?: string;
 };
 
 export type WhatsAppSendCapability = {
@@ -20,6 +21,8 @@ export type WhatsAppSendCapability = {
   required_transport: 'waha' | 'meta_cloud' | null;
   connection_state: string;
 };
+
+export const WHATSAPP_CONNECTION_STALE_MS = 2 * 60_000;
 
 // Private notes are Chatwoot-only and must remain available even when the
 // selected WhatsApp transport is offline.
@@ -41,22 +44,37 @@ export const persistedWhatsAppConnection = (inbox: Inbox, chatType: 'private' | 
     ? (configuration.transports.includes('meta_cloud') ? 'meta_cloud' : configuration.transports[0])
     : configuration.transports.find(item => item !== 'meta_cloud');
   if (!transport) return { applicable: true, transport: null, status: 'disconnected', sendAllowed: false };
-  const status = transportStatusesForInbox(inbox)[transport] || 'pending';
-  return { applicable: true, transport, status, sendAllowed: status === 'connected' };
+  const statusKey = transport === 'meta_cloud' ? 'meta_connection_status' : `${transport}_connection_status`;
+  const rawStatus = inbox.additionalAttributes[statusKey];
+  let status = WHATSAPP_TRANSPORT_STATUSES.includes(rawStatus as typeof WHATSAPP_TRANSPORT_STATUSES[number])
+    ? rawStatus as typeof WHATSAPP_TRANSPORT_STATUSES[number] : 'unknown';
+  const observedAt = Date.parse(String(inbox.additionalAttributes[`${transport}_connection_updated_at`] || ''));
+  if ((status === 'disconnected' || status === 'error') && Number.isFinite(observedAt) && Date.now() - observedAt > WHATSAPP_CONNECTION_STALE_MS) status = 'unknown';
+  return { applicable: true, transport, status, sendAllowed: status === 'connected' || status === 'unknown' || status === 'pending' };
 };
 
 const bridgeUrl = () => (import.meta.env.VITE_BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
 
 export const whatsappConnectionService = {
-  async get(accountId: number, inboxId: number, chatType: 'private' | 'group' = 'private'): Promise<OperationalWhatsAppConnection> {
+  get(accountId: number, inboxId: number, chatType: 'private' | 'group' = 'private'): Promise<OperationalWhatsAppConnection> {
+    const key = `${accountId}:${inboxId}:${chatType}`;
+    const existing = connectionRequests.get(key);
+    if (existing) return existing;
     const url = bridgeUrl();
-    if (!url) return { applicable: false, sendAllowed: true };
+    if (!url) return Promise.resolve({ applicable: false, sendAllowed: true });
     const query = new URLSearchParams({ accountId: String(accountId), chatType });
-    const response = await fetch(`${url}/providers/whatsapp/inboxes/${inboxId}/connection?${query}`, { headers: authenticatedBridgeHeaders() });
-    if (!response.ok) throw new Error('Não foi possível verificar a conexão do WhatsApp.');
-    return response.json() as Promise<OperationalWhatsAppConnection>;
+    const pending = fetch(`${url}/providers/whatsapp/inboxes/${inboxId}/connection?${query}`, { headers: authenticatedBridgeHeaders() })
+      .then(response => {
+        if (!response.ok) throw new Error('Não foi possível verificar a conexão do WhatsApp.');
+        return response.json() as Promise<OperationalWhatsAppConnection>;
+      })
+      .finally(() => connectionRequests.delete(key));
+    connectionRequests.set(key, pending);
+    return pending;
   },
 };
+
+const connectionRequests = new Map<string, Promise<OperationalWhatsAppConnection>>();
 
 const capabilityCache = new Map<string, { value: WhatsAppSendCapability; expiresAt: number }>();
 const capabilityRequests = new Map<string, Promise<WhatsAppSendCapability>>();

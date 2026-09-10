@@ -54,6 +54,7 @@ const realtimeResolvedParticipant = {
   jid: '456@lid', lid: '456', phoneJid: '5511988888888@c.us', phoneNumber: '+5511988888888',
   displayName: 'João Souza', avatarUrl: 'https://example.test/joao.jpg', contactId: 92,
 };
+const retryIncompleteMessage = { ...incompleteGroupMessage, id: 7003, sourceId: 'waha:RETRY' };
 
 let container: HTMLDivElement;
 let root: Root;
@@ -68,6 +69,7 @@ const Harness = () => {
     <output data-testid="realtime-sender">{realtimeSender ? JSON.stringify({ id: realtimeSender.senderId, name: realtimeSender.senderName, phone: realtimeSender.senderPhoneNumber, avatar: realtimeSender.senderAvatarUrl }) : ''}</output>
     <button type="button" onClick={() => history.enrichParticipants([resolvedParticipant])}>Abrir Dados do grupo</button>
     <button type="button" onClick={() => history.upsertRealtimeMessage(realtimeIncompleteMessage)}>Receber realtime</button>
+    <button type="button" onClick={() => history.upsertRealtimeMessage(retryIncompleteMessage)}>Tentar alias novamente</button>
   </>;
 };
 
@@ -134,5 +136,22 @@ describe('group participant identity bootstrap', () => {
     expect(fetch).toHaveBeenCalledOnce();
     const request = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
     expect(request.identifiers).toEqual([{ contactId: 800, aliases: ['456@lid'] }]);
+  });
+
+  it('não mantém cache negativo infinito quando o alias passa a existir depois', async () => {
+    await act(async () => { root.render(<Harness />); await new Promise(resolve => window.setTimeout(resolve, 10)); });
+    expect(fetch).toHaveBeenCalledOnce();
+    backgroundParticipants = [resolvedParticipant];
+    const retry = [...container.querySelectorAll('button')].find(button => button.textContent === 'Tentar alias novamente')!;
+    await act(async () => { retry.click(); await new Promise(resolve => window.setTimeout(resolve, 10)); });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[data-testid="sender"]')?.textContent).toContain('Maria Silva');
+  });
+
+  it('rerender não dispara outro /messages e hydration não refaz histórico', async () => {
+    backgroundParticipants = [resolvedParticipant];
+    await act(async () => { root.render(<Harness />); await new Promise(resolve => window.setTimeout(resolve, 10)); });
+    await act(async () => { root.render(<Harness />); await new Promise(resolve => window.setTimeout(resolve, 1)); });
+    expect(messageService.list).toHaveBeenCalledOnce();
   });
 });

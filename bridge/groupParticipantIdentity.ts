@@ -10,6 +10,13 @@ export type GroupParticipantIdentity = {
 
 export type ParticipantScope = { accountId: number; inboxId: number; session: string };
 
+export const incomingGroupParticipantInput = (message: { participantJid?: string; participantPhone?: string; participantName?: string; participantAvatarUrl?: string }) => ({
+  participant: message.participantJid,
+  phone: message.participantPhone,
+  pushName: message.participantName,
+  avatarUrl: message.participantAvatarUrl,
+});
+
 const phoneFromJid = (jid?: string) => jid?.match(/^(\d{8,15})@(c\.us|s\.whatsapp\.net)$/)?.[1];
 export const resolveGroupParticipantIdentity = (input: Record<string, unknown>): GroupParticipantIdentity => {
   const providerId = String(input.participantAlt || input.senderAlt || input.participant || input.sender || input.from || 'unknown');

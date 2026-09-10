@@ -26,4 +26,8 @@ describe('composer capability notice', () => {
     expect(composerNotice(capability('waha_missing'), null, false)).toMatchObject({ action: 'manager' });
     expect(composerNotice(capability('waha_disconnected'), null, false)?.description).toContain('WAHA');
   });
+  it('não bloqueia nem mostra desconexão quando o estado local é desconhecido', () => {
+    expect(composerNotice(null, { applicable: true, transport: 'waha', status: 'unknown', sendAllowed: true }, false)).toBeNull();
+    expect(composerNotice(null, { applicable: true, transport: 'waha', status: 'disconnected', sendAllowed: false }, false)).toMatchObject({ title: 'WhatsApp desconectado' });
+  });
 });

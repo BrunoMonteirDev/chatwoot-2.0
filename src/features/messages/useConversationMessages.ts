@@ -162,7 +162,10 @@ export const useConversationMessages = (accountId: number | null, conversationId
     if (status !== 'ready' || renderedConversationKeyRef.current !== activeKey || !accountId || !conversationId || !inboxId) return;
     const queries = visibleGroupParticipantIdentityQueries(messages);
     const pending = queries.filter(query => {
-      const key = `${activeKey}:${query.contactId || ''}:${query.aliases.slice().sort().join('|')}`;
+      // A miss is scoped to the current message snapshot. A later realtime
+      // message changes the key and retries the persisted resolver, without a
+      // timer or permanent negative cache.
+      const key = `${activeKey}:${messages.length}:${query.contactId || ''}:${query.aliases.slice().sort().join('|')}`;
       if (participantEnrichmentRef.current.has(key)) return false;
       participantEnrichmentRef.current.add(key);
       return true;

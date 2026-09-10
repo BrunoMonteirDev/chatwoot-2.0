@@ -22,6 +22,10 @@ export const composerNotice = (
     if (reason === 'waha_missing') return { title: 'WhatsApp desconectado', description: 'Configure uma sessão WAHA para voltar a enviar mensagens.', action: 'manager' };
     return { title: reason === 'waha_disconnected' ? 'WhatsApp desconectado' : 'Envio por WhatsApp indisponível', description: reason === 'waha_disconnected' ? 'O envio por WAHA está indisponível porque a sessão está desconectada.' : 'Reconecte a sessão para voltar a enviar mensagens.', action: 'manager' };
   }
-  if (legacy?.applicable && !legacy.sendAllowed) return { title: 'WhatsApp desconectado', description: 'Reconecte a sessão para voltar a enviar mensagens.', action: 'manager' };
+  if (legacy?.applicable && !legacy.sendAllowed) {
+    if (legacy.status === 'connecting') return { title: 'WhatsApp conectando', description: 'A sessão ainda está iniciando.', action: 'manager' };
+    if (legacy.status === 'error') return { title: 'WhatsApp indisponível', description: 'A sessão reportou uma falha operacional.', action: 'manager' };
+    return { title: 'WhatsApp desconectado', description: 'Reconecte a sessão para voltar a enviar mensagens.', action: 'manager' };
+  }
   return null;
 };

@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { GroupParticipantIdentityCache, linkGroupParticipantContacts, resolveGroupParticipantIdentity } from './groupParticipantIdentity';
+import { GroupParticipantIdentityCache, incomingGroupParticipantInput, linkGroupParticipantContacts, resolveGroupParticipantIdentity } from './groupParticipantIdentity';
 
 describe('group participant identity', () => {
+  it('preserva o telefone alternativo extraído junto do LID no fluxo realtime', () => {
+    expect(resolveGroupParticipantIdentity(incomingGroupParticipantInput({
+      participantJid: '19696904601705@lid', participantPhone: '+554497755329', participantName: 'Ana', participantAvatarUrl: 'https://avatar',
+    }))).toMatchObject({ providerId: '19696904601705@lid', lid: '19696904601705', phone: '+554497755329', displayName: 'Ana', avatarUrl: 'https://avatar' });
+  });
   it('vincula os cinco membros do primeiro sync a Contacts reais', async () => {
     const link = vi.fn().mockImplementation(async input => ({ providerId: input.participant, phone: input.phone, contactId: Number(String(input.phone).slice(-1)) }));
     const participants = Array.from({ length: 5 }, (_, index) => ({ jid: `${index}@lid`, lid: `${index}`, phoneNumber: `+554499999999${index}`, name: `Membro ${index}` }));

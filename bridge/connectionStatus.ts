@@ -1,9 +1,25 @@
-export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error' | 'pending';
+export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error' | 'pending' | 'unknown';
 
-export const connectionStatusPatch = (transport: 'evolution' | 'waha' | 'meta_cloud', status: ConnectionStatus) => ({
-  [`${transport}_connection_status`]: status,
-  [`${transport}_connection_updated_at`]: new Date().toISOString(),
-});
+export class ConnectionStatusOrder {
+  private readonly observed = new Map<string, number>();
+
+  accept(scope: string, observedAt: string | number | Date = Date.now()) {
+    const timestamp = observedAt instanceof Date ? observedAt.getTime() : typeof observedAt === 'number' ? observedAt : Date.parse(observedAt);
+    const normalized = Number.isFinite(timestamp) ? timestamp : Date.now();
+    const previous = this.observed.get(scope);
+    if (previous !== undefined && normalized < previous) return false;
+    this.observed.set(scope, normalized);
+    return true;
+  }
+}
+
+export const connectionStatusPatch = (transport: 'evolution' | 'waha' | 'meta_cloud', status: ConnectionStatus, observedAt: string | number | Date = Date.now()) => {
+  const timestamp = new Date(observedAt);
+  return {
+    [`${transport}_connection_status`]: status,
+    [`${transport}_connection_updated_at`]: Number.isFinite(timestamp.getTime()) ? timestamp.toISOString() : new Date().toISOString(),
+  };
+};
 
 export const evolutionConnectionStatus = (payload: unknown): ConnectionStatus => {
   const root = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};

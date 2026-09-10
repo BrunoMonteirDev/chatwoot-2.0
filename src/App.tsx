@@ -50,7 +50,7 @@ import { conversationForActiveRoute } from './features/conversations/directConve
 import { contactForConversation, conversationVisualKey, isCurrentHeaderResponse, messagesForConversation } from './features/conversations/conversationVisualState';
 import { cacheRealtimeMessage, useConversationMessages } from './features/messages/useConversationMessages';
 import { composerNotice } from './features/messages/composerCapability';
-import { messageHistoryCache, messageHistoryPrefetcher } from './features/messages/MessageHistoryCache';
+import { messageHistoryCache } from './features/messages/MessageHistoryCache';
 import { conversationOpeningMetrics } from './features/messages/conversationOpeningMetrics';
 import { showSystemMessagesFrom, uiSettingsWithSystemMessageVisibility, visibleConversationMessages } from './features/messages/systemMessageVisibility';
 import { sendMessageShortcutFrom, uiSettingsWithSendMessageShortcut } from './features/messages/sendMessageShortcut';
@@ -602,13 +602,6 @@ export default function App() {
     },
     onInbox: (inbox) => {
       upsertRealtimeInbox(inbox);
-      if (selectedConversation?.inboxId !== inbox.id) return;
-      setWhatsappConnection((current) => {
-        if (!current?.applicable || !current.transport) return current;
-        const value = inbox.additionalAttributes[`${current.transport}_connection_status`];
-        const status = value === 'connected' || value === 'connecting' || value === 'disconnected' || value === 'error' || value === 'pending' ? value : current.status;
-        return { ...current, status, sendAllowed: status === 'connected' };
-      });
     },
   }), [applyConversationUpdate, applyRealtimeMessage, contactDetails.applyRealtimeUpdate, contactDirectory, currentAccount, messageHistory.retry, messageHistory.upsertRealtimeMessage, navigate, refreshRecentConversations, removeConversation, selectedConversation?.contactId, selectedConversation?.inboxId, selectedConversationId, selectedInbox, upsertRealtimeConversation, upsertRealtimeInbox]);
   const { connectionStatus: realtimeConnectionStatus, typing } = useChatwootRealtime(authenticatedUser, currentAccount, selectedConversationId, realtimeHandlers);
@@ -617,7 +610,7 @@ export default function App() {
     // ActionCable is authoritative while connected. Poll only while it is
     // reconnecting/disconnected, avoiding redundant history requests.
     if (!selectedConversationId || realtimeConnectionStatus === 'connected') return;
-    const interval = window.setInterval(() => { void messageHistory.refreshLatest(); }, 3_000);
+    const interval = window.setInterval(() => { void messageHistory.refreshLatest(); }, 30_000);
     return () => window.clearInterval(interval);
   }, [messageHistory.refreshLatest, realtimeConnectionStatus, selectedConversationId]);
 
@@ -845,19 +838,6 @@ export default function App() {
       return 0;
     });
   }, [listChats, searchQuery, selectedInbox, activeFilter, selectedStatus, filterRules, selectedSort, authenticatedUser]);
-
-  const prefetchConversation = useCallback((chat: Chat) => {
-    if (!currentAccount) return;
-    const conversationId = Number(chat.id);
-    if (!Number.isInteger(conversationId) || conversationId < 1 || messageHistoryCache.get(currentAccount.id, conversationId)?.isFresh || messageHistoryCache.isLoading(currentAccount.id, conversationId)) return;
-    const key = messageHistoryCache.key(currentAccount.id, conversationId);
-    messageHistoryPrefetcher.enqueue(key, async () => {
-      const cached = messageHistoryCache.get(currentAccount.id, conversationId) || await messageHistoryCache.hydrate(currentAccount.id, conversationId);
-      if (cached?.isFresh) return;
-      const page = await messageHistoryCache.request(currentAccount.id, conversationId, (signal) => messageService.list({ accountId: currentAccount.id, conversationId, signal }));
-      messageHistoryCache.set(currentAccount.id, conversationId, page, { preserveExisting: Boolean(cached), conversation: conversations.find(item => item.id === conversationId) });
-    });
-  }, [conversations, currentAccount]);
 
   // Handle sending message
   const handleSendMessage = (chatId: string, text: string, attachments?: File[], isPrivate?: boolean, replyTo?: import('./types').ReplyTo | null) => {
@@ -1329,7 +1309,6 @@ export default function App() {
                         onSelect={(selected) => {
                           openConversation(selected.id);
                         }}
-                        onPrefetch={prefetchConversation}
                         isDarkMode={isDarkMode}
                       />
                     ))
