@@ -250,18 +250,6 @@ export const useConversationMessages = (accountId: number | null, conversationId
     }
   }, [accountId, conversationId, messages]);
 
-  const remove = useCallback(async (messageId: number) => {
-    if (!accountId || !conversationId || messageId < 1) return false;
-    try {
-      await messageService.remove(accountId, conversationId, messageId);
-      messageHistoryCache.removeMessage(accountId, conversationId, messageId);
-      setMessages(current => current.filter(message => message.id !== messageId));
-      return true;
-    } catch {
-      return false;
-    }
-  }, [accountId, conversationId]);
-
   const react = useCallback(async (messageId: number, selectedEmoji: string) => {
     if (!inboxId || !conversationId || messageId < 1) return false;
     const target = messages.find((message) => message.id === messageId);
@@ -369,5 +357,5 @@ export const useConversationMessages = (accountId: number | null, conversationId
   const cachedScrollTop = accountId && conversationId ? messageHistoryCache.get(accountId, conversationId)?.scrollTop || 0 : 0;
   const activeStatus = renderedConversationKeyRef.current === `${accountId}:${conversationId}` ? status : conversationId ? 'loading' : 'idle';
 
-  return { messages, status: activeStatus, error, hasOlderMessages, isLoadingOlder, cachedScrollTop, saveScroll, retry: () => load(), loadOlder, send, retrySend, remove, react, edit: (messageId: number, content: string) => mutate('edit', messageId, content), revoke: (messageId: number) => mutate('revoke', messageId), upsertRealtimeMessage, enrichParticipants, rememberAttachmentDimensions, refreshLatest };
+  return { messages, status: activeStatus, error, hasOlderMessages, isLoadingOlder, cachedScrollTop, saveScroll, retry: () => load(), loadOlder, send, retrySend, react, edit: (messageId: number, content: string) => mutate('edit', messageId, content), revoke: (messageId: number) => mutate('revoke', messageId), upsertRealtimeMessage, enrichParticipants, rememberAttachmentDimensions, refreshLatest };
 };

@@ -15,7 +15,7 @@ import { MetaConfigStore } from './metaConfigStore.js';
 import { MetaEmbeddedSignupSessionStore, type MetaOnboardingMode } from './metaEmbeddedSignupStore.js';
 import { MetaHistoryStore } from './metaHistoryStore.js';
 import { parseMetaWebhook, type IncomingMetaMessage } from './metaEvent.js';
-import { externalMessageId, parseExternalMessageId, resolveMessageOperationTransport, resolveOutgoingTransport, transportConfigurationForInbox } from './providers.js';
+import { externalMessageId, parseExternalMessageId, resolveMessageOperationTransport, resolveOutgoingTransport, resolveTransportRoute, transportConfigurationForInbox } from './providers.js';
 import { reactionTransport, UnsupportedReactionTransportError } from './reactionTransport.js';
 import { bridgeCors, chatwootSessionHeaders, requireChatwootSession } from './auth.js';
 import { bridgeRedis } from './redis.js';
@@ -2196,8 +2196,11 @@ app.post('/webhooks/waha', (request, response) => {
     if (mutation) {
       let routedInbox;
       try { routedInbox = await wahaInboxForWebhook(mutation.session); } catch { return; }
-      const key = `waha-${mutation.event}:${mutation.targetMessageId}`; if (await dedup.hasOrLock(key)) return;
-      try { await chatwootBridge.withAccount(routedInbox.accountId, async () => { if (mutation.event === 'message.edited' && mutation.content) await chatwootBridge.editWhatsAppMessageBySourceId(externalMessageId('waha', mutation.targetMessageId), mutation.content); if (mutation.event === 'message.revoked') await chatwootBridge.revokeWhatsAppMessageBySourceId(externalMessageId('waha', mutation.targetMessageId)); }); await dedup.commit(key); } catch { dedup.release(key); }
+      const editVersion = mutation.event === 'message.edited' && mutation.content
+        ? `:${createHmac('sha256', config.webhookSecret).update(mutation.content).digest('hex').slice(0, 16)}`
+        : '';
+      const key = `waha-${mutation.session}:${mutation.event}:${mutation.targetMessageId}${editVersion}`; if (await dedup.hasOrLock(key)) return;
+      try { await chatwootBridge.withAccount(routedInbox.accountId, async () => { if (mutation.event === 'message.edited' && mutation.content) await chatwootBridge.editWhatsAppMessageBySourceId(routedInbox.id, externalMessageId('waha', mutation.targetMessageId), mutation.content); if (mutation.event === 'message.revoked') await chatwootBridge.revokeWhatsAppMessageBySourceId(routedInbox.id, externalMessageId('waha', mutation.targetMessageId)); }); await dedup.commit(key); } catch { dedup.release(key); }
     }
     if (event.event === 'message.ack' || event.event === 'message.ack.group') {
       const root = request.body as Record<string, unknown>; const payload = root.payload && typeof root.payload === 'object' ? root.payload as Record<string, unknown> : {};
@@ -2263,7 +2266,8 @@ app.post('/webhooks/evolution', async (request, response) => {
     const dedupId = `${edited.instance}:edit:${edited.targetMessageId}:${createHmac('sha256', config.webhookSecret).update(edited.content).digest('hex').slice(0, 16)}`;
     if (await dedup.hasOrLock(dedupId)) return response.status(200).json({ duplicate: true });
     try {
-      await chatwootBridge.editWhatsAppMessageBySourceId(externalMessageId('evolution', edited.targetMessageId), edited.content);
+      const inbox = await chatwootBridge.findInbox(edited.instance);
+      await chatwootBridge.editWhatsAppMessageBySourceId(inbox.id, externalMessageId('evolution', edited.targetMessageId), edited.content);
       await dedup.commit(dedupId);
       bridgeMetrics.increment('whatsapp_messages_edited_total', { transport: 'evolution' });
       return response.status(200).json({ ok: true });
@@ -2278,7 +2282,8 @@ app.post('/webhooks/evolution', async (request, response) => {
     const dedupId = `${revoked.instance}:revoke:${revoked.targetMessageId}`;
     if (await dedup.hasOrLock(dedupId)) return response.status(200).json({ duplicate: true });
     try {
-      await chatwootBridge.revokeWhatsAppMessageBySourceId(externalMessageId('evolution', revoked.targetMessageId));
+      const inbox = await chatwootBridge.findInbox(revoked.instance);
+      await chatwootBridge.revokeWhatsAppMessageBySourceId(inbox.id, externalMessageId('evolution', revoked.targetMessageId));
       await dedup.commit(dedupId);
       bridgeMetrics.increment('whatsapp_messages_revoked_total', { transport: 'evolution' });
       return response.status(200).json({ ok: true });
@@ -2353,36 +2358,42 @@ app.post('/operations/messages/:operation', async (request, response) => {
   const { accountId, inboxId, sourceId, remoteJid, targetFromMe, participantJid, content } = body;
   if (!Number.isInteger(accountId) || !Number.isInteger(inboxId) || typeof sourceId !== 'string' || typeof remoteJid !== 'string' || typeof targetFromMe !== 'boolean' || (participantJid !== undefined && typeof participantJid !== 'string' && participantJid !== null) || (operation === 'edit' && (typeof content !== 'string' || !content.trim()))) return response.status(400).json({ error: 'Invalid WhatsApp message operation' });
   const external = parseExternalMessageId(sourceId);
-  const transport = resolveMessageOperationTransport({ sourceId, contentAttributes: { whatsapp_transport: external?.provider } });
-  if (!external || (transport !== 'evolution' && transport !== 'waha') || external.provider !== transport || !targetFromMe || remoteJid === 'status@broadcast') return response.status(422).json({ error: 'This message cannot be changed remotely.', category: 'operation_unsupported' });
+  if (!external || !targetFromMe || remoteJid === 'status@broadcast') return response.status(422).json({ error: 'This message cannot be changed remotely.', category: 'operation_unsupported' });
   try {
     return await chatwootBridge.withAccount(accountId as number, async () => {
     const inbox = await chatwootBridge.findWhatsAppInboxById(inboxId as number);
+    const route = resolveTransportRoute({ configuration: inbox.configuration, operation, target: { sourceId } });
+    if ('reason' in route) return response.status(422).json({ error: 'This message cannot be changed remotely.', category: route.reason });
+    const transport = route.transport;
+    if (external.provider !== transport) return response.status(422).json({ error: 'This message cannot be changed remotely.', category: 'operation_unsupported' });
     if (transport === 'waha') {
       if (!inbox.configuration.transports.includes('waha') || !inbox.configuration.wahaSessionName) return response.status(409).json({ error: 'WAHA is not available for this inbox.', category: 'transport_unavailable' });
       await adoptLegacyWahaOwnership(accountId as number, inbox.id);
       await wahaSessions.assertOwned(accountId as number, inbox.id, inbox.configuration.wahaSessionName);
       if (operation === 'edit') await wahaTransport.editMessage(inbox.configuration.wahaSessionName, remoteJid, external.id, content as string);
       else await wahaTransport.revokeMessage(inbox.configuration.wahaSessionName, remoteJid, external.id);
-      const updated = operation === 'edit' ? await chatwootBridge.editWhatsAppMessageBySourceId(sourceId, content as string) : await chatwootBridge.revokeWhatsAppMessageBySourceId(sourceId);
+      const updated = operation === 'edit' ? await chatwootBridge.editWhatsAppMessageBySourceId(inbox.id, sourceId, content as string) : await chatwootBridge.revokeWhatsAppMessageBySourceId(inbox.id, sourceId);
       return response.json(updated);
     }
-    if (!inbox.configuration.transports.includes('evolution') || !inbox.configuration.evolutionInstanceName) return response.status(409).json({ error: 'Evolution is not available for this inbox.', category: 'transport_unavailable' });
+    if (transport !== 'evolution' || !inbox.configuration.evolutionInstanceName) return response.status(409).json({ error: 'Evolution is not available for this inbox.', category: 'transport_unavailable' });
     const target = { remoteJid, messageId: external.id, fromMe: true, ...(typeof participantJid === 'string' ? { participant: participantJid } : {}) };
     if (operation === 'edit') {
       await evolutionBridge.editMessage(inbox.configuration.evolutionInstanceName, target, content as string);
-      const updated = await chatwootBridge.editWhatsAppMessageBySourceId(sourceId, content as string);
+      const updated = await chatwootBridge.editWhatsAppMessageBySourceId(inbox.id, sourceId, content as string);
       bridgeMetrics.increment('whatsapp_messages_edited_total', { transport: 'evolution', origin: 'platform' });
       return response.json(updated);
     }
     await evolutionBridge.revokeMessage(inbox.configuration.evolutionInstanceName, target);
-    const updated = await chatwootBridge.revokeWhatsAppMessageBySourceId(sourceId);
+    const updated = await chatwootBridge.revokeWhatsAppMessageBySourceId(inbox.id, sourceId);
     bridgeMetrics.increment('whatsapp_messages_revoked_total', { transport: 'evolution', origin: 'platform' });
     return response.json(updated);
     });
   } catch (error) {
     console.error('[evolution-bridge] remote message operation failed', { operation, inboxId, sourceId, error: error instanceof Error ? error.message : 'unknown error' });
-    return response.status(502).json({ error: operation === 'edit' ? 'Could not edit WhatsApp message' : 'Could not revoke WhatsApp message' });
+    return response.status(422).json({
+      error: operation === 'edit' ? 'Esta mensagem não pode mais ser editada.' : 'Esta mensagem não pode mais ser excluída para todos.',
+      category: 'provider_rejected',
+    });
   }
 });
 

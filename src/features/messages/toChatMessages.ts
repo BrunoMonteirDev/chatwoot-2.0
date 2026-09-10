@@ -89,6 +89,7 @@ const replyForMessage = (message: ConversationMessage, allMessages: Conversation
       ? allMessages.find(item => item.sourceId === externalId)
       : undefined;
   if (!original) return undefined;
+  const wasRevoked = original.contentAttributes.whatsapp_revoked === true;
   const attachment = original.attachments[0];
   const mediaLabel = attachment?.kind === 'image' ? 'Foto'
     : attachment?.kind === 'video' ? 'Vídeo'
@@ -98,7 +99,7 @@ const replyForMessage = (message: ConversationMessage, allMessages: Conversation
     id: String(original.id),
     externalId: original.sourceId,
     senderName: original.kind === 'outgoing' || original.kind === 'private_note' ? 'Você' : original.senderName || 'Contato',
-    text: original.content || mediaLabel,
-    ...(attachment?.kind === 'image' && attachment.url ? { mediaPreviewUrl: attachment.thumbnailUrl || attachment.url } : {}),
+    text: wasRevoked ? 'Essa mensagem foi excluída' : original.content || mediaLabel,
+    ...(!wasRevoked && attachment?.kind === 'image' && attachment.url ? { mediaPreviewUrl: attachment.thumbnailUrl || attachment.url } : {}),
   };
 };

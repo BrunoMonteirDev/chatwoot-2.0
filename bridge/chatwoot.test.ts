@@ -336,6 +336,19 @@ describe('chatwootBridge media messages', () => {
     expect(JSON.parse(init.body as string)).toEqual({ source_id: 'evolution:BAE5', reaction: { sender_id: 'contact:5511999999999', emoji: '👍', transport: 'evolution', origin: 'contact', event_id: 'event-1' } });
   });
 
+  it('escopa edit e revoke pelo inbox real ao persistir mutações externas', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(JSON.stringify({ id: 42, content: 'Original', content_attributes: {} }), { status: 200 })));
+
+    await chatwootBridge.withAccount(47, () => chatwootBridge.editWhatsAppMessageBySourceId(608, 'waha:SYNTHETIC', 'Corrigida'));
+    await chatwootBridge.withAccount(47, () => chatwootBridge.revokeWhatsAppMessageBySourceId(608, 'waha:SYNTHETIC'));
+
+    const editBody = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    const revokeBody = JSON.parse((vi.mocked(fetch).mock.calls[1][1] as RequestInit).body as string);
+    expect(String(vi.mocked(fetch).mock.calls[0][0])).toContain('/api/v1/accounts/47/whatsapp/messages/edit');
+    expect(editBody).toEqual({ inbox_id: 608, source_id: 'waha:SYNTHETIC', content: 'Corrigida' });
+    expect(revokeBody).toEqual({ inbox_id: 608, source_id: 'waha:SYNTHETIC' });
+  });
+
   it('encaminha uma mensagem histórica WAHA ao endpoint silencioso com timestamp e autor do grupo', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 42, created: true }), { status: 201 })));
     await chatwootBridge.withAccount(1, () => chatwootBridge.importHistoricalWhatsAppMessage(31, {

@@ -61,9 +61,6 @@ export const messageService = {
     );
     return normalizeMessage(response);
   },
-  async remove(accountId: number, conversationId: number, messageId: number): Promise<void> {
-    await chatwootApiClient.delete(`/api/v1/accounts/${accountId}/conversations/${conversationId}/messages/${messageId}`);
-  },
   async forward({ accountId, sourceConversationId, sourceMessageId, destinationConversationId, idempotencyToken }: ForwardMessageParams): Promise<ConversationMessage> {
     const response = await chatwootApiClient.post<ChatwootMessageDto>(
       `/api/v1/accounts/${accountId}/conversations/${sourceConversationId}/messages/forward`,

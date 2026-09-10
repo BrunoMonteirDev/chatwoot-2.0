@@ -587,7 +587,6 @@ interface Props {
   onRetryHistory?: () => void;
   onLoadOlderMessages?: () => void;
   onRetryMessage?: (messageId: string) => void;
-  onDeleteMessage?: (messageId: string) => Promise<boolean>;
   onEditMessage?: (messageId: string, content: string) => Promise<boolean>;
   onRevokeMessage?: (messageId: string) => Promise<boolean>;
   onReactMessage?: (messageId: string, emoji: string) => Promise<boolean> | boolean;
@@ -656,7 +655,6 @@ export const ChatArea: React.FC<Props> = ({
   onRetryHistory,
   onLoadOlderMessages,
   onRetryMessage,
-  onDeleteMessage,
   onEditMessage,
   onRevokeMessage,
   onReactMessage,
@@ -863,8 +861,9 @@ export const ChatArea: React.FC<Props> = ({
 
   // Context Menu State
   const { menuState, openContextMenu, closeContextMenu } = useContextMenu();
-  const [messagePendingDeletion, setMessagePendingDeletion] = useState<Message | null>(null);
   const [messagePendingRevoke, setMessagePendingRevoke] = useState<Message | null>(null);
+  const [isRevokingMessage, setIsRevokingMessage] = useState(false);
+  const [revokeFailure, setRevokeFailure] = useState<string | null>(null);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [editingText, setEditingText] = useState('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
@@ -892,11 +891,8 @@ export const ChatArea: React.FC<Props> = ({
           addToast('Mensagem sem texto para copiar', 'error');
         }
       },
-      onDeleteMessage: (m) => {
-        setMessagePendingDeletion(m);
-      },
       onEditMessage: (m) => { setEditingMessage(m); setEditingText(m.text || ''); setEditFailure(null); },
-      onRevokeMessage: (m) => setMessagePendingRevoke(m),
+      onRevokeMessage: (m) => { setMessagePendingRevoke(m); setRevokeFailure(null); },
       onReact: (m, emoji) => void handleReaction(m, emoji),
       onForward: (m) => { setMessageToForward(m); setForwardError(null); },
     });
@@ -1000,10 +996,10 @@ export const ChatArea: React.FC<Props> = ({
         setEditingMessage(null);
         setEditingText('');
       } else {
-        setEditFailure('Não foi possível editar a mensagem. Tente novamente.');
+        setEditFailure('Esta mensagem não pode mais ser editada.');
       }
     } catch {
-      setEditFailure('Não foi possível editar a mensagem. Tente novamente.');
+      setEditFailure('Esta mensagem não pode mais ser editada.');
     } finally {
       setIsSavingEdit(false);
     }
@@ -1976,8 +1972,8 @@ export const ChatArea: React.FC<Props> = ({
           const isMe = msg.sender === 'me';
           const prevMsg = chat.messages[index - 1];
           const isGroupMessage = Boolean(chat.isGroup || conversation?.isGroup || msg.whatsappRemoteJid?.endsWith('@g.us'));
-          const hasWideMedia = Boolean(msg.attachments?.some(attachment => attachment.type === 'image' || attachment.type === 'video'));
-          const hasVisualMedia = Boolean(msg.attachments?.some(attachment => attachment.type === 'image' || attachment.type === 'video'));
+          const hasWideMedia = !msg.isRevoked && Boolean(msg.attachments?.some(attachment => attachment.type === 'image' || attachment.type === 'video'));
+          const hasVisualMedia = !msg.isRevoked && Boolean(msg.attachments?.some(attachment => attachment.type === 'image' || attachment.type === 'video'));
           const isVisualMediaBubble = hasVisualMedia && !msg.isPrivate && !msg.replyTo;
           const groupParticipant = msg.senderIdentity ? groupParticipantIdentities[msg.senderIdentity] : undefined;
           const participantAvatar = msg.senderAvatarUrl || groupParticipant?.avatarUrl;
@@ -2068,6 +2064,14 @@ export const ChatArea: React.FC<Props> = ({
                   {/* Quoted Reply Message */}
                   {msg.replyTo && <QuotedReplyBox replyTo={msg.replyTo} onOpenOriginal={focusMessage} />}
 
+                  {msg.isRevoked ? <>
+                    <p className="italic text-[#8696a0]">Essa mensagem foi excluída</p>
+                    {(msg.whatsappPreviousContent || msg.text || msg.attachments?.length) && <details className="mt-2 select-text text-xs text-[#8696a0]">
+                      <summary className="cursor-pointer select-none hover:text-[#00a884]">Ver conteúdo original</summary>
+                      {(msg.whatsappPreviousContent || msg.text) && <div className="mt-1 whitespace-pre-wrap break-words rounded bg-black/10 p-2"><TextMessageContent text={msg.whatsappPreviousContent || msg.text || ''} isDarkMode={isDarkMode} /></div>}
+                      {msg.attachments?.map(attachment => <a key={attachment.id} href={attachment.url} target="_blank" rel="noreferrer" className="mt-1 block rounded bg-black/10 p-2 hover:text-[#00a884]">{attachment.title || 'Abrir anexo original'}</a>)}
+                    </details>}
+                  </> : <>
                   {/* Link Preview Card */}
                   {msg.linkPreview && <LinkPreviewBox linkPreview={msg.linkPreview} />}
 
@@ -2113,6 +2117,7 @@ export const ChatArea: React.FC<Props> = ({
                       <p className="mt-1 whitespace-pre-wrap break-words rounded bg-black/10 p-2">{msg.whatsappPreviousContent}</p>
                     </details>
                   )}
+                  </>}
 
                   {/* Timestamp & Status Icon (for non-audio or mixed messages) */}
                   {(msg.text || !msg.attachments?.some((a) => a.type === 'audio')) && (
@@ -2706,17 +2711,12 @@ export const ChatArea: React.FC<Props> = ({
         </div>
       </div>}
 
-      {messagePendingDeletion && <div className="fixed inset-0 z-[10001] grid place-items-center bg-black/65 p-4" role="dialog" aria-modal="true" aria-labelledby="delete-message-title">
-        <div className={`w-full max-w-sm rounded-2xl border p-5 shadow-2xl ${isDarkMode ? 'border-[#2a3942] bg-[#182228] text-[#e9edef]' : 'border-[#d1d7db] bg-white text-[#111b21]'}`}>
-          <div className="flex items-start gap-3"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-red-500/15 text-red-400"><Trash2 className="h-5 w-5" /></div><div><h3 id="delete-message-title" className="text-sm font-bold">Excluir do Chatwoot?</h3><p className="mt-1 text-xs leading-5 text-[#8696a0]">Esta ação remove a mensagem somente desta conversa no Chatwoot.</p></div></div>
-          <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setMessagePendingDeletion(null)} className="rounded-lg px-3 py-2 text-xs font-bold text-[#aebac1] hover:bg-white/5">Cancelar</button><button type="button" onClick={() => { const message = messagePendingDeletion; setMessagePendingDeletion(null); if (onDeleteMessage) void onDeleteMessage(message.id); }} className="rounded-lg bg-red-500 px-3 py-2 text-xs font-bold text-white hover:bg-red-600">Excluir do Chatwoot</button></div>
-        </div>
-      </div>}
       {messageToForward && <ForwardMessageModal message={messageToForward} accountId={accountId} sourceConversationId={chat.id} chats={allChats} inboxes={inboxes} isDarkMode={isDarkMode} isSubmitting={isForwardingMessage} error={forwardError} onClose={() => { if (!isForwardingMessage) setMessageToForward(null); }} onForward={(destinationConversationId) => void forwardMessage(destinationConversationId)} />}
       {messagePendingRevoke && <div className="fixed inset-0 z-[10001] grid place-items-center bg-black/65 p-4" role="dialog" aria-modal="true" aria-labelledby="revoke-message-title">
         <div className={`w-full max-w-sm rounded-2xl border p-5 shadow-2xl ${isDarkMode ? 'border-[#2a3942] bg-[#182228] text-[#e9edef]' : 'border-[#d1d7db] bg-white text-[#111b21]'}`}>
           <div className="flex items-start gap-3"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-red-500/15 text-red-400"><Trash2 className="h-5 w-5" /></div><div><h3 id="revoke-message-title" className="text-sm font-bold">Apagar para todos?</h3><p className="mt-1 text-xs leading-5 text-[#8696a0]">A mensagem será apagada no WhatsApp para todos os participantes.</p></div></div>
-          <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setMessagePendingRevoke(null)} className="rounded-lg px-3 py-2 text-xs font-bold text-[#aebac1] hover:bg-white/5">Cancelar</button><button type="button" onClick={() => { const message = messagePendingRevoke; setMessagePendingRevoke(null); if (onRevokeMessage) void onRevokeMessage(message.id); }} className="rounded-lg bg-red-500 px-3 py-2 text-xs font-bold text-white hover:bg-red-600">Apagar para todos</button></div>
+          {revokeFailure && <p className="mt-3 text-xs text-red-400">{revokeFailure}</p>}
+          <div className="mt-5 flex justify-end gap-2"><button type="button" disabled={isRevokingMessage} onClick={() => { setMessagePendingRevoke(null); setRevokeFailure(null); }} className="rounded-lg px-3 py-2 text-xs font-bold text-[#aebac1] hover:bg-white/5 disabled:opacity-50">Cancelar</button><button type="button" disabled={isRevokingMessage} onClick={() => { const message = messagePendingRevoke; if (!onRevokeMessage || isRevokingMessage) return; setIsRevokingMessage(true); setRevokeFailure(null); void onRevokeMessage(message.id).then(revoked => { if (revoked) setMessagePendingRevoke(null); else setRevokeFailure('Esta mensagem não pode mais ser excluída para todos.'); }).catch(() => setRevokeFailure('Esta mensagem não pode mais ser excluída para todos.')).finally(() => setIsRevokingMessage(false)); }} className="rounded-lg bg-red-500 px-3 py-2 text-xs font-bold text-white hover:bg-red-600 disabled:opacity-50">{isRevokingMessage ? 'Excluindo…' : 'Apagar para todos'}</button></div>
         </div>
       </div>}
     </div>

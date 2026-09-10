@@ -143,7 +143,6 @@ export function getMessageContextMenuItems(
   options: {
     onReply?: (msg: Message) => void;
     onCopyText?: (msg: Message) => void;
-    onDeleteMessage?: (msg: Message) => void;
     onEditMessage?: (msg: Message) => void;
     onRevokeMessage?: (msg: Message) => void;
     onReact?: (msg: Message, emoji: string) => void;
@@ -183,7 +182,7 @@ export function getMessageContextMenuItems(
     ...(capabilities.canRevoke ? [{
       label: 'Apagar para todos', icon: <Trash2 />, danger: true, action: () => options.onRevokeMessage?.(msg),
     }] : []),
-    ...(msg.attachments?.length ? [{
+    ...(msg.attachments?.length && !msg.isRevoked ? [{
       label: 'Baixar arquivo',
       icon: <Download />,
       action: () => {
@@ -196,12 +195,6 @@ export function getMessageContextMenuItems(
         link.click();
       },
     }, { divider: true, label: '' }] : []),
-    {
-      label: 'Excluir do Chatwoot',
-      icon: <Trash2 />,
-      danger: true,
-      action: () => options.onDeleteMessage?.(msg),
-    },
   ];
 }
 

@@ -679,11 +679,11 @@ export const chatwootBridge = {
   updateWhatsAppMessageStatus: (sourceId: string, status: 'sent' | 'delivered' | 'read' | 'failed', externalError?: string | null) => request(`/api/v1/accounts/${currentAccountId()}/whatsapp/messages/status`, {
     method: 'POST', body: JSON.stringify({ source_id: sourceId, status, ...(externalError ? { external_error: externalError.slice(0, 500) } : {}) }),
   }, true),
-  editWhatsAppMessageBySourceId: (sourceId: string, content: string) => request<{ id: number; conversation_id: number; content: string; content_attributes: Record<string, unknown> }>(`/api/v1/accounts/${currentAccountId()}/whatsapp/messages/edit`, {
-    method: 'POST', body: JSON.stringify({ source_id: sourceId, content }),
+  editWhatsAppMessageBySourceId: (inboxId: number, sourceId: string, content: string) => request<{ id: number; conversation_id: number; content: string; content_attributes: Record<string, unknown> }>(`/api/v1/accounts/${currentAccountId()}/whatsapp/messages/edit`, {
+    method: 'POST', body: JSON.stringify({ inbox_id: inboxId, source_id: sourceId, content }),
   }, true),
-  revokeWhatsAppMessageBySourceId: (sourceId: string) => request<{ id: number; conversation_id: number; content: string; content_attributes: Record<string, unknown> }>(`/api/v1/accounts/${currentAccountId()}/whatsapp/messages/revoke`, {
-    method: 'POST', body: JSON.stringify({ source_id: sourceId }),
+  revokeWhatsAppMessageBySourceId: (inboxId: number, sourceId: string) => request<{ id: number; conversation_id: number; content: string; content_attributes: Record<string, unknown> }>(`/api/v1/accounts/${currentAccountId()}/whatsapp/messages/revoke`, {
+    method: 'POST', body: JSON.stringify({ inbox_id: inboxId, source_id: sourceId }),
   }, true),
   messageTargetBySourceId: (sourceId: string) => request<WhatsAppMessageTarget>(`/api/v1/accounts/${currentAccountId()}/whatsapp/messages/target?source_id=${encodeURIComponent(sourceId)}`, {}, true),
   async importHistoricalWhatsAppMessage(conversationId: number, input: HistoricalWhatsAppImportInput) {

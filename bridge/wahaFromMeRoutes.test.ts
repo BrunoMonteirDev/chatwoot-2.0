@@ -27,6 +27,18 @@ const postWaha = (session: keyof typeof inboxes, payload: Record<string, unknown
   });
 };
 
+const postWahaMutation = (session: keyof typeof inboxes, event: 'message.edited' | 'message.revoked', payload: Record<string, unknown>) => {
+  const raw = JSON.stringify({ event, session, payload });
+  return fetch(`${base}/webhooks/waha`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Webhook-Hmac': createHmac('sha512', 'synthetic-waha-secret').update(raw).digest('hex'),
+    },
+    body: raw,
+  });
+};
+
 beforeAll(async () => {
   directory = await mkdtemp(`${tmpdir()}/waha-from-me-routes-`);
   for (const [key, value] of Object.entries({
@@ -61,7 +73,7 @@ afterAll(async () => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   if (server) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
-  await rm(directory, { recursive: true, force: true });
+  await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
 beforeEach(() => {
@@ -78,6 +90,8 @@ beforeEach(() => {
   vi.spyOn(chatwoot, 'saveWahaIdentity').mockResolvedValue({} as never);
   vi.spyOn(chatwoot, 'findOrCreateConversation').mockImplementation(async (_identifier, _sourceId, _contactId, inboxId) => ({ id: inboxId === 608 ? 2001 : 2002, status: 'open', inbox_id: inboxId }));
   vi.spyOn(chatwoot, 'createMobileOutgoingTransportMessage').mockResolvedValue({} as never);
+  vi.spyOn(chatwoot, 'editWhatsAppMessageBySourceId').mockResolvedValue({} as never);
+  vi.spyOn(chatwoot, 'revokeWhatsAppMessageBySourceId').mockResolvedValue({} as never);
 });
 
 describe('WAHA fromMe inbound routing', () => {
@@ -136,5 +150,33 @@ describe('WAHA fromMe inbound routing', () => {
     expect(chatwoot.findOrCreateConversation).toHaveBeenCalledWith(inboxes['tenant-session-b'].identifier, expect.any(String), 1002, 904);
     expect(accountScope).toHaveBeenCalledWith(73, expect.any(Function));
     expect(accountScope).not.toHaveBeenCalledWith(47, expect.any(Function));
+  });
+
+  it('updates the existing message for device edit and revoke without creating a duplicate', async () => {
+    await postWahaMutation('tenant-session-a', 'message.edited', {
+      chatId: '5500000000001@c.us', editedMessageId: 'SYNTHETIC-MUTATION', body: 'Edited on device',
+    });
+    await vi.waitFor(() => expect(chatwoot.editWhatsAppMessageBySourceId).toHaveBeenCalledWith(608, 'waha:SYNTHETIC-MUTATION', 'Edited on device'));
+    await postWahaMutation('tenant-session-a', 'message.edited', {
+      chatId: '5500000000001@c.us', editedMessageId: 'SYNTHETIC-MUTATION', body: 'Edited again on device',
+    });
+    await vi.waitFor(() => expect(chatwoot.editWhatsAppMessageBySourceId).toHaveBeenCalledWith(608, 'waha:SYNTHETIC-MUTATION', 'Edited again on device'));
+    expect(chatwoot.editWhatsAppMessageBySourceId).toHaveBeenCalledTimes(2);
+
+    await postWahaMutation('tenant-session-a', 'message.revoked', {
+      chatId: '5500000000001@c.us', revokedMessageId: 'SYNTHETIC-MUTATION',
+    });
+    await vi.waitFor(() => expect(chatwoot.revokeWhatsAppMessageBySourceId).toHaveBeenCalledWith(608, 'waha:SYNTHETIC-MUTATION'));
+
+    expect(chatwoot.createMobileOutgoingTransportMessage).not.toHaveBeenCalled();
+  });
+
+  it('isolates equal provider message ids by account, inbox and WAHA session', async () => {
+    await postWahaMutation('tenant-session-a', 'message.revoked', { chatId: '5500000000001@c.us', revokedMessageId: 'SAME-ID' });
+    await postWahaMutation('tenant-session-b', 'message.revoked', { chatId: '5500000000002@c.us', revokedMessageId: 'SAME-ID' });
+
+    await vi.waitFor(() => expect(chatwoot.revokeWhatsAppMessageBySourceId).toHaveBeenCalledTimes(2));
+    expect(chatwoot.revokeWhatsAppMessageBySourceId).toHaveBeenCalledWith(608, 'waha:SAME-ID');
+    expect(chatwoot.revokeWhatsAppMessageBySourceId).toHaveBeenCalledWith(904, 'waha:SAME-ID');
   });
 });

@@ -1371,7 +1371,6 @@ export default function App() {
                   onRetryMessage={(messageId) => void messageHistory.retrySend(Number(messageId)).then((message) => {
                     if (message) applyOutgoingMessage(message);
                   })}
-                  onDeleteMessage={(messageId) => messageHistory.remove(Number(messageId))}
                   onReactMessage={(messageId, emoji) => messageHistory.react(Number(messageId), emoji)}
                   onForwardMessage={handleForwardMessage}
                   onEditMessage={(messageId, content) => messageHistory.edit(Number(messageId), content)}

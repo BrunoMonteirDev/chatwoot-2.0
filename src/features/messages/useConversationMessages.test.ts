@@ -28,6 +28,14 @@ describe('mergeRealtimeMessage', () => {
     expect(mergeRealtimeMessage([realtime], rest)).toEqual([rest]);
   });
 
+  it('aplica edit/revoke realtime sobre a mensagem existente sem duplicar', () => {
+    const original = message({ id: 99, echoId: undefined, sourceId: 'waha:SYNTHETIC', content: 'Original' });
+    const edited = message({ ...original, content: 'Edited', contentAttributes: { whatsapp_edited: true, whatsapp_previous_content: 'Original' } });
+    const revoked = message({ ...edited, contentAttributes: { ...edited.contentAttributes, whatsapp_revoked: true } });
+
+    expect(mergeRealtimeMessage(mergeRealtimeMessage([original], edited), revoked)).toEqual([revoked]);
+  });
+
   it('troca e remove apenas a reaction do próprio atendente', () => {
     const initial = [{ sender_id: 'self', emoji: '❤️', transport: 'evolution', origin: 'platform' }, { sender_id: 'contact:5511', emoji: '👍', transport: 'evolution', origin: 'contact' }];
     expect(optimisticReactionList(initial, 'evolution', '😂')).toEqual([

@@ -32,6 +32,15 @@ describe('toChatMessages reactions', () => {
     expect(toChatMessages([item])[0]).toMatchObject({ isEdited: true, whatsappPreviousContent: 'Texto original' });
   });
 
+  it('preserva conteúdo e estado revogado após normalização e mantém replies sem expor o original', () => {
+    const revoked = baseMessage({ id: 4, content: 'Conteúdo original', contentAttributes: { whatsapp_revoked: true, whatsapp_previous_content: 'Conteúdo original' } });
+    const reply = baseMessage({ id: 5, contentAttributes: { in_reply_to: 4 } });
+    const [mapped, mappedReply] = toChatMessages([revoked, reply]);
+
+    expect(mapped).toMatchObject({ isRevoked: true, text: 'Conteúdo original', whatsappPreviousContent: 'Conteúdo original' });
+    expect(mappedReply.replyTo).toMatchObject({ id: '4', text: 'Essa mensagem foi excluída' });
+  });
+
   it('identifica participante de grupo por JID, mantém cor estável e mostra somente o nome conhecido', () => {
     const item = baseMessage({ contentAttributes: { whatsapp_remote_jid: '120363@g.us', whatsapp_participant_jid: '5511999999999@s.whatsapp.net', whatsapp_participant_name: 'Ana' } });
     const [first] = toChatMessages([item]); const [second] = toChatMessages([item]);
