@@ -20,6 +20,13 @@ describe('WAHA webhook normalization', () => {
     expect(parseIncomingWahaMessage({ event: 'message', session: 'empresa', payload: { id: 'm4', from: '120@g.us', chatId: '120@g.us', pushName: 'Ana', subject: 'Vendas', body: 'grupo' } })).toMatchObject({ chatType: 'group', name: 'Vendas', groupName: 'Vendas', participantName: 'Ana' });
   });
 
+  it('preserva a origem app/api de mensagens fromMe', () => {
+    expect(parseIncomingWahaMessage({ event: 'message.any', session: 'session-a', payload: { id: 'mobile-1', from: '5500000000001@c.us', fromMe: true, source: 'app', body: 'aparelho' } }))
+      .toMatchObject({ fromMe: true, origin: 'app' });
+    expect(parseIncomingWahaMessage({ event: 'message.any', session: 'session-a', payload: { id: 'platform-1', from: '5500000000001@c.us', fromMe: true, source: 'api', body: 'plataforma' } }))
+      .toMatchObject({ fromMe: true, origin: 'api' });
+  });
+
   it('associa o LID da mensagem ao PN real fornecido pelo WAHA', () => {
     expect(parseIncomingWahaMessage({ event: 'message', session: 'empresa', payload: { id: 'm-lid', chatId: '120@g.us', participant: '19696904601705@lid', participantAlt: '554497755329@c.us', body: 'grupo' } }))
       .toMatchObject({ chatType: 'group', participantJid: '19696904601705@lid', participantPhone: '+554497755329' });

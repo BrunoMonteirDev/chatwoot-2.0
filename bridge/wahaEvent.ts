@@ -6,7 +6,7 @@ const string = (value: unknown) => typeof value === 'string' && value ? value : 
 const time = (value: unknown) => typeof value === 'number' ? new Date(value * 1000).toISOString() : typeof value === 'string' ? value : new Date().toISOString();
 const number = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 export type WahaMediaKind = 'image' | 'audio' | 'video' | 'document';
-export interface IncomingWahaMessage extends UnifiedWhatsAppEvent { externalId: string; providerMessageKey: string; session: string; chatId: string; fromMe: boolean; remoteJid: string; sourceId: string; name: string; contactName?: string; groupName?: string; avatarUrl?: string; phoneNumber?: string; lid?: string; chatType: 'private' | 'group'; participantJid?: string; participantName?: string; participantPhone?: string; participantAvatarUrl?: string; isForwarded?: boolean; forwardingScore?: number; content: string; quotedMessageId?: string; quotedMetadata?: Record<string, unknown>; media?: { kind: WahaMediaKind; url?: string; data?: string; mimetype?: string; filename?: string }; ack?: number; }
+export interface IncomingWahaMessage extends UnifiedWhatsAppEvent { externalId: string; providerMessageKey: string; session: string; chatId: string; fromMe: boolean; origin?: 'app' | 'api'; remoteJid: string; sourceId: string; name: string; contactName?: string; groupName?: string; avatarUrl?: string; phoneNumber?: string; lid?: string; chatType: 'private' | 'group'; participantJid?: string; participantName?: string; participantPhone?: string; participantAvatarUrl?: string; isForwarded?: boolean; forwardingScore?: number; content: string; quotedMessageId?: string; quotedMetadata?: Record<string, unknown>; media?: { kind: WahaMediaKind; url?: string; data?: string; mimetype?: string; filename?: string }; ack?: number; }
 export interface IncomingWahaReaction extends UnifiedWhatsAppEvent { session: string; targetMessageId: string; chatId: string; senderId: string; emoji: string; fromMe: boolean; participantJid?: string; }
 export interface IncomingWahaMutation extends UnifiedWhatsAppEvent { session: string; targetMessageId: string; chatId: string; content?: string; }
 export interface IncomingWahaGroupLifecycle extends UnifiedWhatsAppEvent { session: string; groupId: string; subject?: string; description?: string; avatarUrl?: string; participants?: Array<{ jid: string; name?: string; phoneNumber?: string; admin?: string | null }>; participantAction?: 'add' | 'remove' | 'promote' | 'demote'; }
@@ -39,6 +39,7 @@ export const parseIncomingWahaMessage = (payload: unknown): IncomingWahaMessage 
   const forwardingScore = forwardingContexts.map(value => number(value.forwardingScore)).find((value): value is number => value !== undefined);
   const isForwarded = forwardingContexts.some(value => value.isForwarded === true) || (forwardingScore !== undefined && forwardingScore > 0);
   const rawExternalId = string(data.id); const session = string(root.session); const fromMe = data.fromMe === true;
+  const rawOrigin = string(data.source)?.toLowerCase(); const origin = rawOrigin === 'app' || rawOrigin === 'api' ? rawOrigin : undefined;
   const chatId = string(data.chatId) || string(data.from) || string(data.to);
   if (!rawExternalId || !session || !chatId || chatId === 'status@broadcast') return null;
   const externalId = normalizeWahaMessageId(rawExternalId); const chatType = chatId.endsWith('@g.us') ? 'group' : 'private';
@@ -52,7 +53,7 @@ export const parseIncomingWahaMessage = (payload: unknown): IncomingWahaMessage 
   const participantAliases = [string(data.participant), string(data.participantAlt), string(data.sender), string(data.senderAlt)].filter((value): value is string => Boolean(value));
   const participantPhone = participantAliases.map(phoneFor).find((value): value is string => Boolean(value));
   const participantName = string(data.participantName) || string(data.notifyName) || string(data.pushName) || contactName;
-  return { ...base, externalId, providerMessageKey: rawExternalId, session, chatId, remoteJid: chatId, fromMe,
+  return { ...base, externalId, providerMessageKey: rawExternalId, session, chatId, remoteJid: chatId, fromMe, ...(origin ? { origin } : {}),
     sourceId: chatType === 'group' ? wahaGroupSourceId(chatId) : `whatsapp:${phone || `lid:${lid || identity}`}`,
     name: chatType === 'group' ? groupName || chatId : contactName || `+${phone || lid || identity}`,
     ...(chatType === 'private' && contactName ? { contactName } : {}), ...(chatType === 'group' && groupName ? { groupName } : {}), ...(phone ? { phoneNumber: `+${phone}` } : {}), ...(lid ? { lid } : {}), chatType,

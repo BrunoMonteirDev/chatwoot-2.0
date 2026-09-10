@@ -2139,7 +2139,14 @@ app.post('/webhooks/waha', (request, response) => {
           if (!(error instanceof Error) || error.message !== `Nenhuma inbox WAHA encontrada para a sessão ${message.session}.`) throw error;
           throw new WahaSessionOwnershipError('not_found');
         }
-        if (message.fromMe && consumePendingWahaOutgoing(message.session, message)) {
+        // WAHA identifies the origin of fromMe messages explicitly. Messages
+        // created through its API are echoes of an outgoing Chatwoot message;
+        // messages created by the app/device must become outgoing timeline
+        // entries. Older WAHA versions may omit source, so retain the pending
+        // send matcher only as a compatibility fallback for those payloads.
+        const platformEcho = message.fromMe && (message.origin === 'api'
+          || (message.origin === undefined && consumePendingWahaOutgoing(message.session, message)));
+        if (platformEcho) {
           await dedup.commit(key);
           console.info('[waha] platform echo ignored', { session: message.session, messageId: message.externalId });
           return;
