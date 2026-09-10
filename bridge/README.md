@@ -54,11 +54,10 @@ IP. `host.docker.internal` não é resolvido pela instalação Linux atual.
 
 ## Saída Chatwoot → Evolution
 
-Defina também no `.env` do frontend `VITE_BRIDGE_PUBLIC_URL` com a URL do
-bridge. Em produção ela deve ser HTTPS; em modo Vite de desenvolvimento, HTTP
-é permitido, por exemplo `http://172.21.0.1:3100`. Ao criar uma inbox Evolution, a UI salva automaticamente
-`<VITE_BRIDGE_PUBLIC_URL>/webhooks/chatwoot` em `Channel::Api.webhook_url`.
-Inboxes existentes são atualizadas ao abrir sua tela de configuração.
+O frontend inicia sempre por `/bridge/config`. O bridge retorna em runtime a
+URL usada pelo navegador e o callback Chatwoot calculado a partir de
+`BRIDGE_INTERNAL_URL` ou `BRIDGE_PUBLIC_URL`; nenhuma variável Vite é necessária.
+Ao associar uma inbox WAHA, o próprio bridge persiste e reconcilia esse callback.
 
 Para que a Evolution também entregue mensagens recebidas ao bridge, a UI
 configura `POST /webhooks/evolution` ao criar/conectar a inbox. A UI não recebe

@@ -725,9 +725,11 @@ const replyTargetId = async (conversationId: number, transport: 'evolution' | 'w
 // App ID and Configuration ID are browser-safe inputs required by Facebook
 // Login for Business. App Secret and every access token intentionally remain
 // absent from this response.
-app.get('/config', (_request, response) => config.publicUrl
-  ? response.json({ bridgePublicUrl: config.publicUrl })
-  : response.status(503).json({ error: 'Bridge public URL is not configured.' }));
+app.get('/config', (_request, response) => {
+  if (!config.publicUrl) return response.status(503).json({ error: 'BRIDGE_PUBLIC_URL is not configured.' });
+  try { return response.json({ bridgePublicUrl: config.publicUrl, chatwootWebhookUrl: chatwootWebhookUrl() }); }
+  catch (error) { return response.status(503).json({ error: error instanceof Error ? error.message : 'Bridge callback URL is not configured.' }); }
+});
 
 app.get('/meta/embedded-signup/config', (_request, response) => {
   if (!config.metaAppId || !config.metaEmbeddedSignupConfigId) return response.status(503).json({ error: 'Embedded Signup is not configured on this bridge.' });

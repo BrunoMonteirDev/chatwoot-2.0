@@ -10,7 +10,7 @@ import { MetaCloudSetup } from './MetaCloudSetup';
 import { WahaSetup } from './WahaSetup';
 import { hasWahaTransport, isNativeWhatsAppInbox, metaCloudMetadataForInbox, transportDisplayStatusesForInbox, transportStatusLabel, whatsappConfigurationForInbox } from '../integrations/whatsapp/provider';
 import { settingsInboxRouteState } from '../features/inboxes/settingsInboxRoute';
-import { bridgePublicUrl } from '../config/runtime';
+import { bridgeChatwootWebhookUrl, bridgePublicUrl } from '../config/runtime';
 
 interface Props {
   accountId: number | null;
@@ -28,22 +28,10 @@ type Screen = 'list' | 'provider' | 'create' | 'configure' | 'adopt' | 'meta' | 
 const instanceOf = (inbox: Inbox) => evolutionMetadataForInbox(inbox)?.evolution_instance_name ?? null;
 const formatNumber = (number: string | null) => number ? `+${number}` : 'Número ainda não disponível';
 const instanceNameFor = (accountId: number, name: string) => `cw-${accountId}-${name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 36) || 'whatsapp'}-${Date.now()}`;
-const bridgeWebhookUrl = () => {
-  const configured = bridgePublicUrl();
-  if (!configured) return null;
-  try {
-    // Relative URLs are browser-only proxies and are never valid server-side
-    // callbacks. The runtime bridge configuration must provide the absolute
-    // installation URL instead of making the browser guess private DNS.
-    if (configured.startsWith('/')) return null;
-    const url = new URL(configured, window.location.origin);
-    if (url.protocol === 'https:' || url.protocol === 'http:') return `${url.toString().replace(/\/$/, '')}/webhooks/chatwoot`;
-  } catch { /* A mensagem abaixo orienta a configuração inválida. */ }
-  return null;
-};
 
 export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inboxesStatus, inboxesError, onRefresh, isDarkMode, selectedInboxId = null, onOpenInbox, onCloseInbox }) => {
-  const chatwootWebhookUrl = bridgeWebhookUrl();
+  const runtimeBridgeAvailable = Boolean(bridgePublicUrl());
+  const chatwootWebhookUrl = bridgeChatwootWebhookUrl();
   const [screen, setScreen] = useState<Screen>('list');
   const [selectedInbox, setSelectedInbox] = useState<Inbox | null>(null);
   const [name, setName] = useState('');
@@ -118,10 +106,10 @@ export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inb
   };
   const openEvolutionSetup = (inbox: Inbox) => { setSelectedInbox(inbox); setExistingInstanceName(''); setCreateInstanceForExistingInbox(false); setError(null); setScreen('adopt'); };
   const create = async () => {
-    if (!accountId || !name.trim() || creating || !chatwootWebhookUrl) return;
+    if (!accountId || !name.trim() || creating || !runtimeBridgeAvailable) return;
     setCreating(true); setError(null);
     try {
-      const inbox = await inboxService.createEvolutionInbox(accountId, { name: name.trim(), webhookUrl: chatwootWebhookUrl });
+      const inbox = await inboxService.createWhatsAppApiInbox(accountId, { name: name.trim() });
       await onRefresh(); onOpenInbox?.(inbox.id); setName('');
     } catch (cause) { setError(errorMessageForUser(cause)); }
     finally { setCreating(false); }
@@ -205,13 +193,13 @@ export const EvolutionInboxesPanel: React.FC<Props> = ({ accountId, inboxes, inb
         </section>
         <section className={`rounded-2xl border p-5 ${card}`}>
           <p className="text-sm font-bold">Detalhes da caixa de entrada</p><p className="mt-1 text-xs text-[#8696a0]">Use um nome que sua equipe reconheça facilmente.</p>
-          {!chatwootWebhookUrl && <div className="mt-4 flex gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300"><AlertCircle className="h-4 w-4 shrink-0" />Configure <code>VITE_BRIDGE_PUBLIC_URL</code> antes de conectar o WhatsApp.</div>}
+          {!runtimeBridgeAvailable && <div className="mt-4 flex gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300"><AlertCircle className="h-4 w-4 shrink-0" />Não foi possível carregar a configuração runtime do bridge. Verifique <code>/bridge/config</code>.</div>}
           <label className="mt-5 block text-xs font-bold">Nome da caixa de entrada<input autoFocus value={name} onChange={event => setName(event.target.value)} placeholder="Ex.: WhatsApp Vendas" className={`mt-2 w-full px-3 py-3 rounded-xl border outline-none transition focus:border-[#00a884] ${isDarkMode ? 'bg-[#111b21] border-[#2a3942]' : 'bg-gray-50 border-gray-300'}`} /></label>
-          <button type="button" disabled={!name.trim() || creating || !chatwootWebhookUrl} onClick={() => void create()} className="mt-5 w-full py-3 bg-[#00a884] hover:bg-[#008069] text-[#0b141a] rounded-xl text-xs font-bold disabled:opacity-40 flex justify-center gap-2">{creating && <Loader2 className="w-4 h-4 animate-spin" />}{creating ? 'Criando caixa…' : 'Continuar para conectar WAHA'}</button>
+          <button type="button" disabled={!name.trim() || creating || !runtimeBridgeAvailable} onClick={() => void create()} className="mt-5 w-full py-3 bg-[#00a884] hover:bg-[#008069] text-[#0b141a] rounded-xl text-xs font-bold disabled:opacity-40 flex justify-center gap-2">{creating && <Loader2 className="w-4 h-4 animate-spin" />}{creating ? 'Criando caixa…' : 'Continuar para conectar WAHA'}</button>
         </section>
       </div>
     </div>}
-    {screen === 'adopt' && selectedInbox && <div className="max-w-lg mx-auto space-y-5"><div className={`p-4 rounded-xl border ${card}`}><p className="text-sm font-bold">Configurar {selectedInbox.name} como Evolution</p><p className="text-[11px] mt-1 text-[#8696a0]">A inbox atual será preservada. Apenas os metadados Evolution e o webhook do bridge serão configurados.</p></div>{!chatwootWebhookUrl && <p className="text-xs text-red-500">Configure VITE_BRIDGE_PUBLIC_URL antes de continuar.</p>}<label className="block text-xs font-bold">Nome da instância Evolution<input autoFocus value={existingInstanceName} onChange={event => setExistingInstanceName(event.target.value)} placeholder="Ex.: cw-suporte" className={`mt-2 w-full px-3 py-2.5 rounded-xl border outline-none ${isDarkMode ? 'bg-[#182228] border-[#2a3942]' : 'bg-gray-50 border-gray-300'}`} /></label><label className="flex gap-2 text-xs items-center cursor-pointer"><input type="checkbox" checked={createInstanceForExistingInbox} onChange={event => setCreateInstanceForExistingInbox(event.target.checked)} />Criar uma nova instância com esse nome</label><p className="text-[11px] text-[#8696a0]">Sem essa opção, o bridge valida uma instância Evolution já existente antes de salvar.</p><button type="button" disabled={!existingInstanceName.trim() || creating || !chatwootWebhookUrl} onClick={() => void configureExistingInbox()} className="w-full py-2.5 bg-[#00a884] text-white rounded-xl text-xs font-bold disabled:opacity-40 flex justify-center gap-2">{creating && <Loader2 className="w-4 h-4 animate-spin" />}{creating ? 'Configurando…' : 'Salvar e conectar Evolution'}</button></div>}
+    {screen === 'adopt' && selectedInbox && <div className="max-w-lg mx-auto space-y-5"><div className={`p-4 rounded-xl border ${card}`}><p className="text-sm font-bold">Configurar {selectedInbox.name} como Evolution</p><p className="text-[11px] mt-1 text-[#8696a0]">A inbox atual será preservada. Apenas os metadados Evolution e o webhook do bridge serão configurados.</p></div>{!chatwootWebhookUrl && <p className="text-xs text-red-500">A configuração runtime do callback do bridge não está disponível.</p>}<label className="block text-xs font-bold">Nome da instância Evolution<input autoFocus value={existingInstanceName} onChange={event => setExistingInstanceName(event.target.value)} placeholder="Ex.: cw-suporte" className={`mt-2 w-full px-3 py-2.5 rounded-xl border outline-none ${isDarkMode ? 'bg-[#182228] border-[#2a3942]' : 'bg-gray-50 border-gray-300'}`} /></label><label className="flex gap-2 text-xs items-center cursor-pointer"><input type="checkbox" checked={createInstanceForExistingInbox} onChange={event => setCreateInstanceForExistingInbox(event.target.checked)} />Criar uma nova instância com esse nome</label><p className="text-[11px] text-[#8696a0]">Sem essa opção, o bridge valida uma instância Evolution já existente antes de salvar.</p><button type="button" disabled={!existingInstanceName.trim() || creating || !chatwootWebhookUrl} onClick={() => void configureExistingInbox()} className="w-full py-2.5 bg-[#00a884] text-white rounded-xl text-xs font-bold disabled:opacity-40 flex justify-center gap-2">{creating && <Loader2 className="w-4 h-4 animate-spin" />}{creating ? 'Configurando…' : 'Salvar e conectar Evolution'}</button></div>}
     {screen === 'configure' && selectedInbox && <div className="space-y-5"><div className={`p-4 rounded-xl border ${card}`}><div className="flex justify-between gap-3"><div><p className="font-bold text-sm">{selectedInbox.name}</p><p className="text-[11px] text-[#8696a0]">Instância Evolution: {selectedInstance}</p><p className="text-[11px] text-[#8696a0]">{formatNumber(connection?.number ?? null)}</p></div><span className={`h-fit px-2 py-1 rounded-full text-[11px] font-bold flex gap-1 items-center ${status === 'connected' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-amber-500/20 text-amber-500'}`}>{statusIcon}{statusLabel[status]}</span></div><div className="mt-4 flex gap-2"><button type="button" disabled={loadingConnection} onClick={() => void reconnect()} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#00a884] text-white flex gap-1">{loadingConnection ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}Conectar/reconectar</button><button type="button" disabled={loadingConnection || status !== 'connected'} onClick={() => void disconnect()} className="px-3 py-1.5 rounded-lg text-xs font-bold border border-red-500/40 text-red-500 flex gap-1"><Unplug className="w-3.5 h-3.5" />Desconectar</button></div></div>
       {!selectedConfiguration?.transports.includes('meta_cloud') && <div className={`p-4 rounded-xl border ${card}`}><p className="text-sm font-bold">API oficial Meta</p><p className="mt-1 text-[11px] text-[#8696a0]">Vincule a API oficial a esta inbox. Se este número usa WhatsApp Business, escolha coexistência no cadastro.</p><button type="button" onClick={() => setScreen('meta')} className="mt-3 rounded-lg bg-[#00a884] px-3 py-1.5 text-xs font-bold text-white">Conectar API oficial</button></div>}
       {selectedConfiguration?.transports.includes('meta_cloud') && <div className={`p-4 rounded-xl border ${card}`}><p className="text-sm font-bold">API oficial vinculada</p><p className="mt-1 text-[11px] text-[#8696a0]">Meta Cloud API: {metaCloudMetadataForInbox(selectedInbox)?.meta_display_phone_number || 'conectada'} · Sessão não oficial: {statusLabel[status].toLowerCase()}.</p>{metaCloudMetadataForInbox(selectedInbox)?.meta_business_app_status === 'offboarded' && <button type="button" onClick={() => setScreen('meta')} className="mt-3 rounded-lg bg-[#00a884] px-3 py-1.5 text-xs font-bold text-white">Reconectar Meta</button>}</div>}

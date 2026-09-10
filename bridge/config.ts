@@ -73,7 +73,13 @@ export const config = {
 export const chatwootWebhookUrl = () => {
   const baseUrl = config.internalUrl || config.publicUrl;
   if (!baseUrl) throw new Error('BRIDGE_INTERNAL_URL ou BRIDGE_PUBLIC_URL é obrigatório para configurar o webhook do Chatwoot.');
-  return `${baseUrl}/webhooks/chatwoot`;
+  try {
+    const url = new URL(baseUrl);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('unsupported protocol');
+    return `${url.toString().replace(/\/$/, '')}/webhooks/chatwoot`;
+  } catch {
+    throw new Error('BRIDGE_INTERNAL_URL ou BRIDGE_PUBLIC_URL deve ser uma URL HTTP(S) absoluta para configurar o webhook do Chatwoot.');
+  }
 };
 
 if (config.chatwootDefaultAccountId !== null && (!Number.isInteger(config.chatwootDefaultAccountId) || config.chatwootDefaultAccountId < 1)) throw new Error('CHATWOOT_ACCOUNT_ID deve ser um número positivo.');

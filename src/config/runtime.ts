@@ -1,6 +1,5 @@
-export interface KoplaRuntimeConfig { bridgePublicUrl: string }
+export interface KoplaRuntimeConfig { bridgePublicUrl: string; chatwootWebhookUrl: string }
 
-const buildTimeBridgeUrl = (import.meta.env.VITE_BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
 let runtimeConfig: KoplaRuntimeConfig | null = null;
 
 const validBridgeUrl = (value: unknown) => {
@@ -13,16 +12,25 @@ const validBridgeUrl = (value: unknown) => {
   } catch { return ''; }
 };
 
+const validWebhookUrl = (value: unknown) => {
+  if (typeof value !== 'string') return '';
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString().replace(/\/$/, '') : '';
+  } catch { return ''; }
+};
+
 export const loadRuntimeConfig = async (fetcher: typeof fetch = fetch): Promise<KoplaRuntimeConfig> => {
-  const bootstrapBase = buildTimeBridgeUrl || '/bridge';
-  const response = await fetcher(`${bootstrapBase}/config`, { headers: { Accept: 'application/json' } });
+  const response = await fetcher('/bridge/config', { headers: { Accept: 'application/json' } });
   const body: unknown = await response.json().catch(() => null);
   const bridgePublicUrl = body && typeof body === 'object' ? validBridgeUrl((body as Record<string, unknown>).bridgePublicUrl) : '';
-  if (!response.ok || !bridgePublicUrl) throw new Error('A configuração runtime do bridge não está disponível.');
-  runtimeConfig = { bridgePublicUrl };
+  const chatwootWebhookUrl = body && typeof body === 'object' ? validWebhookUrl((body as Record<string, unknown>).chatwootWebhookUrl) : '';
+  if (!response.ok || !bridgePublicUrl || !chatwootWebhookUrl) throw new Error('A configuração runtime do bridge não está disponível.');
+  runtimeConfig = { bridgePublicUrl, chatwootWebhookUrl };
   return runtimeConfig;
 };
 
-export const bridgePublicUrl = () => runtimeConfig?.bridgePublicUrl || buildTimeBridgeUrl;
+export const bridgePublicUrl = () => runtimeConfig?.bridgePublicUrl || '';
+export const bridgeChatwootWebhookUrl = () => runtimeConfig?.chatwootWebhookUrl || '';
 
 export const resetRuntimeConfigForTests = () => { runtimeConfig = null; };

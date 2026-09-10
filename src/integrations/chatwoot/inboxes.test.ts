@@ -32,6 +32,14 @@ describe('inboxService', () => {
     expect(vi.mocked(fetch).mock.calls[1][1]).toMatchObject({ method: 'PATCH', body: JSON.stringify({ channel: { additional_attributes: { evolution_provider: 'evolution', evolution_instance_name: 'cw-12-vendas' }, webhook_url: 'https://bridge.example.test/webhooks/chatwoot' } }) });
   });
 
+  it('cria inbox WAHA sem depender de callback fornecido pelo bundle', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ id: 6, name: 'WAHA', avatar_url: null, channel_type: 'Channel::Api' }), { status: 200 }));
+
+    await inboxService.createWhatsAppApiInbox(12, { name: 'WAHA' });
+
+    expect(vi.mocked(fetch).mock.calls[0][1]).toMatchObject({ body: JSON.stringify({ name: 'WAHA', channel: { type: 'api' } }) });
+  });
+
   it('usa somente o endpoint nativo para criar uma inbox oficial', async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(new Response(JSON.stringify({ app_id: 'app-id', configuration_id: 'config-id', api_version: 'v22.0' }), { status: 200 }))

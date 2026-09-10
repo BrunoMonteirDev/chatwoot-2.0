@@ -50,7 +50,7 @@ describe('group creation routing and idempotency', () => {
   it('expõe somente a URL pública runtime configurada pelo ambiente', async () => {
     const response = await fetch(`${base}/config`);
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ bridgePublicUrl: 'https://bridge.synthetic.example' });
+    expect(await response.json()).toEqual({ bridgePublicUrl: 'https://bridge.synthetic.example', chatwootWebhookUrl: 'https://bridge.synthetic.example/webhooks/chatwoot' });
   });
 
   it('persiste o callback server-side ao associar uma inbox WAHA', async () => {

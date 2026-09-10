@@ -58,7 +58,6 @@ jobs:
           file: ${{ matrix.dockerfile }}
           push: true
           platforms: linux/amd64
-          build-args: VITE_BRIDGE_PUBLIC_URL=/bridge
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: ${{ steps.meta.outputs.tags }}

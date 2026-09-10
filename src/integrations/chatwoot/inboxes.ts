@@ -9,7 +9,7 @@ import type { MetaOnboardingMode } from '../meta/embeddedSignup';
 
 const root = (accountId: number) => `/api/v1/accounts/${accountId}`;
 
-export interface CreateEvolutionInboxParams { name: string; webhookUrl: string; }
+export interface CreateEvolutionInboxParams { name: string; webhookUrl?: string; }
 export interface SaveAgentParams { name: string; email?: string; role: 'agent' | 'administrator'; availability: 'online' | 'offline' | 'busy'; customRoleId?: number | null; }
 export interface SaveCustomRoleParams { name: string; description: string; permissions: string[]; }
 export interface SavePermissionProfileParams { name: string; description: string; kind: 'inbox' | 'system'; inboxPermissions: string[]; systemPermissions: string[]; }
@@ -71,7 +71,7 @@ export const inboxService = {
   async createEvolutionInbox(accountId: number, { name, webhookUrl }: CreateEvolutionInboxParams): Promise<Inbox> {
     const response = await chatwootApiClient.post<ChatwootInboxDto>(`${root(accountId)}/inboxes`, {
       name,
-      channel: { type: 'api', webhook_url: webhookUrl },
+      channel: { type: 'api', ...(webhookUrl ? { webhook_url: webhookUrl } : {}) },
     });
     return normalizeInbox(response);
   },
