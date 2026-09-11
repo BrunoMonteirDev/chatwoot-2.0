@@ -48,7 +48,9 @@ beforeEach(() => {
     const session = { name, status: 'SCAN', connectionStatus: 'connecting' as const }; providerSessions.set(name, session); return session;
   });
   vi.spyOn(waha, 'getQrCode').mockResolvedValue({ mimetype: 'image/png', data: 'synthetic-qr' });
-  vi.spyOn(waha, 'logoutSession').mockImplementation(async name => { providerSessions.set(name, { name, status: 'STOPPED', connectionStatus: 'disconnected' }); return null; });
+  // GOWS no longer exposes the provider session after logout. The bridge must
+  // retain ownership and recreate this same internal identity for a new QR.
+  vi.spyOn(waha, 'logoutSession').mockImplementation(async name => { providerSessions.delete(name); return null; });
   vi.spyOn(waha, 'deleteSession').mockImplementation(async name => { providerSessions.delete(name); });
 });
 
@@ -84,6 +86,14 @@ describe('inbox-scoped WhatsApp connection routes', () => {
     expect(waha.createSession).not.toHaveBeenCalled();
   });
 
+  it('reports a persisted provider-missing connection as disconnected without deleting its binding', async () => {
+    attributes.set(302, { whatsapp_transports: ['waha'], waha_session_name: 'missing-provider-session' });
+    const response = await fetch(`${base}/providers/waha/inboxes/302/connection?accountId=7&inboxId=302`, { headers: requestHeaders });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ connection: { status: 'STOPPED', connectionStatus: 'disconnected' } });
+    expect(attributes.get(302)).toMatchObject({ whatsapp_transports: ['waha'], waha_session_name: 'missing-provider-session' });
+  });
+
   it('reconnects the same provider connection without duplication', async () => {
     await post(401); const name = vi.mocked(waha.createSession).mock.calls[0][0].name;
     vi.clearAllMocks();
@@ -113,9 +123,18 @@ describe('inbox-scoped WhatsApp connection routes', () => {
     expect(waha.logoutSession).toHaveBeenCalledWith(name);
     expect(waha.deleteSession).not.toHaveBeenCalledWith(name);
     expect(attributes.get(450)).toMatchObject({ waha_session_name: name, whatsapp_transports: ['waha'], waha_connection_status: 'disconnected' });
-    const reconnect = await post(450, '/reconnect');
-    expect(reconnect.status).toBe(200);
-    expect(waha.createSession).toHaveBeenCalledTimes(1);
+    const qr = await fetch(`${base}/providers/waha/inboxes/450/connection/qr?accountId=7&inboxId=450`, { headers: requestHeaders });
+    expect(qr.status).toBe(200);
+    expect(waha.createSession).toHaveBeenLastCalledWith({ name });
+    expect(waha.deleteSession).not.toHaveBeenCalledWith(name);
+    expect(attributes.get(450)).toMatchObject({ waha_session_name: name, whatsapp_transports: ['waha'] });
+  });
+
+  it('treats disconnect without an association as an already disconnected state', async () => {
+    const response = await post(451, '/disconnect');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ connection: null });
+    expect(waha.logoutSession).not.toHaveBeenCalled();
   });
 
   it('deletes only the connection and clears its inbox binding', async () => {

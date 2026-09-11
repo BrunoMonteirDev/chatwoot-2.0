@@ -51,7 +51,7 @@ export const wahaClient = {
   getInboxConnection: (context: Context) => request<{ connection: WahaInboxConnection | null }>(`/providers/waha/inboxes/${context.inboxId}/connection${query(context)}`),
   connectInbox: (context: Context) => request<{ connection: WahaInboxConnection; qr?: WahaQrCode }>(`/providers/waha/inboxes/${context.inboxId}/connection`, { method: 'POST', body: JSON.stringify(context) }),
   reconnectInbox: (context: Context) => request<{ connection: WahaInboxConnection; qr?: WahaQrCode }>(`/providers/waha/inboxes/${context.inboxId}/connection/reconnect`, { method: 'POST', body: JSON.stringify(context) }),
-  disconnectInbox: (context: Context) => request<{ connection: WahaInboxConnection }>(`/providers/waha/inboxes/${context.inboxId}/connection/disconnect`, { method: 'POST', body: JSON.stringify(context) }),
+  disconnectInbox: (context: Context) => request<{ connection: WahaInboxConnection | null }>(`/providers/waha/inboxes/${context.inboxId}/connection/disconnect`, { method: 'POST', body: JSON.stringify(context) }),
   getInboxQrCode: (context: Context) => request<WahaQrCode>(`/providers/waha/inboxes/${context.inboxId}/connection/qr${query(context)}`),
   deleteInboxConnection: (context: Context) => request<void>(`/providers/waha/inboxes/${context.inboxId}/connection`, { method: 'DELETE', body: JSON.stringify(context) }),
 };

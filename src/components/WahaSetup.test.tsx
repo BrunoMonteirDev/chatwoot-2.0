@@ -88,8 +88,16 @@ describe('WahaSetup simplified connection', () => {
     expect(disconnect).toHaveBeenCalledWith({ accountId: 2, inboxId: 152 });
     expect(remove).not.toHaveBeenCalled();
     expect(element.textContent).toContain('WhatsApp não conectado');
-    expect(element.textContent).toContain('Mostrar novo QR Code');
+    expect(element.textContent).toContain('Conectar por QR Code');
     expect(element.textContent).toContain('Excluir conexão');
+  });
+
+  it('falls back to a disconnected UI when the provider connection no longer exists', async () => {
+    vi.mocked(wahaClient.getInboxConnection).mockResolvedValue({ connection: null });
+    await render();
+    expect(element.textContent).toContain('WhatsApp não conectado');
+    expect(element.textContent).toContain('Conectar por QR Code');
+    expect(element.textContent).not.toContain('WAHA session was not found');
   });
 
   it('keeps two inboxes isolated through their request context', async () => {

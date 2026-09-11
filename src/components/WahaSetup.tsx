@@ -106,6 +106,26 @@ export const WahaSetup = ({ accountId, inbox, isDarkMode, onSaved }: Props) => {
     }
   };
 
+  const disconnectConnection = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await wahaClient.disconnectInbox(context);
+      setConnection(result.connection);
+      setQr(null);
+      setPairing(false);
+      await onSaved?.();
+    } catch (cause) {
+      setConnection(null);
+      setQr(null);
+      setPairing(false);
+      setError(errorMessageForUser(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const saveName = async () => {
     if (!name.trim() || busy) return;
     setBusy(true);
@@ -140,9 +160,9 @@ export const WahaSetup = ({ accountId, inbox, isDarkMode, onSaved }: Props) => {
 
         <div className="mt-5 flex flex-wrap gap-2">
           {!connection && <button type="button" onClick={() => void perform(() => wahaClient.connectInbox(context))} disabled={busy} className={`${button} border-[#00a884] bg-[#00a884] text-white`}><QrCode className="h-4 w-4" />Conectar por QR Code</button>}
-          {connection && !connected && <button type="button" onClick={() => void showQr()} disabled={busy} className={`${button} border-[#00a884]/50 text-[#00a884]`}><QrCode className="h-4 w-4" />Mostrar novo QR Code</button>}
+          {connection && !connected && <button type="button" onClick={() => void showQr()} disabled={busy} className={`${button} border-[#00a884]/50 text-[#00a884]`}><QrCode className="h-4 w-4" />Conectar por QR Code</button>}
           {connection && <button type="button" onClick={() => void perform(() => wahaClient.reconnectInbox(context))} disabled={busy} className={`${button} border-white/20`}><RotateCcw className="h-4 w-4" />Reconectar</button>}
-          {connected && <button type="button" onClick={() => void perform(() => wahaClient.disconnectInbox(context))} disabled={busy} className={`${button} border-amber-500/40 text-amber-500`}><LogOut className="h-4 w-4" />Desconectar</button>}
+          {connected && <button type="button" onClick={() => void disconnectConnection()} disabled={busy} className={`${button} border-amber-500/40 text-amber-500`}><LogOut className="h-4 w-4" />Desconectar</button>}
           {connection && <button type="button" onClick={() => void deleteConnection()} disabled={busy} className={`${button} border-red-500/40 text-red-400`}><Trash2 className="h-4 w-4" />Excluir conexão</button>}
         </div>
 
