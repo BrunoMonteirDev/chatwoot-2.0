@@ -164,7 +164,11 @@ describe('WAHA fromMe inbound routing', () => {
     expect(chatwoot.editWhatsAppMessageBySourceId).toHaveBeenCalledTimes(2);
 
     await postWahaMutation('tenant-session-a', 'message.revoked', {
-      chatId: '5500000000001@c.us', revokedMessageId: 'SYNTHETIC-MUTATION',
+      after: {
+        id: 'true_5500000000001@c.us_SYNTHETIC-REVOKE-ACTION',
+        from: '5500000000001@c.us', fromMe: true, source: 'app', body: '',
+      },
+      revokedMessageId: 'SYNTHETIC-MUTATION', before: null,
     });
     await vi.waitFor(() => expect(chatwoot.revokeWhatsAppMessageBySourceId).toHaveBeenCalledWith(608, 'waha:SYNTHETIC-MUTATION'));
 

@@ -37,6 +37,16 @@ describe('WAHA webhook normalization', () => {
     expect(parseIncomingWahaMutation({ event: 'message.revoked', session: 'empresa', payload: { chatId: '55@c.us', revokedMessageId: 'target' } })).toMatchObject({ targetMessageId: 'target' });
   });
 
+  it('normaliza o envelope real de revoke do GOWS vindo do aparelho', () => {
+    expect(parseIncomingWahaMutation({
+      event: 'message.revoked', session: 'empresa', engine: 'GOWS',
+      payload: {
+        after: { id: 'true_5511999999999@c.us_REVOKE-ACTION', from: '5511999999999@c.us', fromMe: true, body: '' },
+        revokedMessageId: '3EB0ORIGINAL', before: null,
+      },
+    })).toMatchObject({ session: 'empresa', chatId: '5511999999999@c.us', targetMessageId: '3EB0ORIGINAL' });
+  });
+
   it('usa a chave da mensagem, e não o JID do evento, como identidade WAHA', () => {
     expect(normalizeWahaMessageId('true_5511999999999@c.us_3EB01234')).toBe('3EB01234');
     expect(normalizeWahaMessageId('true_123456@lid_3EB01234')).toBe('3EB01234');

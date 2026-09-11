@@ -66,7 +66,22 @@ export const parseIncomingWahaMessage = (payload: unknown): IncomingWahaMessage 
 export const parseWahaHistoryMessage = (session: string, message: unknown): IncomingWahaMessage | null =>
   parseIncomingWahaMessage({ event: 'message.any', session, payload: message });
 export const parseIncomingWahaReaction = (payload: unknown): IncomingWahaReaction | null => { const base = parseWahaWebhook(payload); if (base.event !== 'message.reaction') return null; const root = record(payload); const data = record(root.payload || root.data); const reaction = record(data.reaction); const rawTargetMessageId = string(data.msgId) || string(data.messageId) || string(reaction.messageId); const session = string(root.session); const chatId = string(data.chatId) || string(data.from); if (!rawTargetMessageId || !session || !chatId) return null; return { ...base, session, targetMessageId: normalizeWahaMessageId(rawTargetMessageId), chatId, senderId: string(data.senderId) || string(data.participant) || (data.fromMe === true ? 'self' : `contact:${chatId}`), emoji: string(reaction.text) || string(reaction.emoji) || string(data.emoji) || '', fromMe: data.fromMe === true, ...(string(data.participant) ? { participantJid: string(data.participant) } : {}) }; };
-export const parseIncomingWahaMutation = (payload: unknown): IncomingWahaMutation | null => { const base = parseWahaWebhook(payload); if (base.event !== 'message.edited' && base.event !== 'message.revoked') return null; const root = record(payload); const data = record(root.payload || root.data); const after = record(data.after); const rawTargetMessageId = base.event === 'message.edited' ? (string(data.editedMessageId) || string(data.messageId) || string(after.id)) : (string(data.revokedMessageId) || string(data.messageId) || string(after.id)); const session = string(root.session); const chatId = string(data.chatId) || string(data.from); if (!rawTargetMessageId || !session || !chatId) return null; return { ...base, session, targetMessageId: normalizeWahaMessageId(rawTargetMessageId), chatId, ...(string(data.body) || string(after.body) ? { content: string(data.body) || string(after.body) } : {}) }; };
+export const parseIncomingWahaMutation = (payload: unknown): IncomingWahaMutation | null => {
+  const base = parseWahaWebhook(payload);
+  if (base.event !== 'message.edited' && base.event !== 'message.revoked') return null;
+  const root = record(payload); const data = record(root.payload || root.data); const after = record(data.after); const before = record(data.before);
+  // GOWS revoke payloads wrap the protocol action in `after`. Its id belongs
+  // to the revoke action, while revokedMessageId identifies the original.
+  const rawTargetMessageId = base.event === 'message.edited'
+    ? (string(data.editedMessageId) || string(data.messageId))
+    : (string(data.revokedMessageId) || string(data.messageId) || string(before.id));
+  const session = string(root.session);
+  const chatId = string(data.chatId) || string(data.from) || string(data.to)
+    || string(after.chatId) || string(after.from) || string(after.to)
+    || string(before.chatId) || string(before.from) || string(before.to);
+  if (!rawTargetMessageId || !session || !chatId) return null;
+  return { ...base, session, targetMessageId: normalizeWahaMessageId(rawTargetMessageId), chatId, ...(string(data.body) || string(after.body) ? { content: string(data.body) || string(after.body) } : {}) };
+};
 
 export const parseIncomingWahaGroupLifecycle = (payload: unknown): IncomingWahaGroupLifecycle | null => {
   const base = parseWahaWebhook(payload); if (!['group.v2.join', 'group.v2.leave', 'group.v2.participants', 'group.v2.update'].includes(base.event)) return null;
