@@ -1,4 +1,4 @@
-import { AlertCircle, Loader2, QrCode, RotateCcw, Save, Trash2 } from 'lucide-react';
+import { AlertCircle, Loader2, LogOut, QrCode, RotateCcw, Save, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { Inbox } from '../domain/currentUser';
 import { errorMessageForUser } from '../integrations/chatwoot/errors';
@@ -66,7 +66,7 @@ export const WahaSetup = ({ accountId, inbox, isDarkMode, onSaved }: Props) => {
       const result = await operation();
       setConnection(result.connection);
       setQr(result.qr || null);
-      setPairing(result.connection.connectionStatus !== 'connected');
+      setPairing(result.connection.connectionStatus === 'connecting');
       await onSaved?.();
     } catch (cause) {
       setError(errorMessageForUser(cause));
@@ -142,6 +142,7 @@ export const WahaSetup = ({ accountId, inbox, isDarkMode, onSaved }: Props) => {
           {!connection && <button type="button" onClick={() => void perform(() => wahaClient.connectInbox(context))} disabled={busy} className={`${button} border-[#00a884] bg-[#00a884] text-white`}><QrCode className="h-4 w-4" />Conectar por QR Code</button>}
           {connection && !connected && <button type="button" onClick={() => void showQr()} disabled={busy} className={`${button} border-[#00a884]/50 text-[#00a884]`}><QrCode className="h-4 w-4" />Mostrar novo QR Code</button>}
           {connection && <button type="button" onClick={() => void perform(() => wahaClient.reconnectInbox(context))} disabled={busy} className={`${button} border-white/20`}><RotateCcw className="h-4 w-4" />Reconectar</button>}
+          {connected && <button type="button" onClick={() => void perform(() => wahaClient.disconnectInbox(context))} disabled={busy} className={`${button} border-amber-500/40 text-amber-500`}><LogOut className="h-4 w-4" />Desconectar</button>}
           {connection && <button type="button" onClick={() => void deleteConnection()} disabled={busy} className={`${button} border-red-500/40 text-red-400`}><Trash2 className="h-4 w-4" />Excluir conexão</button>}
         </div>
 

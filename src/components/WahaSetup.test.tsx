@@ -6,7 +6,7 @@ import { WahaSetup } from './WahaSetup';
 import { wahaClient } from '../integrations/waha/client';
 
 vi.mock('../integrations/waha/client', () => ({ wahaClient: {
-  getInboxConnection: vi.fn(), connectInbox: vi.fn(), reconnectInbox: vi.fn(), getInboxQrCode: vi.fn(), deleteInboxConnection: vi.fn(),
+  getInboxConnection: vi.fn(), connectInbox: vi.fn(), reconnectInbox: vi.fn(), disconnectInbox: vi.fn(), getInboxQrCode: vi.fn(), deleteInboxConnection: vi.fn(),
 } }));
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -20,7 +20,7 @@ const render = async (id = 152, onSaved = vi.fn()) => {
 };
 const button = (label: string) => Array.from(element.querySelectorAll('button')).find(item => item.textContent?.includes(label)) as HTMLButtonElement;
 
-beforeEach(() => { vi.mocked(wahaClient.getInboxConnection).mockReset().mockResolvedValue({ connection: null }); vi.mocked(wahaClient.connectInbox).mockReset(); vi.mocked(wahaClient.reconnectInbox).mockReset(); vi.mocked(wahaClient.getInboxQrCode).mockReset(); vi.mocked(wahaClient.deleteInboxConnection).mockReset(); });
+beforeEach(() => { vi.mocked(wahaClient.getInboxConnection).mockReset().mockResolvedValue({ connection: null }); vi.mocked(wahaClient.connectInbox).mockReset(); vi.mocked(wahaClient.reconnectInbox).mockReset(); vi.mocked(wahaClient.disconnectInbox).mockReset(); vi.mocked(wahaClient.getInboxQrCode).mockReset(); vi.mocked(wahaClient.deleteInboxConnection).mockReset(); });
 afterEach(async () => { if (root) await act(async () => root.unmount()); element?.remove(); vi.restoreAllMocks(); });
 
 describe('WahaSetup simplified connection', () => {
@@ -40,6 +40,7 @@ describe('WahaSetup simplified connection', () => {
     expect(element.textContent).toContain('WhatsApp conectado');
     expect(element.textContent).toContain('Equipe Comercial · 5511999999999');
     expect(element.textContent).toContain('Reconectar');
+    expect(element.textContent).toContain('Desconectar');
     expect(element.textContent).toContain('Excluir conexão');
     expect(element.textContent).not.toContain('WhatsApp oficial');
   });
@@ -76,6 +77,19 @@ describe('WahaSetup simplified connection', () => {
     expect(saved).toHaveBeenCalled();
     expect(element.textContent).toContain('WhatsApp não conectado');
     expect(element.textContent).toContain('Conectar por QR Code');
+  });
+
+  it('disconnects the device while preserving the connection and inbox', async () => {
+    vi.mocked(wahaClient.getInboxConnection).mockResolvedValue({ connection: { status: 'WORKING', connectionStatus: 'connected' } });
+    const disconnect = vi.mocked(wahaClient.disconnectInbox).mockResolvedValue({ connection: { status: 'STOPPED', connectionStatus: 'disconnected' } });
+    const remove = vi.mocked(wahaClient.deleteInboxConnection);
+    await render();
+    await act(async () => { button('Desconectar').click(); });
+    expect(disconnect).toHaveBeenCalledWith({ accountId: 2, inboxId: 152 });
+    expect(remove).not.toHaveBeenCalled();
+    expect(element.textContent).toContain('WhatsApp não conectado');
+    expect(element.textContent).toContain('Mostrar novo QR Code');
+    expect(element.textContent).toContain('Excluir conexão');
   });
 
   it('keeps two inboxes isolated through their request context', async () => {

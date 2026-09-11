@@ -1457,6 +1457,15 @@ const wahaQrForOwnedSession = async (sessionName: string) => {
   return { session, qr: session.status === 'WORKING' ? undefined : await wahaTransport.getQrCode(sessionName) };
 };
 
+const settleWahaReconnect = async (sessionName: string, initial: Awaited<ReturnType<typeof wahaTransport.restartSession>>) => {
+  let session = initial;
+  for (let attempt = 0; attempt < 12 && session.status === 'STARTING'; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    session = await wahaTransport.getSession(sessionName);
+  }
+  return session;
+};
+
 // Inbox-scoped endpoints keep the provider session identifier server-side.
 // The browser works only with the authenticated account+inbox pair.
 app.get('/providers/waha/inboxes/:inboxId/connection', async (request, response) => {
@@ -1510,11 +1519,29 @@ app.post('/providers/waha/inboxes/:inboxId/connection/reconnect', async (request
   try {
     const owned = await ownedWahaSession(context);
     if (!owned) return response.status(404).json({ error: 'WhatsApp connection was not found.' });
-    const session = await wahaTransport.restartSession(owned.ownership.sessionName);
+    const session = await settleWahaReconnect(owned.ownership.sessionName, await wahaTransport.restartSession(owned.ownership.sessionName));
     await wahaSessions.update(owned.ownership.sessionName, { status: session.status, engine: session.engine, phone: session.me?.id });
     await configureWahaInbox(context.accountId, context.inboxId, owned.ownership.sessionName, session.connectionStatus);
-    const qr = session.status === 'WORKING' ? undefined : await wahaTransport.getQrCode(owned.ownership.sessionName);
+    // A persisted GOWS login commonly changes STARTING -> WORKING. Asking for
+    // QR during that transition waits for SCAN_QR_CODE and ends as WAHA 422
+    // when authentication wins the race. Fetch it only in the explicit scan state.
+    const qr = session.status === 'SCAN_QR_CODE' ? await wahaTransport.getQrCode(owned.ownership.sessionName) : undefined;
     return response.json({ connection: publicWahaConnection(session), ...(qr ? { qr } : {}) });
+  } catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
+});
+
+app.post('/providers/waha/inboxes/:inboxId/connection/disconnect', async (request, response) => {
+  if (!(await requireBridgeAdministrator(request, response))) return;
+  const context = await wahaContext(request, response, request.body as Record<string, unknown>);
+  if (!context || context.inboxId !== Number(request.params.inboxId)) return;
+  try {
+    const owned = await ownedWahaSession(context);
+    if (!owned) return response.status(404).json({ error: 'WhatsApp connection was not found.' });
+    await wahaTransport.logoutSession(owned.ownership.sessionName);
+    const session = await wahaTransport.getSession(owned.ownership.sessionName);
+    await wahaSessions.update(owned.ownership.sessionName, { status: session.status, engine: session.engine, phone: session.me?.id });
+    await configureWahaInbox(context.accountId, context.inboxId, owned.ownership.sessionName, 'disconnected');
+    return response.json({ connection: publicWahaConnection(session) });
   } catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
 });
 
