@@ -60,6 +60,8 @@ export class WahaSessionStore {
       const values = await this.read(); const existing = values[input.sessionName];
       if (existing?.status === 'cleanup_pending') throw new WahaSessionOwnershipError('conflict');
       if (existing && (existing.accountId !== input.accountId || existing.inboxId !== input.inboxId)) throw new WahaSessionOwnershipError('conflict');
+      const inboxOwnership = Object.values(values).find(item => item.accountId === input.accountId && item.inboxId === input.inboxId && item.sessionName !== input.sessionName);
+      if (inboxOwnership) throw new WahaSessionOwnershipError('conflict');
       const now = new Date().toISOString(); const record: WahaSessionOwnership = { ...existing, ...input, provider: 'waha', createdAt: existing?.createdAt || now, updatedAt: now };
       values[input.sessionName] = record; await this.write(values); return record;
     });

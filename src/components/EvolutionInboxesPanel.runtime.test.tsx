@@ -23,11 +23,8 @@ describe('WAHA inbox creation with runtime bridge configuration', () => {
     }), { status: 200 })));
     const created = { id: 701, name: 'Synthetic WAHA', avatarUrl: null, channelType: 'Channel::Api', channelId: 701, webhookUrl: null, inboxIdentifier: 'synthetic-701', additionalAttributes: {} };
     vi.spyOn(inboxService, 'createWhatsAppApiInbox').mockResolvedValue(created);
-    const session = { name: 'synthetic-session', status: 'STOPPED', connectionStatus: 'disconnected' as const, engine: 'GOWS' };
-    vi.spyOn(wahaClient, 'listSessions').mockResolvedValueOnce({ sessions: [] }).mockResolvedValue({ sessions: [session] });
-    vi.spyOn(wahaClient, 'createSession').mockResolvedValue({ session });
-    vi.spyOn(wahaClient, 'getQrCode').mockResolvedValue({ mimetype: 'image/png', data: 'c3ludGhldGljLXFy' });
-    vi.spyOn(wahaClient, 'getCurrentHistoryImport').mockResolvedValue({ job: null, running: false });
+    vi.spyOn(wahaClient, 'getInboxConnection').mockResolvedValue({ connection: null });
+    vi.spyOn(wahaClient, 'connectInbox').mockResolvedValue({ connection: { status: 'SCAN', connectionStatus: 'connecting' }, qr: { mimetype: 'image/png', data: 'c3ludGhldGljLXFy' } });
     const onOpenInbox = vi.fn(); const onRefresh = vi.fn(); const onNavigateInboxCreation = vi.fn();
     const element = document.createElement('div'); document.body.append(element); const root = createRoot(element);
     const props = { accountId: 47, inboxes: [], inboxesStatus: 'ready' as const, inboxesError: null, onRefresh, isDarkMode: true, onOpenInbox, onNavigateInboxCreation };
@@ -42,15 +39,10 @@ describe('WAHA inbox creation with runtime bridge configuration', () => {
     expect(element.textContent).not.toContain('Configure antes de conectar');
 
     await act(async () => { root.render(<EvolutionInboxesPanel {...props} inboxes={[created]} selectedInboxId={701} inboxCreationRoute={null} />); });
-    expect(element.textContent).toContain('Configurações da caixa de entrada');
-    expect(element.textContent).toContain('WhatsApp não oficial');
-    await act(async () => { (Array.from(element.querySelectorAll('button')).find(button => button.textContent === 'WhatsApp não oficial') as HTMLButtonElement).click(); });
-    const sessionInput = element.querySelector('input[placeholder="Ex.: WhatsApp-Vendas"]') as HTMLInputElement;
-    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(sessionInput, 'synthetic-session'); sessionInput.dispatchEvent(new Event('input', { bubbles: true })); });
-    await act(async () => { (Array.from(element.querySelectorAll('button')).find(button => button.textContent === 'Criar conexão') as HTMLButtonElement).click(); });
-    expect(wahaClient.createSession).toHaveBeenCalledWith({ accountId: 47, inboxId: 701 }, 'synthetic-session');
-    await act(async () => { (Array.from(element.querySelectorAll('button')).find(button => button.textContent?.includes('Mostrar QR Code')) as HTMLButtonElement).click(); });
-    expect(wahaClient.getQrCode).toHaveBeenCalledWith({ accountId: 47, inboxId: 701 }, 'synthetic-session');
+    expect(element.textContent).toContain('WhatsApp não conectado');
+    expect(element.textContent).not.toMatch(/WhatsApp oficial|Nome da sessão|Criar conexão/);
+    await act(async () => { (Array.from(element.querySelectorAll('button')).find(button => button.textContent === 'Conectar por QR Code') as HTMLButtonElement).click(); });
+    expect(wahaClient.connectInbox).toHaveBeenCalledWith({ accountId: 47, inboxId: 701 });
     expect(element.querySelector('img[alt="QR Code do WhatsApp"]')).not.toBeNull();
     await act(async () => root.unmount());
   });

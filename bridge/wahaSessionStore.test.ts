@@ -28,11 +28,19 @@ describe('WahaSessionStore', () => {
     await expect(store.reserve({ accountId: 42, inboxId: 101, sessionName: 'session-a' })).rejects.toMatchObject({ code: 'conflict' });
   });
 
+  it('allows only one generated session per account and inbox', async () => {
+    const { store } = await storeAt();
+    await store.reserve({ accountId: 42, inboxId: 100, sessionName: 'generated-a' });
+
+    await expect(store.reserve({ accountId: 42, inboxId: 100, sessionName: 'generated-b' })).rejects.toMatchObject({ code: 'conflict' });
+    expect((await store.list(42, 100)).map(item => item.sessionName)).toEqual(['generated-a']);
+  });
+
   it('keeps cleanup_pending ownership reserved for later cleanup', async () => {
     const { store } = await storeAt();
     await store.reserve({ accountId: 42, inboxId: 100, sessionName: 'session-pending' });
     await store.update('session-pending', { status: 'cleanup_pending' });
-    await store.reserve({ accountId: 42, inboxId: 100, sessionName: 'session-normal' });
+    await store.reserve({ accountId: 42, inboxId: 101, sessionName: 'session-normal' });
 
     await expect(store.reserve({ accountId: 42, inboxId: 100, sessionName: 'session-pending' })).rejects.toMatchObject({ code: 'conflict' });
     await expect(store.reserve({ accountId: 43, inboxId: 200, sessionName: 'session-pending' })).rejects.toMatchObject({ code: 'conflict' });

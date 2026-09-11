@@ -4,6 +4,7 @@ import { bridgePublicUrl } from '../../config/runtime';
 
 export type WahaConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error';
 export interface WahaSession { name: string; linked?: boolean; status: string; connectionStatus: WahaConnectionStatus; engine?: string; me?: { id?: string; pushName?: string }; }
+export interface WahaInboxConnection { status: string; connectionStatus: WahaConnectionStatus; me?: { id?: string; pushName?: string }; }
 export interface WahaQrCode { mimetype: string; data: string; }
 export type WahaHistoryRange = '7d' | '30d' | '90d' | 'all';
 export type WahaHistoryJobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
@@ -47,4 +48,9 @@ export const wahaClient = {
   getCurrentHistoryImport: (context: Context) => request<{ job: WahaHistoryJob | null; running: boolean }>(`/providers/waha/inboxes/${context.inboxId}/history/import${query(context)}`),
   getHistoryImport: (context: Context, jobId: string) => request<{ job: WahaHistoryJob; running: boolean }>(`/providers/waha/inboxes/${context.inboxId}/history/import/${encodeURIComponent(jobId)}${query(context)}`),
   cancelHistoryImport: (context: Context, jobId: string) => request<{ job: WahaHistoryJob }>(`/providers/waha/inboxes/${context.inboxId}/history/import/${encodeURIComponent(jobId)}/cancel`, { method: 'POST', body: JSON.stringify(context) }),
+  getInboxConnection: (context: Context) => request<{ connection: WahaInboxConnection | null }>(`/providers/waha/inboxes/${context.inboxId}/connection${query(context)}`),
+  connectInbox: (context: Context) => request<{ connection: WahaInboxConnection; qr?: WahaQrCode }>(`/providers/waha/inboxes/${context.inboxId}/connection`, { method: 'POST', body: JSON.stringify(context) }),
+  reconnectInbox: (context: Context) => request<{ connection: WahaInboxConnection; qr?: WahaQrCode }>(`/providers/waha/inboxes/${context.inboxId}/connection/reconnect`, { method: 'POST', body: JSON.stringify(context) }),
+  getInboxQrCode: (context: Context) => request<WahaQrCode>(`/providers/waha/inboxes/${context.inboxId}/connection/qr${query(context)}`),
+  deleteInboxConnection: (context: Context) => request<void>(`/providers/waha/inboxes/${context.inboxId}/connection`, { method: 'DELETE', body: JSON.stringify(context) }),
 };

@@ -1,181 +1,156 @@
+import { AlertCircle, Loader2, QrCode, RotateCcw, Save, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, CheckCircle2, Loader2, LogOut, QrCode, RefreshCw, RotateCcw, Save, Trash2 } from 'lucide-react';
 import type { Inbox } from '../domain/currentUser';
 import { errorMessageForUser } from '../integrations/chatwoot/errors';
 import { inboxService } from '../integrations/chatwoot/inboxes';
-import { wahaClient, type WahaHistoryJob, type WahaHistoryRange, type WahaQrCode, type WahaSession } from '../integrations/waha/client';
-import { MetaCloudSetup } from './MetaCloudSetup';
+import { wahaClient, type WahaInboxConnection, type WahaQrCode } from '../integrations/waha/client';
 import { InboxCollaboratorsPanel } from './InboxCollaboratorsPanel';
-import { shouldQueryWahaForInbox, transportDisplayStatusesForInbox, transportStatusLabel, whatsappConfigurationForInbox } from '../integrations/whatsapp/provider';
 
-type Props = { accountId: number; inbox: Inbox; webhookUrl: string; isDarkMode: boolean; onSaved: () => Promise<void> | void };
-const statusLabel: Record<string, string> = { STOPPED: 'Parada', STARTING: 'Iniciando', SCAN_QR_CODE: 'Aguardando QR Code', WORKING: 'Conectada', FAILED: 'Erro' };
+interface Props {
+  accountId: number;
+  inbox: Inbox;
+  isDarkMode: boolean;
+  onSaved?: () => Promise<void> | void;
+}
 
-export const WahaSetup = ({ accountId, inbox, webhookUrl, isDarkMode, onSaved }: Props) => {
+const qrSource = (qr: WahaQrCode) => qr.data.startsWith('data:') ? qr.data : `data:${qr.mimetype};base64,${qr.data}`;
+const connectedNumber = (connection: WahaInboxConnection) => connection.me?.id?.replace(/@.+$/, '') || '';
+
+export const WahaSetup = ({ accountId, inbox, isDarkMode, onSaved }: Props) => {
   const context = { accountId, inboxId: inbox.id };
-  const configuration = whatsappConfigurationForInbox(inbox);
-  // An unconfigured Channel::Api is the initial WAHA setup flow. Once a
-  // transport declaration exists, it is authoritative: never probe WAHA for
-  // a Meta-only or Evolution-only inbox.
-  const usesWaha = shouldQueryWahaForInbox(inbox);
-  const transportStatuses = transportDisplayStatusesForInbox(inbox);
-  const [sessions, setSessions] = useState<WahaSession[]>([]);
-  const [selected, setSelected] = useState(inbox.additionalAttributes.waha_session_name as string || '');
-  const [newSession, setNewSession] = useState('');
-  const [associatedSession, setAssociatedSession] = useState(inbox.additionalAttributes.waha_session_name as string || '');
-  const [current, setCurrent] = useState<WahaSession | null>(null);
+  const [tab, setTab] = useState<'connection' | 'general' | 'collaborators'>('connection');
+  const [connection, setConnection] = useState<WahaInboxConnection | null>(null);
   const [qr, setQr] = useState<WahaQrCode | null>(null);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [pairing, setPairing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'general' | 'collaborators' | 'unofficial' | 'official'>('general');
-  const [inboxName, setInboxName] = useState(inbox.name);
-  const [savingName, setSavingName] = useState(false);
-  const [historyRange, setHistoryRange] = useState<WahaHistoryRange>('30d');
-  const [historyJob, setHistoryJob] = useState<WahaHistoryJob | null>(null);
-  const [confirmAllHistory, setConfirmAllHistory] = useState(false);
-  const card = isDarkMode ? 'border-[#2a3942] bg-[#182228]' : 'border-[#d1d7db] bg-[#f0f2f5]';
+  const [name, setName] = useState(inbox.name);
 
-  const refresh = useCallback(async () => {
-    if (!usesWaha) {
-      setSessions([]); setCurrent(null); setSelected('');
-      return;
+  const refreshConnection = useCallback(async () => {
+    const result = await wahaClient.getInboxConnection({ accountId, inboxId: inbox.id });
+    setConnection(result.connection);
+    if (result.connection?.connectionStatus === 'connected') {
+      setQr(null);
+      setPairing(false);
     }
-    setBusy(true); setError(null);
-    try {
-      const result = await wahaClient.listSessions(context);
-      setSessions(result.sessions);
-      const name = selected || result.sessions[0]?.name || '';
-      if (name) { setSelected(name); setCurrent(result.sessions.find(item => item.name === name) || await wahaClient.getSession(context, name).then(result => result.session)); }
-    } catch (cause) { setError(errorMessageForUser(cause)); }
-    finally { setBusy(false); }
-  }, [accountId, inbox.id, selected, usesWaha]);
-  useEffect(() => { void refresh(); }, [refresh]);
-  useEffect(() => { setInboxName(inbox.name); }, [inbox.name]);
-  useEffect(() => { setAssociatedSession(inbox.additionalAttributes.waha_session_name as string || ''); }, [inbox.additionalAttributes.waha_session_name]);
+    return result.connection;
+  }, [accountId, inbox.id]);
+
   useEffect(() => {
-    if (!usesWaha) return;
     let active = true;
-    void wahaClient.getCurrentHistoryImport(context)
-      .then((result) => { if (active) setHistoryJob(result.job); })
-      .catch(() => undefined);
+    setLoading(true);
+    setError(null);
+    wahaClient.getInboxConnection(context)
+      .then(result => { if (active) setConnection(result.connection); })
+      .catch(cause => { if (active) setError(errorMessageForUser(cause)); })
+      .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [accountId, inbox.id, usesWaha]);
+  }, [accountId, inbox.id]);
+
   useEffect(() => {
-    if (!usesWaha || !historyJob || !['pending', 'running'].includes(historyJob.status)) return;
+    if (!pairing) return;
     const timer = window.setInterval(() => {
-      void wahaClient.getHistoryImport(context, historyJob.id)
-        .then((result) => setHistoryJob(result.job))
-        .catch((cause) => setError(errorMessageForUser(cause)));
+      void refreshConnection().then(current => {
+        if (current?.connectionStatus === 'connected') void onSaved?.();
+      }).catch(cause => setError(errorMessageForUser(cause)));
     }, 1500);
     return () => window.clearInterval(timer);
-  }, [accountId, inbox.id, historyJob?.id, historyJob?.status, usesWaha]);
+  }, [onSaved, pairing, refreshConnection]);
 
-  const selectSession = async (name: string) => {
-    setSelected(name); setQr(null); setBusy(true); setError(null);
-    try { setCurrent((await wahaClient.getSession(context, name)).session); }
-    catch (cause) { setError(errorMessageForUser(cause)); }
-    finally { setBusy(false); }
-  };
-  const create = async () => {
-    const name = newSession.trim(); if (!name || busy) return;
-    setBusy(true); setError(null);
-    try { const result = await wahaClient.createSession(context, name); setNewSession(''); setSelected(result.session.name); setCurrent(result.session); await refresh(); }
-    catch (cause) { setError(errorMessageForUser(cause)); }
-    finally { setBusy(false); }
-  };
-  const run = async (action: 'start' | 'restart' | 'logout' | 'delete' | 'qr') => {
-    if (!selected || busy) return; setBusy(true); setError(null);
+  const perform = async (operation: () => Promise<{ connection: WahaInboxConnection; qr?: WahaQrCode }>) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
     try {
-      if (action === 'start') setCurrent((await wahaClient.startSession(context, selected)).session);
-      if (action === 'restart') setCurrent((await wahaClient.restartSession(context, selected)).session);
-      if (action === 'logout') { await wahaClient.logoutSession(context, selected); setCurrent(null); setQr(null); }
-      if (action === 'delete') { await wahaClient.deleteSession(context, selected); setSelected(''); setAssociatedSession(''); setCurrent(null); setQr(null); setSessions([]); await onSaved(); }
-      if (action === 'qr') setQr(await wahaClient.getQrCode(context, selected));
-    } catch (cause) { setError(errorMessageForUser(cause)); }
-    finally { setBusy(false); }
+      const result = await operation();
+      setConnection(result.connection);
+      setQr(result.qr || null);
+      setPairing(result.connection.connectionStatus !== 'connected');
+      await onSaved?.();
+    } catch (cause) {
+      setError(errorMessageForUser(cause));
+    } finally {
+      setBusy(false);
+    }
   };
-  const save = async () => {
-    if (!selected || busy) return; setBusy(true); setError(null);
+
+  const showQr = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
     try {
-      await wahaClient.associateSession(context, selected);
-      setAssociatedSession(selected);
-      await onSaved();
-    } catch (cause) { setError(errorMessageForUser(cause)); }
-    finally { setBusy(false); }
+      setQr(await wahaClient.getInboxQrCode(context));
+      setPairing(true);
+    } catch (cause) {
+      setError(errorMessageForUser(cause));
+    } finally {
+      setBusy(false);
+    }
   };
-  const startHistoryImport = async () => {
-    if (!isConnected || !isAssociated || busy) return;
-    if (historyRange === 'all' && !confirmAllHistory) { setConfirmAllHistory(true); return; }
-    setBusy(true); setError(null);
-    try { setHistoryJob((await wahaClient.startHistoryImport(context, historyRange)).job); setConfirmAllHistory(false); }
-    catch (cause) { setError(errorMessageForUser(cause)); }
-    finally { setBusy(false); }
+
+  const deleteConnection = async () => {
+    if (!window.confirm('Excluir a conexão deste WhatsApp? A caixa de entrada e suas conversas serão preservadas.')) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await wahaClient.deleteInboxConnection(context);
+      setConnection(null);
+      setQr(null);
+      setPairing(false);
+      await onSaved?.();
+    } catch (cause) {
+      setError(errorMessageForUser(cause));
+    } finally {
+      setBusy(false);
+    }
   };
-  const cancelHistoryImport = async () => {
-    if (!historyJob || busy) return;
-    setBusy(true); setError(null);
-    try { setHistoryJob((await wahaClient.cancelHistoryImport(context, historyJob.id)).job); }
-    catch (cause) { setError(errorMessageForUser(cause)); }
-    finally { setBusy(false); }
+
+  const saveName = async () => {
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await inboxService.updateName(accountId, inbox.id, name.trim());
+      await onSaved?.();
+    } catch (cause) {
+      setError(errorMessageForUser(cause));
+    } finally {
+      setBusy(false);
+    }
   };
-  const saveInboxName = async () => {
-    const name = inboxName.trim();
-    if (!name || savingName) return;
-    setSavingName(true); setError(null);
-    try { await inboxService.updateName(accountId, inbox.id, name); await onSaved(); }
-    catch (cause) { setError(errorMessageForUser(cause)); }
-    finally { setSavingName(false); }
-  };
-  const qrSrc = qr ? (qr.data.startsWith('data:') ? qr.data : `data:${qr.mimetype};base64,${qr.data}`) : null;
-  const isConnected = current?.status === 'WORKING';
-  // A QR is only valid while the session is waiting for a scan. Keeping it on
-  // screen after WAHA confirms the connection invites a second, invalid scan.
-  useEffect(() => {
-    if (isConnected) setQr(null);
-  }, [isConnected]);
-  const hasSession = sessions.length > 0;
-  const isAssociated = selected.length > 0 && associatedSession === selected;
-  // A durable binding is not evidence that WAHA is operational. Until the
-  // provider-backed (or explicit unavailable) session arrives, show pending
-  // instead of reusing a stale persisted "connected" flag from the inbox.
-  const wahaStatus = current ? current.connectionStatus : associatedSession ? 'pending' : transportStatuses.waha;
-  // The collaborators list is an overlay. The card must not clip it when the
-  // picker opens near the bottom of the settings panel.
-  return <div className={`mx-auto max-w-3xl overflow-visible rounded-2xl border ${card}`}>
-    <div className="border-b border-white/10 p-5"><h4 className="font-bold">Configurações da caixa de entrada</h4><p className="mt-1 text-xs text-[#8696a0]">Gerencie a inbox, colaboradores e as conexões WhatsApp.</p></div>
-    <div className="flex gap-1 overflow-x-auto border-b border-white/10 px-4 pt-3">
-      {([['general', 'Geral'], ['collaborators', 'Colaboradores'], ['unofficial', 'WhatsApp não oficial'], ['official', 'WhatsApp oficial']] as const).map(([value, label]) => <button key={value} type="button" onClick={() => setTab(value)} className={`whitespace-nowrap rounded-t-lg px-3 py-2 text-xs font-semibold ${tab === value ? 'bg-[#00a884] text-white' : 'text-[#8696a0] hover:bg-white/5 hover:text-[#e9edef]'}`}>{label}</button>)}
+
+  const connected = connection?.connectionStatus === 'connected';
+  const panel = isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-gray-200 bg-white';
+  const button = 'inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-40';
+
+  return <div className={`rounded-2xl border p-4 sm:p-6 ${panel}`}>
+    <div className="flex flex-wrap gap-2 border-b border-white/10 pb-4">
+      {([['connection', 'WhatsApp'], ['general', 'Geral'], ['collaborators', 'Colaboradores']] as const).map(([value, label]) => <button key={value} type="button" onClick={() => setTab(value)} className={`rounded-lg px-3 py-2 text-xs font-bold ${tab === value ? 'bg-[#00a884] text-white' : 'text-[#8696a0] hover:bg-white/5'}`}>{label}</button>)}
     </div>
-    <div className="space-y-4 p-5">
-    {error && <div className="flex gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400"><AlertCircle className="h-4 w-4 shrink-0" />{error}</div>}
-    {tab === 'general' && <section className="space-y-3"><div><h5 className="text-sm font-bold">Nome da caixa de entrada</h5><p className="mt-1 text-xs text-[#8696a0]">Este nome é exibido para a equipe na lista de canais.</p></div><div className="flex gap-2"><input value={inboxName} onChange={(event) => setInboxName(event.target.value)} maxLength={160} className={`min-w-0 flex-1 rounded-xl border px-3 py-3 text-sm ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-gray-300 bg-white'}`} /><button type="button" onClick={() => void saveInboxName()} disabled={!inboxName.trim() || inboxName.trim() === inbox.name || savingName} className="rounded-xl bg-[#00a884] px-4 text-xs font-bold text-white disabled:opacity-40">{savingName ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}<span className="sr-only">Salvar nome</span></button></div>{configuration && <div className="rounded-xl border border-white/10 bg-black/10 p-3 text-xs"><p className="mb-2 font-semibold">Status por conexão</p>{configuration.transports.map((transport) => { const transportStatus = transport === 'waha' ? wahaStatus : transportStatuses[transport]; return <div key={transport} className="flex justify-between gap-4 py-1"><span>{transport === 'meta_cloud' ? 'Meta Cloud' : transport === 'waha' ? 'WAHA' : 'Evolution'}</span><span className={transportStatus === 'connected' ? 'text-[#00a884]' : transport === 'meta_cloud' ? 'text-red-400' : 'text-amber-500'}>{transportStatusLabel(transportStatus)}</span></div>; })}</div>}</section>}
-    {tab === 'collaborators' && <InboxCollaboratorsPanel accountId={accountId} inboxId={inbox.id} isDarkMode={isDarkMode} onSaved={onSaved} />}
-    {tab === 'unofficial' && usesWaha && <section className="space-y-5">
-      <div><h5 className="font-bold">Conexão WhatsApp não oficial</h5><p className="mt-1 text-xs text-[#8696a0]">Conecte uma sessão WAHA por QR Code. A conexão é privada desta inbox.</p></div>
 
-      <div className="rounded-xl border border-white/10 p-4">
-        <div className="mb-3 flex items-start gap-3"><span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#00a884] text-xs font-bold text-white">1</span><div><p className="text-xs font-bold">Conexão desta caixa</p><p className="mt-1 text-[11px] leading-4 text-[#8696a0]">Cada caixa permite apenas uma conexão WAHA. Para usar outro número, exclua primeiro a conexão atual.</p></div></div>
-        <div className="grid gap-3 sm:grid-cols-[1fr_auto]"><select value={selected} disabled className={`rounded-xl border px-3 py-3 text-sm disabled:cursor-not-allowed disabled:opacity-70 ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-gray-300 bg-white'}`}><option value="">{selected ? 'Conexão vinculada' : 'Nenhuma conexão criada'}</option>{sessions.map(session => <option key={session.name} value={session.name}>{session.name} · {statusLabel[session.status] || session.status}</option>)}</select><button type="button" onClick={() => void refresh()} disabled={busy} className="rounded-xl border border-[#00a884]/40 px-3 text-xs font-bold text-[#00a884]"><RefreshCw className={`inline h-4 w-4 ${busy ? 'animate-spin' : ''}`} /> Atualizar</button></div>
-      </div>
+    {error && <p role="alert" className="mt-4 flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400"><AlertCircle className="h-4 w-4 shrink-0" />{error}</p>}
 
-      {!hasSession && <div className="rounded-xl border border-white/10 p-4">
-        <div className="mb-3 flex items-start gap-3"><span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#00a884] text-xs font-bold text-white">2</span><div><p className="text-xs font-bold">Ou crie uma nova conexão</p><p className="mt-1 text-[11px] leading-4 text-[#8696a0]">Dê um nome interno para identificar este telefone, por exemplo: <b>WhatsApp-Vendas</b>. Em seguida você verá o QR Code para conectar o aparelho.</p></div></div>
-        <div className="flex gap-2"><input value={newSession} onChange={event => setNewSession(event.target.value.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80))} placeholder="Ex.: WhatsApp-Vendas" className={`min-w-0 flex-1 rounded-xl border px-3 py-3 text-sm ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-gray-300 bg-white'}`} /><button type="button" onClick={() => void create()} disabled={!newSession || busy || hasSession} className="rounded-xl bg-[#00a884] px-4 text-xs font-bold text-white disabled:opacity-40">Criar conexão</button></div>
-      </div>}
+    {tab === 'connection' && <section className="mt-5">
+      {loading ? <p className="flex items-center gap-2 text-sm text-[#8696a0]"><Loader2 className="h-4 w-4 animate-spin" />Consultando conexão…</p> : <>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div><p className="text-sm font-bold">{connected ? 'WhatsApp conectado' : 'WhatsApp não conectado'}</p>{connected && (connection?.me?.pushName || connectedNumber(connection)) && <p className="mt-1 text-xs text-[#8696a0]">{[connection?.me?.pushName, connectedNumber(connection)].filter(Boolean).join(' · ')}</p>}</div>
+          <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${connected ? 'bg-[#00a884]/15 text-[#00a884]' : 'bg-amber-500/15 text-amber-500'}`}>{connected ? 'Conectado' : connection ? 'Aguardando conexão' : 'Desconectado'}</span>
+        </div>
 
-      {current && <div className={`rounded-xl border p-4 text-xs ${isConnected ? 'border-[#00a884]/35 bg-[#00a884]/10' : 'border-amber-500/30 bg-amber-500/10'}`}><div className="flex items-center justify-between gap-3"><div><p className="font-bold">{isConnected ? 'WhatsApp conectado' : 'WhatsApp ainda não conectado'}</p><p className="mt-1 text-[#8696a0]">{current.me?.id ? `Número conectado: ${current.me.id}` : `Conexão: ${current.name}`}</p></div><span className={`rounded-full px-2 py-1 text-[11px] font-bold ${isConnected ? 'bg-[#00a884]/20 text-[#00a884]' : 'bg-amber-500/20 text-amber-500'}`}>{statusLabel[current.status] || current.status}</span></div><p className="mt-3 text-[11px] text-[#8696a0]">Tecnologia: WAHA / {current.engine || 'GOWS'}</p></div>}
+        <div className="mt-5 flex flex-wrap gap-2">
+          {!connection && <button type="button" onClick={() => void perform(() => wahaClient.connectInbox(context))} disabled={busy} className={`${button} border-[#00a884] bg-[#00a884] text-white`}><QrCode className="h-4 w-4" />Conectar por QR Code</button>}
+          {connection && !connected && <button type="button" onClick={() => void showQr()} disabled={busy} className={`${button} border-[#00a884]/50 text-[#00a884]`}><QrCode className="h-4 w-4" />Mostrar novo QR Code</button>}
+          {connection && <button type="button" onClick={() => void perform(() => wahaClient.reconnectInbox(context))} disabled={busy} className={`${button} border-white/20`}><RotateCcw className="h-4 w-4" />Reconectar</button>}
+          {connection && <button type="button" onClick={() => void deleteConnection()} disabled={busy} className={`${button} border-red-500/40 text-red-400`}><Trash2 className="h-4 w-4" />Excluir conexão</button>}
+        </div>
 
-      {selected && <div className="rounded-xl border border-white/10 p-4"><div className="mb-3 flex items-start gap-3"><span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#00a884] text-xs font-bold text-white">3</span><div><p className="text-xs font-bold">Conecte ou administre o telefone</p><p className="mt-1 text-[11px] leading-4 text-[#8696a0]">Para uma conexão nova, inicie e abra o QR Code. Depois de escaneá-lo no celular, o status mudará para “Conectada”.</p></div></div><div className="flex flex-wrap gap-2">{!isConnected && <button type="button" onClick={() => void run('start')} disabled={busy} className="rounded-xl bg-[#00a884] px-3 py-2 text-xs font-bold text-white disabled:opacity-40">Iniciar conexão</button>}<button type="button" onClick={() => void run('qr')} disabled={busy || isConnected} className="rounded-xl border border-[#00a884]/40 px-3 py-2 text-xs font-bold text-[#00a884] disabled:opacity-40"><QrCode className="inline h-4 w-4" /> {qrSrc ? 'Atualizar QR Code' : 'Mostrar QR Code'}</button><button type="button" onClick={() => void run('restart')} disabled={busy} className="rounded-xl border border-[#00a884]/40 px-3 py-2 text-xs font-bold text-[#00a884] disabled:opacity-40"><RotateCcw className="inline h-4 w-4" /> Reconectar</button><button type="button" onClick={() => void run('logout')} disabled={busy} className="rounded-xl border border-red-500/40 px-3 py-2 text-xs font-bold text-red-400 disabled:opacity-40"><LogOut className="inline h-4 w-4" /> Desconectar WhatsApp</button><button type="button" onClick={() => { if (window.confirm('Excluir esta conexão? Será necessário criar e conectar uma nova sessão.')) void run('delete'); }} disabled={busy} className="rounded-xl border border-red-500/40 px-3 py-2 text-xs font-bold text-red-400 disabled:opacity-40"><Trash2 className="inline h-4 w-4" /> Excluir conexão</button></div></div>}
-      {qrSrc && <div className="rounded-xl bg-white p-4 text-center"><img src={qrSrc} alt="QR Code do WhatsApp" className="mx-auto max-h-64 max-w-full" /><p className="mt-2 text-xs text-slate-600">No celular: WhatsApp → aparelhos conectados → conectar um aparelho. Aponte a câmera para este QR Code.</p></div>}
-      {selected && <><button type="button" onClick={() => void save()} disabled={busy || isAssociated} className="flex w-full justify-center gap-2 rounded-xl bg-[#00a884] py-3 text-xs font-bold text-white disabled:opacity-50">{busy && <Loader2 className="h-4 w-4 animate-spin" />}<CheckCircle2 className="h-4 w-4" />{isAssociated ? 'Esta conexão já está vinculada à caixa' : 'Usar esta conexão nesta caixa'}</button>
-      {!isAssociated && <p className="-mt-3 text-center text-[11px] text-[#8696a0]">Só clique depois de confirmar que este é o WhatsApp correto para esta caixa.</p>}
-    <div className="rounded-xl border border-white/10 bg-black/10 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold">Histórico do WhatsApp</p><p className="mt-1 max-w-xl text-xs leading-5 text-[#8696a0]">Importe manualmente as mensagens que já foram sincronizadas pelo WhatsApp nesta sessão. O histórico disponível depende do que o WhatsApp sincronizou com esta sessão.</p></div>{isConnected ? <span className="rounded-full bg-[#00a884]/15 px-2 py-1 text-[11px] font-semibold text-[#00a884]">Sessão conectada</span> : <span className="rounded-full bg-amber-500/15 px-2 py-1 text-[11px] font-semibold text-amber-500">Conecte a sessão para importar</span>}</div>
-      <div className="mt-4 flex flex-col gap-2 sm:flex-row"><select value={historyRange} onChange={(event) => { setHistoryRange(event.target.value as WahaHistoryRange); setConfirmAllHistory(false); }} disabled={!isConnected || !isAssociated || busy || ['pending', 'running'].includes(historyJob?.status || '')} className={`min-w-0 flex-1 rounded-xl border px-3 py-2.5 text-sm ${isDarkMode ? 'border-[#2a3942] bg-[#111b21]' : 'border-gray-300 bg-white'}`}><option value="7d">Últimos 7 dias</option><option value="30d">Últimos 30 dias</option><option value="90d">Últimos 90 dias</option><option value="all">Tudo disponível</option></select><button type="button" onClick={() => void startHistoryImport()} disabled={!isConnected || !isAssociated || busy || ['pending', 'running'].includes(historyJob?.status || '')} className="rounded-xl bg-[#00a884] px-4 py-2.5 text-xs font-bold text-white disabled:opacity-40">{historyRange === 'all' && !confirmAllHistory ? 'Continuar' : historyJob && ['pending', 'running'].includes(historyJob.status) ? 'Importando…' : confirmAllHistory ? 'Confirmar importação' : 'Importar histórico'}</button></div>
-      {historyRange === 'all' && confirmAllHistory && <p className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] leading-4 text-amber-500">Esta operação pode importar muitas mensagens e mídias. Clique em “Confirmar importação” para iniciar.</p>}
-      {historyJob && <div className={`mt-4 rounded-xl border p-3 text-xs ${historyJob.status === 'failed' ? 'border-red-500/30 bg-red-500/10' : historyJob.status === 'completed' ? 'border-[#00a884]/30 bg-[#00a884]/10' : 'border-white/10 bg-white/5'} `}><div className="flex items-center justify-between gap-3"><p className="font-semibold">{historyJob.status === 'completed' ? 'Importação concluída' : historyJob.status === 'failed' ? 'Importação finalizada com erro' : historyJob.status === 'cancelled' ? 'Importação cancelada' : 'Importando histórico…'}</p><div className="flex items-center gap-2"><span className="text-[#8696a0]">{historyJob.processed} processadas</span>{['pending', 'running'].includes(historyJob.status) && <button type="button" onClick={() => void cancelHistoryImport()} disabled={busy} className="rounded-md border border-red-500/40 px-2 py-1 text-[11px] font-semibold text-red-400 disabled:opacity-40">Cancelar</button>}</div></div><div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-[#8696a0] sm:grid-cols-3"><span>Conversas: {historyJob.conversations}</span><span>Importadas: {historyJob.imported}</span><span>Já existentes: {historyJob.duplicates}</span><span>Ignoradas: {historyJob.skipped}</span><span>Falhas: {historyJob.failed}</span><span>Mídias: {historyJob.mediaImported}{historyJob.mediaFailed ? ` (${historyJob.mediaFailed} falhas)` : ''}</span></div>{historyJob.lastError && <p className="mt-2 text-red-400">{historyJob.lastError}</p>}</div>}
-    </div></>}
+        {busy && <p className="mt-3 flex items-center gap-2 text-xs text-[#8696a0]"><Loader2 className="h-3.5 w-3.5 animate-spin" />Preparando conexão…</p>}
+        {qr && !connected && <div className="mt-5 rounded-xl border border-[#00a884]/30 bg-[#00a884]/5 p-4"><p className="text-xs font-semibold">No celular, abra WhatsApp → Aparelhos conectados → Conectar aparelho.</p><img className="mt-3 h-56 w-56 max-w-full rounded-lg bg-white p-2" alt="QR Code do WhatsApp" src={qrSource(qr)} /><p className="mt-2 text-[11px] text-[#8696a0]">Esta tela será atualizada automaticamente depois da leitura.</p></div>}
+      </>}
     </section>}
-    {tab === 'official' && <section><MetaCloudSetup accountId={accountId} inbox={inbox} webhookUrl={webhookUrl} isDarkMode={isDarkMode} onSaved={async () => { await onSaved(); }} /></section>}
-    </div>
+
+    {tab === 'general' && <section className="mt-5"><h4 className="text-sm font-bold">Dados da caixa de entrada</h4><label className="mt-4 block text-xs font-semibold">Nome<input value={name} onChange={event => setName(event.target.value)} className={`mt-2 block w-full rounded-lg border px-3 py-2 text-sm outline-none ${isDarkMode ? 'border-[#2a3942] bg-[#202c33]' : 'border-gray-200 bg-white'}`} /></label><button type="button" onClick={() => void saveName()} disabled={busy || !name.trim()} className={`${button} mt-3 border-[#00a884] bg-[#00a884] text-white`}><Save className="h-4 w-4" />Salvar</button></section>}
+    {tab === 'collaborators' && <div className="mt-5"><InboxCollaboratorsPanel accountId={accountId} inboxId={inbox.id} isDarkMode={isDarkMode} onSaved={onSaved} /></div>}
   </div>;
 };

@@ -1427,6 +1427,126 @@ app.post('/providers/waha/sessions/:sessionName/associate', async (request, resp
   } catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
 });
 
+const publicWahaConnection = (session: { status: string; connectionStatus: ConnectionStatus; me?: { id?: string; pushName?: string } }) => ({
+  status: session.status,
+  connectionStatus: session.connectionStatus,
+  ...(session.me ? { me: session.me } : {}),
+});
+
+const ownedWahaSession = async (context: Awaited<ReturnType<typeof wahaContext>> & {}) => {
+  await adoptLegacyWahaOwnership(context.accountId, context.inboxId, context.inbox.additionalAttributes);
+  const ownership = (await wahaSessions.list(context.accountId, context.inboxId))[0];
+  if (!ownership) return null;
+  try {
+    const session = await wahaTransport.getSession(ownership.sessionName);
+    await wahaSessions.update(ownership.sessionName, { status: session.status, engine: session.engine, phone: session.me?.id });
+    return { ownership, session };
+  } catch (error) {
+    if (!(error instanceof WahaApiError && error.status === 404)) throw error;
+    if (ownership.status === 'STARTING' && Date.now() - new Date(ownership.updatedAt).getTime() < 120_000) throw new WahaSessionOwnershipError('conflict');
+    await wahaSessions.remove(context.accountId, context.inboxId, ownership.sessionName);
+    await clearWahaInbox(context.accountId, context.inboxId);
+    return null;
+  }
+};
+
+const wahaQrForOwnedSession = async (sessionName: string) => {
+  let session = await wahaTransport.getSession(sessionName);
+  if (session.status !== 'WORKING') session = await wahaTransport.restartSession(sessionName);
+  await wahaSessions.update(sessionName, { status: session.status, engine: session.engine, phone: session.me?.id });
+  return { session, qr: session.status === 'WORKING' ? undefined : await wahaTransport.getQrCode(sessionName) };
+};
+
+// Inbox-scoped endpoints keep the provider session identifier server-side.
+// The browser works only with the authenticated account+inbox pair.
+app.get('/providers/waha/inboxes/:inboxId/connection', async (request, response) => {
+  if (!(await requireBridgeAdministrator(request, response))) return;
+  const context = await wahaContext(request, response, request.query as Record<string, unknown>);
+  if (!context || context.inboxId !== Number(request.params.inboxId)) return;
+  try {
+    const owned = await ownedWahaSession(context);
+    return response.json({ connection: owned ? publicWahaConnection(owned.session) : null });
+  } catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
+});
+
+app.post('/providers/waha/inboxes/:inboxId/connection', async (request, response) => {
+  if (!(await enforceRateLimit(request, response, 'waha-session-configuration', 20, 60))) return;
+  if (!(await requireBridgeAdministrator(request, response))) return;
+  const context = await wahaContext(request, response, request.body as Record<string, unknown>);
+  if (!context || context.inboxId !== Number(request.params.inboxId)) return;
+  try {
+    let owned = await ownedWahaSession(context);
+    let created = false;
+    if (!owned) {
+      const sessionName = `waha_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
+      try { await wahaSessions.reserve({ ...context, sessionName, status: 'STARTING' }); }
+      catch (error) {
+        if (!(error instanceof WahaSessionOwnershipError && error.code === 'conflict')) throw error;
+        owned = await ownedWahaSession(context);
+        if (!owned) throw error;
+      }
+      if (!owned) {
+        let session;
+        try { session = await wahaTransport.createSession({ name: sessionName }); }
+        catch (error) { await wahaSessions.remove(context.accountId, context.inboxId, sessionName); throw error; }
+        session = await wahaTransport.startSession(sessionName);
+        await wahaSessions.update(sessionName, { status: session.status, engine: session.engine, phone: session.me?.id });
+        owned = { ownership: await wahaSessions.assertOwned(context.accountId, context.inboxId, sessionName), session };
+        created = true;
+      }
+    }
+    let session = owned.session;
+    let qr;
+    if (session.status !== 'WORKING') ({ session, qr } = await wahaQrForOwnedSession(owned.ownership.sessionName));
+    await configureWahaInbox(context.accountId, context.inboxId, owned.ownership.sessionName, session.connectionStatus);
+    return response.status(created ? 201 : 200).json({ connection: publicWahaConnection(session), ...(qr ? { qr } : {}) });
+  } catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
+});
+
+app.post('/providers/waha/inboxes/:inboxId/connection/reconnect', async (request, response) => {
+  if (!(await requireBridgeAdministrator(request, response))) return;
+  const context = await wahaContext(request, response, request.body as Record<string, unknown>);
+  if (!context || context.inboxId !== Number(request.params.inboxId)) return;
+  try {
+    const owned = await ownedWahaSession(context);
+    if (!owned) return response.status(404).json({ error: 'WhatsApp connection was not found.' });
+    const session = await wahaTransport.restartSession(owned.ownership.sessionName);
+    await wahaSessions.update(owned.ownership.sessionName, { status: session.status, engine: session.engine, phone: session.me?.id });
+    await configureWahaInbox(context.accountId, context.inboxId, owned.ownership.sessionName, session.connectionStatus);
+    const qr = session.status === 'WORKING' ? undefined : await wahaTransport.getQrCode(owned.ownership.sessionName);
+    return response.json({ connection: publicWahaConnection(session), ...(qr ? { qr } : {}) });
+  } catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
+});
+
+app.get('/providers/waha/inboxes/:inboxId/connection/qr', async (request, response) => {
+  if (!(await requireBridgeAdministrator(request, response))) return;
+  const context = await wahaContext(request, response, request.query as Record<string, unknown>);
+  if (!context || context.inboxId !== Number(request.params.inboxId)) return;
+  try {
+    const owned = await ownedWahaSession(context);
+    if (!owned) return response.status(404).json({ error: 'WhatsApp connection was not found.' });
+    const result = await wahaQrForOwnedSession(owned.ownership.sessionName);
+    if (!result.qr) return response.status(409).json({ error: 'WhatsApp is already connected.' });
+    return response.json(result.qr);
+  } catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
+});
+
+app.delete('/providers/waha/inboxes/:inboxId/connection', async (request, response) => {
+  if (!(await requireBridgeAdministrator(request, response))) return;
+  const context = await wahaContext(request, response, request.body as Record<string, unknown>);
+  if (!context || context.inboxId !== Number(request.params.inboxId)) return;
+  try {
+    const owned = await ownedWahaSession(context);
+    if (owned) {
+      try { await wahaTransport.deleteSession(owned.ownership.sessionName); }
+      catch (error) { if (!(error instanceof WahaApiError && error.status === 404)) throw error; }
+      await wahaSessions.remove(context.accountId, context.inboxId, owned.ownership.sessionName);
+    }
+    await clearWahaInbox(context.accountId, context.inboxId);
+    return response.status(204).end();
+  } catch (error) { return wahaOwnershipResponse(response, error) || wahaErrorResponse(response, error); }
+});
+
 const getWahaHistoryImport = async (request: express.Request, response: express.Response) => {
   if (!(await requireBridgeAdministrator(request, response))) return;
   const inboxId = Number(request.params.inboxId);
